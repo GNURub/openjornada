@@ -209,10 +209,18 @@ onRecordCreateRequest((e) => {
   }
 
   const serverNow = new Date();
+  const recordedAt = serverNow.toISOString();
+  const requestedAdjustmentReason = e.record
+    .getString("adjustmentReason")
+    .trim();
   e.record.set("employee", employeeId);
   e.record.set("organization", e.auth.getString("organization"));
   e.record.set("createdBy", e.auth.id);
   e.record.set("timezone", $os.getenv("PB_TIMEZONE") || "Europe/Madrid");
+  e.record.set("recordedAt", recordedAt);
+  e.record.set("adjustmentSeconds", 0);
+  e.record.set("adjustmentReason", "");
+  e.record.set("integrityVersion", "v2");
 
   let latestByTime = [];
   try {
@@ -279,13 +287,19 @@ onRecordCreateRequest((e) => {
     const adjustmentSeconds = Math.floor(
       (serverNow.getTime() - reviewedEnd.getTime()) / 1000,
     );
-    if (adjustmentSeconds >= 60) {
-      e.record.set(
-        "note",
-        "Hora de finalización revisada antes de confirmar (" +
-          Math.floor(adjustmentSeconds / 60) +
-          " min de ajuste).",
+    const adjustmentReason = requestedAdjustmentReason;
+    if (adjustmentSeconds >= 60 && adjustmentReason.length < 8) {
+      throw new BadRequestError(
+        "Explica brevemente por qué ajustas la hora final (mínimo 8 caracteres).",
       );
+    }
+    e.record.set("adjustmentSeconds", Math.max(0, adjustmentSeconds));
+    e.record.set(
+      "adjustmentReason",
+      adjustmentSeconds >= 60 ? adjustmentReason : "",
+    );
+    if (adjustmentSeconds >= 60) {
+      e.record.set("note", adjustmentReason);
     }
   }
   e.record.set("occurredAt", occurredAt);
@@ -310,12 +324,16 @@ onRecordCreateRequest((e) => {
     "integrityHash",
     $security.sha256(
       [
+        "v2",
         employeeId,
         e.auth.getString("organization"),
         requestedKind,
         e.record.getString("correctedKind"),
         e.record.getString("corrects"),
-        e.record.getString("occurredAt"),
+        new Date(e.record.getString("occurredAt")).toISOString(),
+        new Date(recordedAt).toISOString(),
+        e.record.getFloat("adjustmentSeconds"),
+        e.record.getString("adjustmentReason"),
         requestId,
         previousHash,
       ].join("|"),
@@ -337,10 +355,10 @@ onRecordAfterCreateSuccess((e) => {
     employee: e.record.getString("employee"),
     integrityHash: e.record.getString("integrityHash"),
     occurredAt: e.record.getString("occurredAt"),
-    reviewedAtCheckout:
-      (e.record.getString("kind") === "clock_out" ||
-        e.record.getString("kind") === "break_end") &&
-      e.record.getString("note").indexOf("revisada antes de confirmar") >= 0,
+    recordedAt: e.record.getString("recordedAt"),
+    adjustmentSeconds: e.record.getFloat("adjustmentSeconds"),
+    adjustmentReason: e.record.getString("adjustmentReason"),
+    integrityVersion: e.record.getString("integrityVersion"),
   });
   audit.set("occurredAt", new Date().toISOString());
   e.app.save(audit);

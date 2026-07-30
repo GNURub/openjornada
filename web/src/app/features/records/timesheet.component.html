@@ -37,7 +37,9 @@
                     {{ requestLabel(request) }}
                   </span>
                 </div>
-                <p class="mt-1 text-sm text-stone-500">{{ request.reason }}</p>
+                @if (request.reason) {
+                  <p class="mt-1 text-sm text-stone-500">{{ request.reason }}</p>
+                }
                 @if (request.requestType === 'replacement') {
                   <div class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                     <div class="rounded-xl bg-stone-50 p-3 text-stone-500">
@@ -602,35 +604,33 @@
                                 </button>
                               </div>
 
-                              <label class="mt-4 block">
-                                <span class="field-label">{{
-                                  editorMode() === 'replacement'
-                                    ? 'Motivo de la corrección'
-                                    : 'Motivo de la incorporación'
-                                }}</span>
-                                <textarea
-                                  [(ngModel)]="reason"
-                                  name="manualReason"
-                                  required
-                                  minlength="8"
-                                  maxlength="500"
-                                  rows="2"
-                                  class="field-input min-h-20 resize-y"
-                                  placeholder="Por ejemplo: olvidé registrar la salida"
-                                  aria-describedby="manual-reason-help"
-                                ></textarea>
-                                <span
-                                  id="manual-reason-help"
-                                  class="mt-2 block text-xs leading-5"
-                                  [class.text-red-600]="!!reasonError()"
-                                  [class.text-stone-400]="!reasonError()"
-                                >
-                                  {{
-                                    reasonError() ||
-                                      reason.trim().length + ' de 500 caracteres utilizados.'
-                                  }}
-                                </span>
-                              </label>
+                              @if (editorMode() === 'replacement') {
+                                <label class="mt-4 block">
+                                  <span class="field-label">Motivo de la corrección</span>
+                                  <textarea
+                                    [(ngModel)]="reason"
+                                    name="manualReason"
+                                    required
+                                    minlength="8"
+                                    maxlength="500"
+                                    rows="2"
+                                    class="field-input min-h-20 resize-y"
+                                    placeholder="Por ejemplo: olvidé registrar la salida"
+                                    aria-describedby="manual-reason-help"
+                                  ></textarea>
+                                  <span
+                                    id="manual-reason-help"
+                                    class="mt-2 block text-xs leading-5"
+                                    [class.text-red-600]="!!reasonError()"
+                                    [class.text-stone-400]="!reasonError()"
+                                  >
+                                    {{
+                                      reasonError() ||
+                                        reason.trim().length + ' de 500 caracteres utilizados.'
+                                    }}
+                                  </span>
+                                </label>
+                              }
 
                               @if (manualDraftError(); as draftError) {
                                 <p role="alert" class="mt-3 text-xs leading-5 text-red-600">

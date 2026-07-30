@@ -292,8 +292,238 @@ function monthlyStatementData(app, organization, employee, period) {
   }
 }
 
+function dateVariants(value) {
+  const variants = [String(value || "")]
+  const parsed = new Date(value)
+  if (!isNaN(parsed.getTime())) {
+    const canonical = parsed.toISOString()
+    if (variants.indexOf(canonical) < 0) variants.push(canonical)
+  }
+  return variants
+}
+
+function eventHashMatches(record) {
+  const employee = record.getString("employee")
+  const organization = record.getString("organization")
+  const kind = record.getString("kind")
+  const occurredAt = record.getString("occurredAt")
+  const requestId = record.getString("clientRequestId")
+  const previousHash = record.getString("previousHash")
+  const expected = record.getString("integrityHash")
+  const source = record.getString("source")
+  const manualRequest = record.getString("manualRequest")
+  const candidates = []
+
+  if (record.getString("integrityVersion") === "v2") {
+    for (const occurred of dateVariants(occurredAt)) {
+      for (const recorded of dateVariants(record.getString("recordedAt"))) {
+        candidates.push([
+          "v2",
+          employee,
+          organization,
+          kind,
+          record.getString("correctedKind"),
+          record.getString("corrects"),
+          occurred,
+          recorded,
+          record.getFloat("adjustmentSeconds"),
+          record.getString("adjustmentReason"),
+          requestId,
+          previousHash,
+        ])
+      }
+    }
+  } else if (source === "manual" && record.getBool("voidsTarget")) {
+    for (const occurred of dateVariants(occurredAt)) {
+      candidates.push([
+        employee,
+        organization,
+        "correction",
+        "void",
+        record.getString("corrects"),
+        occurred,
+        requestId,
+        previousHash,
+      ])
+    }
+  } else if (source === "manual" && manualRequest) {
+    const index = Number(requestId.slice(requestId.lastIndexOf("-") + 1))
+    for (const occurred of dateVariants(occurredAt)) {
+      candidates.push([
+        employee,
+        organization,
+        kind,
+        occurred,
+        manualRequest,
+        index,
+        previousHash,
+      ])
+    }
+  } else {
+    for (const occurred of dateVariants(occurredAt)) {
+      candidates.push([
+        employee,
+        organization,
+        kind,
+        record.getString("correctedKind"),
+        record.getString("corrects"),
+        occurred,
+        requestId,
+        previousHash,
+      ])
+    }
+  }
+
+  return candidates.some(
+    (parts) => $security.sha256(parts.join("|")) === expected,
+  )
+}
+
+function exportedEvent(record) {
+  return {
+    id: record.id,
+    employee: record.getString("employee"),
+    organization: record.getString("organization"),
+    kind: record.getString("kind"),
+    correctedKind: record.getString("correctedKind"),
+    corrects: record.getString("corrects"),
+    occurredAt: record.getString("occurredAt"),
+    recordedAt: record.getString("recordedAt"),
+    adjustmentSeconds: record.getFloat("adjustmentSeconds"),
+    adjustmentReason: record.getString("adjustmentReason"),
+    timezone: record.getString("timezone"),
+    source: record.getString("source"),
+    note: record.getString("note"),
+    createdBy: record.getString("createdBy"),
+    manualRequest: record.getString("manualRequest"),
+    voidsTarget: record.getBool("voidsTarget"),
+    clientRequestId: record.getString("clientRequestId"),
+    previousHash: record.getString("previousHash"),
+    integrityHash: record.getString("integrityHash"),
+    integrityVersion: record.getString("integrityVersion") || "v1",
+    created: record.getString("created"),
+  }
+}
+
+function workEventExportData(app, auth, query) {
+  const from = String(query.from || "")
+  const to = String(query.to || "")
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(to) ||
+    from > to
+  ) {
+    throw new BadRequestError("El intervalo de exportación no es válido.")
+  }
+
+  const organization = app.findRecordById(
+    "organizations",
+    auth.getString("organization"),
+  )
+  const timezone = organization.getString("timezone") || "Europe/Madrid"
+  const startAt = new DateTime(from + " 00:00:00", timezone)
+  const nextAt = new DateTime(to + " 00:00:00", timezone).addDate(0, 0, 1)
+  if ((nextAt.unix() - startAt.unix()) / 86400 > 367) {
+    throw new BadRequestError("La exportación no puede abarcar más de un año.")
+  }
+
+  const role = auth.getString("role")
+  let employeeId = String(query.employee || auth.id)
+  if (
+    role !== "admin" &&
+    role !== "manager" &&
+    role !== "representative"
+  ) {
+    employeeId = auth.id
+  }
+  const employee = app.findRecordById("users", employeeId)
+  if (employee.getString("organization") !== organization.id) {
+    throw new ForbiddenError("La persona no pertenece a tu empresa.")
+  }
+
+  const allRecords = app.findRecordsByFilter(
+    "work_events",
+    "employee = {:employee}",
+    "created",
+    50000,
+    0,
+    { employee: employee.id },
+  )
+  const selectedRecords = allRecords.filter((record) => {
+    const occurred = new DateTime(record.getString("occurredAt")).unix()
+    return occurred >= startAt.unix() && occurred < nextAt.unix()
+  })
+
+  const hashes = {}
+  const referenced = {}
+  const errors = []
+  let cryptographicallyVerified = 0
+  for (const record of allRecords) {
+    const hash = record.getString("integrityHash")
+    if (!hash || hashes[hash]) {
+      errors.push({
+        eventId: record.id,
+        code: hash ? "duplicate_hash" : "missing_hash",
+      })
+    } else {
+      hashes[hash] = record.id
+    }
+    const previousHash = record.getString("previousHash")
+    if (previousHash) referenced[previousHash] = true
+    if (eventHashMatches(record)) {
+      cryptographicallyVerified += 1
+    } else {
+      errors.push({ eventId: record.id, code: "hash_mismatch" })
+    }
+  }
+  for (const record of allRecords) {
+    const previousHash = record.getString("previousHash")
+    if (previousHash && !hashes[previousHash]) {
+      errors.push({ eventId: record.id, code: "missing_predecessor" })
+    }
+  }
+  const tips = allRecords.filter(
+    (record) => !referenced[record.getString("integrityHash")],
+  )
+  const roots = allRecords.filter((record) => !record.getString("previousHash"))
+  if (allRecords.length && roots.length !== 1) {
+    errors.push({ code: "invalid_root_count", count: roots.length })
+  }
+  if (allRecords.length && tips.length !== 1) {
+    errors.push({ code: "invalid_tip_count", count: tips.length })
+  }
+
+  return {
+    schemaVersion: "openjornada-work-events-export-v1",
+    generatedAt: new Date().toISOString(),
+    organization: {
+      id: organization.id,
+      name: organization.getString("name"),
+      taxId: organization.getString("taxId"),
+      timezone,
+    },
+    employee: {
+      id: employee.id,
+      name: employee.getString("name"),
+      employeeCode: employee.getString("employeeCode"),
+    },
+    range: { from, to },
+    verification: {
+      status: errors.length ? "invalid" : "valid",
+      totalChainEvents: allRecords.length,
+      exportedEvents: selectedRecords.length,
+      cryptographicallyVerified,
+      roots: roots.length,
+      tips: tips.length,
+      errors,
+    },
+    events: selectedRecords.map(exportedEvent),
+  }
+}
+
 module.exports = {
   monthlyStatementData,
   privacyNotice,
   statementAudit,
+  workEventExportData,
 }

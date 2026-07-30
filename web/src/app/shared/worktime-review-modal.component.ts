@@ -31,9 +31,7 @@ export class WorktimeReviewModalComponent {
   }
 
   protected startLabel(): string {
-    return this.worktime.reviewKind() === 'clock_out'
-      ? 'Jornada iniciada'
-      : 'Pausa iniciada';
+    return this.worktime.reviewKind() === 'clock_out' ? 'Jornada iniciada' : 'Pausa iniciada';
   }
 
   protected durationLabel(): string {
@@ -79,15 +77,28 @@ export class WorktimeReviewModalComponent {
     const latest = this.latestEvent();
     if (
       latest &&
-      Math.floor(end.getTime() / 1_000) <
-        Math.floor(new Date(latest.occurredAt).getTime() / 1_000)
+      Math.floor(end.getTime() / 1_000) < Math.floor(new Date(latest.occurredAt).getTime() / 1_000)
     ) {
       return 'La hora final no puede ser anterior al último fichaje.';
     }
     if (end.getTime() > Date.now()) {
       return 'La hora final no puede estar en el futuro.';
     }
+    if (this.requiresReason() && this.worktime.reviewReason().trim().length < 8) {
+      return 'Explica el ajuste con al menos 8 caracteres.';
+    }
     return '';
+  }
+
+  protected adjustmentSeconds(): number {
+    const end = this.endDate();
+    const recordedAt = new Date(this.worktime.reviewRecordedAt());
+    if (!end || Number.isNaN(recordedAt.getTime())) return 0;
+    return Math.max(0, Math.floor((recordedAt.getTime() - end.getTime()) / 1_000));
+  }
+
+  protected requiresReason(): boolean {
+    return this.adjustmentSeconds() >= 30;
   }
 
   protected adjust(minutes: number): void {
@@ -104,7 +115,7 @@ export class WorktimeReviewModalComponent {
     const kind = this.worktime.reviewKind();
     const end = this.endDate();
     if (!kind || !end || this.validationMessage()) return;
-    const saved = await this.worktime.record(kind, end.toISOString());
+    const saved = await this.worktime.record(kind, end.toISOString(), this.worktime.reviewReason());
     if (saved) this.worktime.closeReview();
   }
 
@@ -114,9 +125,7 @@ export class WorktimeReviewModalComponent {
 
   private orderedEvents(): WorkEventRecord[] {
     return applyCorrections(this.worktime.events()).sort(
-      (left, right) =>
-        new Date(right.occurredAt).getTime() -
-        new Date(left.occurredAt).getTime(),
+      (left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime(),
     );
   }
 
@@ -128,8 +137,6 @@ export class WorktimeReviewModalComponent {
   }
 
   private localDateTimeValue(date: Date): string {
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-      .toISOString()
-      .slice(0, 19);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
   }
 }

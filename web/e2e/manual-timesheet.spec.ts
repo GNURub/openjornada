@@ -120,7 +120,6 @@ async function selectDay(page: import('@playwright/test').Page, date: string): P
 
 async function submitWorkday(
   page: import('@playwright/test').Page,
-  reason: string,
   withBreak: boolean,
 ): Promise<void> {
   await page.getByRole('button', { name: '+ Añadir tiempo' }).click();
@@ -133,7 +132,7 @@ async function submitWorkday(
     await popover.getByRole('button', { name: '+ Pausa' }).click();
     await popover.getByRole('button', { name: '+ Trabajo' }).click();
   }
-  await popover.getByLabel('Motivo de la incorporación').fill(reason);
+  await expect(popover.getByLabel('Motivo de la incorporación')).toHaveCount(0);
   await popover.getByRole('button', { name: 'Aplicar' }).click();
 }
 
@@ -149,10 +148,7 @@ test('employee completes a past workday and the approval policy is enforced', as
   const automaticDate = '2026-01-15';
   const cancelledDate = '2026-01-16';
   const approvedDate = '2026-01-19';
-  const automaticReason = 'Olvido de fichaje E2E con pausa';
   const correctionReason = 'La salida real de la jornada fue una hora antes';
-  const cancelledReason = 'Solicitud E2E que será cancelada';
-  const approvedReason = 'Solicitud E2E pendiente de revisión';
 
   const admin = await apiSignIn(request, adminEmail, adminPassword);
   const employee = await apiSignIn(request, employeeEmail, employeePassword);
@@ -161,7 +157,7 @@ test('employee completes a past workday and the approval policy is enforced', as
   await page.goto('/registros');
   await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();
   await selectDay(page, automaticDate);
-  await submitWorkday(page, automaticReason, true);
+  await submitWorkday(page, true);
   await expect(page.getByText('La jornada se ha incorporado con trazabilidad.')).toBeVisible();
 
   const automaticDay = page.locator(`[data-timesheet-date="${automaticDate}"]`);
@@ -321,7 +317,7 @@ test('employee completes a past workday and the approval policy is enforced', as
   await changeAccount(page, employeeEmail, employeePassword);
   await page.goto('/registros');
   await selectDay(page, cancelledDate);
-  await submitWorkday(page, cancelledReason, false);
+  await submitWorkday(page, false);
   await expect(page.getByText('La jornada se ha enviado para aprobación.')).toBeVisible();
   await expect(
     page.locator(`[data-timesheet-date="${cancelledDate}"]`).getByText('Pendiente'),
@@ -330,12 +326,12 @@ test('employee completes a past workday and the approval policy is enforced', as
   await expect(page.getByText('Solicitud cancelada.')).toBeVisible();
 
   await selectDay(page, approvedDate);
-  await submitWorkday(page, approvedReason, false);
+  await submitWorkday(page, false);
   await expect(page.getByText('La jornada se ha enviado para aprobación.')).toBeVisible();
 
   await changeAccount(page, adminEmail, adminPassword);
   await page.goto('/registros');
-  const pendingCard = page.locator('li').filter({ hasText: approvedReason });
+  const pendingCard = page.locator('li').filter({ hasText: 'Alta manual' });
   await expect(pendingCard).toBeVisible();
   await pendingCard.getByRole('button', { name: 'Aprobar' }).click();
   await expect(page.getByText('Jornada aprobada e incorporada.')).toBeVisible();
@@ -383,7 +379,33 @@ test('employee completes a past workday and the approval policy is enforced', as
     expect.objectContaining({
       workedMinutes: 0,
       editableIntervals: [],
+      canAddManualTime: false,
+      canCorrectTime: true,
     }),
+  );
+
+  const readditionWithoutReason = await request.post(
+    `${apiBase}/openjornada/timesheet-corrections`,
+    {
+      headers: { Authorization: employee.token },
+      data: {
+        workDate: approvedDate,
+        intervals: [
+          {
+            kind: 'work',
+            start: '09:00',
+            end: '17:00',
+            startNextDay: false,
+            breakType: '',
+          },
+        ],
+        reason: '',
+      },
+    },
+  );
+  expect(readditionWithoutReason.status()).toBe(400);
+  expect(await readditionWithoutReason.text()).toContain(
+    'El motivo debe tener entre ocho y quinientos caracteres.',
   );
 
   const historyResponse = await request.get(`${apiBase}/collections/work_events/records`, {

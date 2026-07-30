@@ -117,6 +117,10 @@ export interface WorkEventRecord extends RecordModel {
   organization: string;
   kind: WorkEventKind;
   occurredAt: string;
+  recordedAt: string;
+  adjustmentSeconds: number;
+  adjustmentReason: string;
+  integrityVersion: 'v1' | 'v2' | '';
   timezone: string;
   source: 'desktop' | 'mobile' | 'tablet' | 'admin' | 'manual';
   note: string;

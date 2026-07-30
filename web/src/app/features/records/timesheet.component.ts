@@ -211,6 +211,7 @@ export class TimesheetComponent {
   }
 
   protected reasonError(): string {
+    if (this.editorMode() !== 'replacement') return '';
     const missing = 8 - this.reason.trim().length;
     if (missing <= 0) return '';
     return missing === 1
@@ -255,7 +256,12 @@ export class TimesheetComponent {
       await this.load();
     } catch (error) {
       this.error.set(
-        this.errorMessage(error, 'No se pudo guardar la jornada. Revisa los tramos y el motivo.'),
+        this.errorMessage(
+          error,
+          this.editorMode() === 'replacement'
+            ? 'No se pudo guardar la corrección. Revisa los tramos y el motivo.'
+            : 'No se pudo guardar la jornada. Revisa los tramos.',
+        ),
       );
     } finally {
       this.saving.set(false);

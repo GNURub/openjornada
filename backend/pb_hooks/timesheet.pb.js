@@ -599,9 +599,9 @@ routerAdd(
     );
     const timezone = organization.getString("timezone") || "Europe/Madrid";
     const reason = String(body.reason || "").trim();
-    if (reason.length < 8 || reason.length > 500) {
+    if ((reason.length > 0 && reason.length < 8) || reason.length > 500) {
       throw new BadRequestError(
-        "El motivo debe tener entre ocho y quinientos caracteres.",
+        "Si indicas un motivo, debe tener entre ocho y quinientos caracteres.",
       );
     }
     const intervals = helper.normalizeIntervals(
@@ -611,6 +611,25 @@ routerAdd(
       body.intervals,
       organization.id,
     );
+    const current = helper.editableDayState(
+      e.app,
+      e.auth.id,
+      body.workDate,
+      timezone,
+    );
+    if (
+      current.eventIds.length > 0 ||
+      helper.hasApprovedTimeHistory(
+        e.app,
+        e.auth.id,
+        body.workDate,
+        timezone,
+      )
+    ) {
+      throw new BadRequestError(
+        "Esta jornada ya tenía fichajes. Utiliza una corrección e indica el motivo.",
+      );
+    }
     helper.validateConflicts(e.app, e.auth.id, intervals, "");
 
     let created;
@@ -714,12 +733,22 @@ routerAdd(
       body.workDate,
       timezone,
     );
-    if (original.eventIds.length === 0) {
+    const hadApprovedTimeHistory = helper.hasApprovedTimeHistory(
+      e.app,
+      e.auth.id,
+      body.workDate,
+      timezone,
+    );
+    if (original.eventIds.length === 0 && !hadApprovedTimeHistory) {
       throw new BadRequestError(
         "No hay fichajes que corregir en esta jornada.",
       );
     }
-    if (body.workDate === helper.today(timezone) && !original.closed) {
+    if (
+      original.eventIds.length > 0 &&
+      body.workDate === helper.today(timezone) &&
+      !original.closed
+    ) {
       throw new BadRequestError(
         "Finaliza la jornada actual antes de corregirla.",
       );
@@ -1112,6 +1141,10 @@ routerAdd(
         intervals: [],
         closed: false,
       };
+      const dayRequests = requestsByDate[date] || [];
+      const hadApprovedTimeHistory = dayRequests.some(
+        (request) => request.status === "approved",
+      );
       const dayEvents = effectiveEvents
         .filter(
           (event) =>
@@ -1206,17 +1239,20 @@ routerAdd(
         absences,
         events: dayEvents,
         editableIntervals: editableDay.intervals,
-        requests: requestsByDate[date] || [],
+        requests: dayRequests,
         anomaly: Boolean(anomalyDates[date]),
         canAddManualTime:
           date <= today &&
           employeeId === e.auth.id &&
-          editableDay.eventIds.length === 0,
+          editableDay.eventIds.length === 0 &&
+          !hadApprovedTimeHistory,
         canCorrectTime:
           date <= today &&
           employeeId === e.auth.id &&
-          editableDay.eventIds.length > 0 &&
-          (date < today || editableDay.closed),
+          ((editableDay.eventIds.length > 0 &&
+            (date < today || editableDay.closed)) ||
+            (editableDay.eventIds.length === 0 &&
+              hadApprovedTimeHistory)),
       });
     }
 

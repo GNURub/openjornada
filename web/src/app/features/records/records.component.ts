@@ -26,12 +26,11 @@ export class RecordsComponent {
   protected readonly error = signal('');
   protected readonly success = signal('');
   protected readonly savingCorrection = signal(false);
+  protected readonly exportingEvidence = signal(false);
   protected readonly correctionTarget = signal<WorkEventRecord | null>(null);
   protected readonly eventLabel = eventLabel;
   protected readonly activeTab = signal<'sheet' | 'trace'>('sheet');
-  protected readonly canViewCompany = computed(
-    () => this.auth.user()?.role !== 'employee',
-  );
+  protected readonly canViewCompany = computed(() => this.auth.user()?.role !== 'employee');
   protected readonly canResolve = computed(() => {
     const role = this.auth.user()?.role;
     return role === 'admin' || role === 'manager';
@@ -39,9 +38,7 @@ export class RecordsComponent {
   protected correctionKind: Exclude<WorkEventKind, 'correction'> = 'clock_in';
   protected correctionOccurredAt = '';
   protected correctionReason = '';
-  protected from = this.toInputDate(
-    new Date(new Date().setDate(new Date().getDate() - 30)),
-  );
+  protected from = this.toInputDate(new Date(new Date().setDate(new Date().getDate() - 30)));
   protected to = this.toInputDate(new Date());
   protected employee = this.auth.user()?.id ?? '';
 
@@ -77,8 +74,7 @@ export class RecordsComponent {
 
   protected openCorrection(event: WorkEventRecord): void {
     this.correctionTarget.set(event);
-    this.correctionKind =
-      event.kind === 'correction' ? 'clock_in' : event.kind;
+    this.correctionKind = event.kind === 'correction' ? 'clock_in' : event.kind;
     const date = new Date(event.occurredAt);
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
     this.correctionOccurredAt = local.toISOString().slice(0, 23);
@@ -99,21 +95,15 @@ export class RecordsComponent {
         employee: user.id,
         workEvent: target.id,
         requestedKind: this.correctionKind,
-        requestedOccurredAt: new Date(
-          this.correctionOccurredAt,
-        ).toISOString(),
+        requestedOccurredAt: new Date(this.correctionOccurredAt).toISOString(),
         reason: this.correctionReason,
         status: 'pending',
       });
       this.correctionTarget.set(null);
-      this.success.set(
-        'La solicitud se ha enviado a una persona responsable.',
-      );
+      this.success.set('La solicitud se ha enviado a una persona responsable.');
       await this.loadCorrectionRequests();
     } catch {
-      this.error.set(
-        'No se pudo solicitar la corrección. Revisa el motivo y la fecha.',
-      );
+      this.error.set('No se pudo solicitar la corrección. Revisa el motivo y la fecha.');
     } finally {
       this.savingCorrection.set(false);
     }
@@ -133,9 +123,7 @@ export class RecordsComponent {
             : 'La corrección no ha sido aprobada.',
       });
       this.success.set(
-        status === 'approved'
-          ? 'Corrección aplicada con trazabilidad.'
-          : 'Solicitud rechazada.',
+        status === 'approved' ? 'Corrección aplicada con trazabilidad.' : 'Solicitud rechazada.',
       );
       await this.load();
     } catch {
@@ -172,18 +160,51 @@ export class RecordsComponent {
       }),
     ];
     const csv = rows
-      .map((row) =>
-        row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','),
-      )
+      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','))
       .join('\r\n');
-    const url = URL.createObjectURL(
-      new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }),
-    );
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `registros-jornada-${this.from}-${this.to}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  protected async exportEvidence(): Promise<void> {
+    if (!this.employee || this.exportingEvidence()) return;
+    this.exportingEvidence.set(true);
+    this.error.set('');
+    try {
+      const evidence = await this.pb.send<{
+        verification: { status: 'valid' | 'invalid'; errors: unknown[] };
+      }>('/api/openjornada/work-events/export', {
+        method: 'GET',
+        query: {
+          employee: this.employee,
+          from: this.from,
+          to: this.to,
+        },
+      });
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(evidence, null, 2)], {
+          type: 'application/json;charset=utf-8',
+        }),
+      );
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `evidencias-jornada-${this.from}-${this.to}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      this.success.set(
+        evidence.verification.status === 'valid'
+          ? 'Paquete de evidencias exportado con la cadena íntegra.'
+          : 'Paquete exportado con incidencias de integridad; debe revisarlo una persona administradora.',
+      );
+    } catch {
+      this.error.set('No se pudo generar el paquete de evidencias.');
+    } finally {
+      this.exportingEvidence.set(false);
+    }
   }
 
   protected formatDate(value: string): string {
@@ -222,18 +243,15 @@ export class RecordsComponent {
     if (!user) return;
     try {
       const filter = this.canResolve()
-        ? this.pb.filter(
-            "organization = {:organization} && status = 'pending'",
-            { organization: user.organization },
-          )
+        ? this.pb.filter("organization = {:organization} && status = 'pending'", {
+            organization: user.organization,
+          })
         : this.pb.filter('employee = {:employee}', { employee: user.id });
-      const records = await this.pb
-        .collection('correction_requests')
-        .getFullList({
-          filter,
-          sort: '-created',
-          expand: 'employee,workEvent',
-        });
+      const records = await this.pb.collection('correction_requests').getFullList({
+        filter,
+        sort: '-created',
+        expand: 'employee,workEvent',
+      });
       this.correctionRequests.set(records as CorrectionRequestRecord[]);
     } catch {
       this.correctionRequests.set([]);

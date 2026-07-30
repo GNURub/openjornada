@@ -23,6 +23,8 @@ export class WorktimeService {
   readonly status = computed(() => deriveStatus(this.events()));
   readonly reviewKind = signal<ReviewableWorkEventKind | null>(null);
   readonly reviewEndAt = signal('');
+  readonly reviewRecordedAt = signal('');
+  readonly reviewReason = signal('');
 
   async loadToday(): Promise<void> {
     const user = this.auth.user();
@@ -35,10 +37,10 @@ export class WorktimeService {
     start.setHours(0, 0, 0, 0);
     try {
       const records = await this.pb.collection('work_events').getFullList({
-        filter: this.pb.filter(
-          'employee = {:employee} && occurredAt >= {:start}',
-          { employee: user.id, start: start.toISOString() },
-        ),
+        filter: this.pb.filter('employee = {:employee} && occurredAt >= {:start}', {
+          employee: user.id,
+          start: start.toISOString(),
+        }),
         sort: '-occurredAt',
       });
       this.events.set(records as WorkEventRecord[]);
@@ -59,7 +61,10 @@ export class WorktimeService {
 
   openReview(kind: ReviewableWorkEventKind): void {
     this.error.set('');
-    this.reviewEndAt.set(this.localDateTimeValue(new Date()));
+    const now = new Date();
+    this.reviewRecordedAt.set(now.toISOString());
+    this.reviewEndAt.set(this.localDateTimeValue(now));
+    this.reviewReason.set('');
     this.reviewKind.set(kind);
   }
 
@@ -67,9 +72,11 @@ export class WorktimeService {
     if (this.submitting()) return;
     this.reviewKind.set(null);
     this.reviewEndAt.set('');
+    this.reviewRecordedAt.set('');
+    this.reviewReason.set('');
   }
 
-  async record(kind: WorkEventKind, reviewedAt?: string): Promise<boolean> {
+  async record(kind: WorkEventKind, reviewedAt?: string, adjustmentReason = ''): Promise<boolean> {
     const user = this.auth.user();
     if (!user || this.submitting()) {
       return false;
@@ -85,16 +92,15 @@ export class WorktimeService {
           reviewedAt && (kind === 'clock_out' || kind === 'break_end')
             ? reviewedAt
             : new Date().toISOString(),
+        adjustmentReason:
+          kind === 'clock_out' || kind === 'break_end' ? adjustmentReason.trim() : '',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         source: this.deviceSource(),
         createdBy: user.id,
         integrityHash: 'server-generated',
         clientRequestId: crypto.randomUUID(),
       });
-      this.events.update((events) => [
-        created as WorkEventRecord,
-        ...events,
-      ]);
+      this.events.update((events) => [created as WorkEventRecord, ...events]);
       return true;
     } catch (error) {
       const detail =
@@ -124,8 +130,6 @@ export class WorktimeService {
   }
 
   private localDateTimeValue(date: Date): string {
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-      .toISOString()
-      .slice(0, 19);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
   }
 }

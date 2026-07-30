@@ -481,6 +481,25 @@ function editableDayState(app, employeeId, workDate, timezone) {
   }
 }
 
+function hasApprovedTimeHistory(app, employeeId, workDate, timezone) {
+  const start = new DateTime(workDate + " 00:00:00", timezone)
+  const end = start.addDate(0, 0, 1)
+  return (
+    app.findRecordsByFilter(
+      "manual_time_requests",
+      "employee = {:employee} && status = 'approved' && workDate >= {:start} && workDate < {:end}",
+      "created",
+      1,
+      0,
+      {
+        employee: employeeId,
+        start: start.string(),
+        end: end.string(),
+      },
+    ).length > 0
+  )
+}
+
 function workSpans(events, openUntil) {
   const spans = []
   let activeAt = null
@@ -717,6 +736,10 @@ function materializeRequest(app, request, intervals) {
     event.set("breakPaid", specification.breakPaid)
     event.set("previousHash", previousHash)
     event.set("clientRequestId", requestId)
+    event.set("recordedAt", new Date().toISOString())
+    event.set("adjustmentSeconds", 0)
+    event.set("adjustmentReason", "")
+    event.set("integrityVersion", "v1")
     const integrityHash = $security.sha256(
       [
         request.getString("employee"),
@@ -758,7 +781,7 @@ function materializeReplacement(app, request, intervals) {
       : []
   const expectedTargets = [...targetEvents].sort().join(",")
   const currentTargets = [...current.eventIds].sort().join(",")
-  if (!targetEvents.length || expectedTargets !== currentTargets) {
+  if (expectedTargets !== currentTargets) {
     throw new BadRequestError(
       "Los fichajes de la jornada ya no coinciden con la solicitud.",
     )
@@ -798,6 +821,10 @@ function materializeReplacement(app, request, intervals) {
     correction.set("manualRequest", request.id)
     correction.set("previousHash", previousHash)
     correction.set("clientRequestId", requestId)
+    correction.set("recordedAt", new Date().toISOString())
+    correction.set("adjustmentSeconds", 0)
+    correction.set("adjustmentReason", "")
+    correction.set("integrityVersion", "v1")
     const integrityHash = $security.sha256(
       [
         employeeId,
@@ -964,6 +991,7 @@ module.exports = {
   editableDayState,
   editableDays,
   effectiveEvents,
+  hasApprovedTimeHistory,
   integrityTipHash,
   localKey,
   materializeRequest,

@@ -9,24 +9,25 @@
       </p>
     </div>
     @if (activeTab() === 'trace') {
-      <button
-        type="button"
-        [disabled]="events().length === 0"
-        (click)="exportCsv()"
-        class="btn-secondary w-full gap-2 disabled:opacity-40 sm:w-auto"
-      >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          class="size-5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
+      <div class="grid w-full gap-2 sm:flex sm:w-auto">
+        <button
+          type="button"
+          [disabled]="events().length === 0"
+          (click)="exportCsv()"
+          class="btn-secondary gap-2 disabled:opacity-40"
         >
-          <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" />
-        </svg>
-        Exportar CSV
-      </button>
+          Exportar CSV
+        </button>
+        <button
+          type="button"
+          data-testid="export-work-event-evidence"
+          [disabled]="exportingEvidence()"
+          (click)="exportEvidence()"
+          class="btn-primary gap-2 disabled:opacity-40"
+        >
+          {{ exportingEvidence() ? 'Verificando…' : 'Exportar evidencias JSON' }}
+        </button>
+      </div>
     }
   </div>
 

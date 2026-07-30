@@ -547,10 +547,11 @@ onRecordAfterUpdateSuccess((e) => {
         0,
         { employee: e.record.getString("employee") },
       );
-      const previousHash = events.length
-        ? events[0].getString("integrityHash")
-        : "";
+      const previousHash = require(
+        `${__hooks}/timesheet_helpers.js`,
+      ).integrityTipHash(e.app, e.record.getString("employee"));
       const requestId = "correction-request-" + e.record.id;
+      const recordedAt = new Date().toISOString();
       const collection = e.app.findCollectionByNameOrId("work_events");
       const correction = new Record(collection);
       correction.set("employee", e.record.getString("employee"));
@@ -571,16 +572,26 @@ onRecordAfterUpdateSuccess((e) => {
       correction.set("corrects", e.record.getString("workEvent"));
       correction.set("previousHash", previousHash);
       correction.set("clientRequestId", requestId);
+      correction.set("recordedAt", recordedAt);
+      correction.set("adjustmentSeconds", 0);
+      correction.set("adjustmentReason", "");
+      correction.set("integrityVersion", "v2");
       correction.set(
         "integrityHash",
         $security.sha256(
           [
+            "v2",
             e.record.getString("employee"),
             e.record.getString("organization"),
             "correction",
             e.record.getString("requestedKind"),
             e.record.getString("workEvent"),
-            e.record.getString("requestedOccurredAt"),
+            new Date(
+              e.record.getString("requestedOccurredAt"),
+            ).toISOString(),
+            new Date(recordedAt).toISOString(),
+            0,
+            "",
             requestId,
             previousHash,
           ].join("|"),

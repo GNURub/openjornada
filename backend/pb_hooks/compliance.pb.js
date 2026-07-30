@@ -321,6 +321,18 @@ function ojMonthlyStatementData(app, organization, employee, period) {
 }
 
 routerAdd(
+  "GET",
+  "/api/openjornada/work-events/export",
+  (e) => {
+    const data = require(
+      `${__hooks}/compliance_helpers.js`,
+    ).workEventExportData(e.app, e.auth, e.requestInfo().query);
+    return e.json(200, data);
+  },
+  $apis.requireAuth("users"),
+);
+
+routerAdd(
   "POST",
   "/api/openjornada/monthly-statements/close",
   (e) => {
