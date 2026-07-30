@@ -4,10 +4,17 @@ import { AuthService } from '../core/auth.service';
 import { BrandingService } from '../core/branding.service';
 import { WorktimeService } from '../core/worktime.service';
 import { ActiveWorktimeWidgetComponent } from './active-worktime-widget.component';
+import { WorktimeReviewModalComponent } from './worktime-review-modal.component';
 
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, ActiveWorktimeWidgetComponent],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    ActiveWorktimeWidgetComponent,
+    WorktimeReviewModalComponent,
+  ],
   templateUrl: './shell.component.html',
 })
 export class ShellComponent {

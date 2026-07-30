@@ -199,11 +199,10 @@ onRecordCreateRequest((e) => {
     }
   }
 
-  const now = new Date().toISOString();
+  const serverNow = new Date();
   e.record.set("employee", employeeId);
   e.record.set("organization", e.auth.getString("organization"));
   e.record.set("createdBy", e.auth.id);
-  e.record.set("occurredAt", isCorrection ? e.record.get("occurredAt") : now);
   e.record.set("timezone", $os.getenv("PB_TIMEZONE") || "Europe/Madrid");
 
   let latestByTime = [];
@@ -238,6 +237,49 @@ onRecordCreateRequest((e) => {
       throw new BadRequestError("La secuencia del fichaje no es válida.");
     }
   }
+
+  let occurredAt = isCorrection
+    ? e.record.getString("occurredAt")
+    : serverNow.toISOString();
+  const canReviewEnd =
+    !isCorrection &&
+    (requestedKind === "clock_out" || requestedKind === "break_end");
+  if (canReviewEnd) {
+    let reviewedEnd = new Date(e.record.getString("occurredAt"));
+    if (isNaN(reviewedEnd.getTime())) {
+      throw new BadRequestError("La hora final revisada no es válida.");
+    }
+    if (reviewedEnd.getTime() > serverNow.getTime()) {
+      throw new BadRequestError("La hora final no puede estar en el futuro.");
+    }
+    if (latestByTime.length) {
+      const latestAt = new Date(
+        latestByTime[0].getString("occurredAt"),
+      );
+      if (reviewedEnd.getTime() < latestAt.getTime()) {
+        if (latestAt.getTime() - reviewedEnd.getTime() < 1_000) {
+          reviewedEnd = latestAt;
+        } else {
+          throw new BadRequestError(
+            "La hora final no puede ser anterior al último fichaje.",
+          );
+        }
+      }
+    }
+    occurredAt = reviewedEnd.toISOString();
+    const adjustmentSeconds = Math.floor(
+      (serverNow.getTime() - reviewedEnd.getTime()) / 1000,
+    );
+    if (adjustmentSeconds >= 60) {
+      e.record.set(
+        "note",
+        "Hora de finalización revisada antes de confirmar (" +
+          Math.floor(adjustmentSeconds / 60) +
+          " min de ajuste).",
+      );
+    }
+  }
+  e.record.set("occurredAt", occurredAt);
 
   let previousHash = "";
   try {
@@ -285,6 +327,11 @@ onRecordAfterCreateSuccess((e) => {
     kind: e.record.getString("kind"),
     employee: e.record.getString("employee"),
     integrityHash: e.record.getString("integrityHash"),
+    occurredAt: e.record.getString("occurredAt"),
+    reviewedAtCheckout:
+      (e.record.getString("kind") === "clock_out" ||
+        e.record.getString("kind") === "break_end") &&
+      e.record.getString("note").indexOf("revisada antes de confirmar") >= 0,
   });
   audit.set("occurredAt", new Date().toISOString());
   e.app.save(audit);

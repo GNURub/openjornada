@@ -12,7 +12,8 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Autenticación, recuperación de contraseña e invitaciones por correo de un solo
   uso, con 72 horas de validez, creación de contraseña y acceso automático.
 - Roles `admin`, `manager`, `employee` y `representative`, aislados por empresa.
-- Fichajes y pausas con hora de servidor, idempotencia, cadena SHA-256 y auditoría.
+- Fichajes y pausas con revisión de la hora final, validación de servidor,
+  idempotencia, cadena SHA-256 y auditoría.
 - Hoja diaria y mensual con trabajado, planificado, balance y horas extra; la
   plantilla puede completar jornadas pasadas mediante tramos de trabajo y pausas.
 - Política por empresa para aplicar esas altas automáticamente o someterlas a
@@ -26,6 +27,9 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Tareas de onboarding, formación y administración.
 - Objetivos por ciclos y seguimiento porcentual.
 - Horarios, comunicados, informes y exportaciones CSV.
+- Servidor MCP remoto para que administración y responsables operen sobre
+  equipo, jornada, ausencias, gastos, documentos, tareas, objetivos y avisos
+  mediante tokens revocables de hasta seis meses.
 - Identidad corporativa por empresa: colores, logotipo y nombre; el icono de la
   PWA y los favicons se generan automáticamente desde el logotipo.
 - PWA instalable con manifiesto por empresa, iconos adaptativos y shell disponible
@@ -108,8 +112,15 @@ pnpm start
 Cuando el frontend se ejecuta en los puertos `4200` o `4217`, se conecta
 automáticamente a PocketBase en `127.0.0.1:8090`.
 
-Para desarrollar PocketBase sin Docker hace falta descargar el binario
-0.39.10 en `backend/bin/pocketbase`. Ese directorio está ignorado por Git.
+El backend es un binario Go propio que incorpora PocketBase 0.39.10, los hooks
+JS existentes y el servidor MCP. Para desarrollarlo sin Docker necesitas Go
+1.25 o posterior:
+
+```bash
+go build -o backend/bin/pocketbase ./cmd/openjornada
+```
+
+`backend/bin/` está ignorado por Git.
 
 ## Producción
 
@@ -187,6 +198,8 @@ instancia. Consulta la
 | `PB_APP_NAME`                 | Sí              | Nombre mostrado en PocketBase y correos.                                      |
 | `PB_PUBLIC_URL`               | Sí              | URL pública completa; HTTPS en producción.                                    |
 | `PB_ENCRYPTION_KEY`           | Sí              | Clave de exactamente 32 caracteres. No debe rotarse sin un plan de migración. |
+| `PB_MCP_ENABLED`              | No              | Activa MCP; usa `false` como corte de emergencia. Por defecto está activo.    |
+| `PB_MCP_INTERNAL_URL`         | No              | URL HTTP interna de PocketBase; sólo acepta `127.0.0.1`.                      |
 | `PB_ORGANIZATION_NAME`        | Sí              | Empresa creada durante el bootstrap inicial.                                  |
 | `PB_ORGANIZATION_TAX_ID`      | Sí              | Identificador único usado para un bootstrap idempotente.                      |
 | `PB_TIMEZONE`                 | Sí              | Zona IANA, por ejemplo `Europe/Madrid`.                                       |
@@ -245,12 +258,36 @@ docker compose -f docker-compose.production.yml config --quiet
 ```
 
 Playwright crea una base temporal y no toca los datos de desarrollo o producción.
-Para E2E local necesita `backend/bin/pocketbase` y los navegadores de Playwright:
+El script E2E compila el backend en `backend/bin/pocketbase`; requiere Go 1.25
+o posterior y los navegadores de Playwright:
 
 ```bash
 cd web
 pnpm exec playwright install chromium
 ```
+
+## Integración MCP
+
+Administración y responsables gestionan sus credenciales en
+**Integraciones → Acceso MCP**. El token sólo se muestra una vez, conserva los
+permisos actuales de quien lo creó, puede revocarse inmediatamente y no admite
+una caducidad superior a seis meses. Una cuenta `admin` ve todos los tokens de
+su empresa; una cuenta `manager`, únicamente los suyos.
+
+El endpoint remoto es `POST /mcp` y utiliza Streamable HTTP sin estado con
+`Authorization: Bearer <token>`. Ejemplo para Codex:
+
+```toml
+[mcp_servers.openjornada]
+url = "https://jornada.example.com/mcp"
+bearer_token_env_var = "OPENJORNADA_MCP_TOKEN"
+default_tools_approval_mode = "writes"
+```
+
+Los archivos protegidos se entregan mediante URLs firmadas que caducan a los
+cinco minutos. El servidor vuelve a comprobar token, rol, empresa y permisos al
+descargar. No guardes tokens en el repositorio ni los pases en argumentos de
+línea de comandos.
 
 ## Datos, copias y actualizaciones
 

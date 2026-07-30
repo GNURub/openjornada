@@ -59,4 +59,13 @@ export class DashboardComponent {
       minute: '2-digit',
     }).format(new Date(value));
   }
+
+  protected triggerPrimaryAction(): void {
+    const kind = this.primaryAction().kind;
+    if (kind === 'clock_out' || kind === 'break_end') {
+      this.worktime.openReview(kind);
+      return;
+    }
+    void this.worktime.record(kind);
+  }
 }

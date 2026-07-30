@@ -9,20 +9,18 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm run build
 
+FROM golang:1.25-alpine AS backend-builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pocketbase ./cmd/openjornada
+
 FROM alpine:3.23
-ARG PB_VERSION=0.39.10
-ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl tzdata unzip \
-    && case "${TARGETARCH}" in \
-      amd64) PB_ARCH=amd64 ;; \
-      arm64) PB_ARCH=arm64 ;; \
-      *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
-    esac \
-    && curl -fsSL -o /tmp/pocketbase.zip \
-      "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_${PB_ARCH}.zip" \
-    && unzip /tmp/pocketbase.zip -d /app \
-    && rm /tmp/pocketbase.zip
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
+COPY --from=backend-builder /out/pocketbase ./pocketbase
 COPY backend/pb_migrations ./pb_migrations
 COPY backend/pb_hooks ./pb_hooks
 COPY --from=web-builder /app/web/dist/web/browser ./pb_public

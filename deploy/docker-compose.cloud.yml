@@ -5,8 +5,6 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-      args:
-        PB_VERSION: "0.39.10"
     environment:
       PB_APP_NAME: ${PB_APP_NAME:-OpenJornada}
       PB_PUBLIC_URL: ${PB_PUBLIC_URL:?Configura la URL HTTPS pública}
@@ -25,6 +23,8 @@ services:
       PB_SMTP_PASSWORD: ${PB_SMTP_PASSWORD:-}
       PB_SMTP_TLS: ${PB_SMTP_TLS:-false}
       PB_DEMO_ENABLED: "false"
+      PB_MCP_ENABLED: ${PB_MCP_ENABLED:-true}
+      PB_MCP_INTERNAL_URL: http://127.0.0.1:8090
     expose:
       - "8090"
     volumes:

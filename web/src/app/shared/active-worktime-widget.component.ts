@@ -17,6 +17,10 @@ export class ActiveWorktimeWidgetComponent {
   }
 
   protected record(kind: WorkEventKind): void {
+    if (kind === 'clock_out' || kind === 'break_end') {
+      this.worktime.openReview(kind);
+      return;
+    }
     void this.worktime.record(kind);
   }
 }

@@ -178,6 +178,24 @@
           </svg>
           Equipo
         </a>
+        <a
+          routerLink="/integraciones"
+          routerLinkActive="!bg-coral-50 !text-coral-700"
+          class="nav-link"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <path d="M8 12h8M12 8v8" />
+            <path d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z" />
+          </svg>
+          Integraciones
+        </a>
       }
       @if (auth.user()?.role === 'admin') {
         <a routerLink="/ajustes" routerLinkActive="!bg-coral-50 !text-coral-700" class="nav-link">
@@ -265,6 +283,7 @@
   </main>
 
   <app-active-worktime-widget />
+  <app-worktime-review-modal />
 
   <nav
     aria-label="Navegación móvil"
@@ -435,6 +454,24 @@
           <path d="M17 8h4M19 6v4" />
         </svg>
         Equipo
+      </a>
+      <a
+        routerLink="/integraciones"
+        routerLinkActive="!bg-white !text-stone-950"
+        class="mobile-nav-link"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M8 12h8M12 8v8" />
+          <rect x="4" y="4" width="16" height="16" rx="3" />
+        </svg>
+        MCP
       </a>
     }
     @if (auth.user()?.role === 'admin') {

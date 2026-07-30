@@ -28,8 +28,9 @@ pnpm run e2e        # Playwright en escritorio, tableta y móvil
 pnpm audit --prod
 ```
 
-Las pruebas E2E arrancan PocketBase y Angular con una base temporal. Requieren
-`../backend/bin/pocketbase` y Chromium instalado mediante:
+Las pruebas E2E compilan el backend Go, arrancan PocketBase y Angular con una
+base temporal y cubren también el ciclo MCP. Requieren Go 1.25 o posterior y
+Chromium instalado mediante:
 
 ```bash
 pnpm exec playwright install chromium
@@ -46,6 +47,18 @@ e2e/                recorridos Playwright
 
 La API se resuelve contra `127.0.0.1:8090` en desarrollo y contra el mismo origen
 que sirve la SPA en producción.
+
+## Integraciones MCP
+
+La ruta protegida `/integraciones` está disponible para `admin` y `manager`.
+Permite emitir tokens con caducidad de uno a seis meses, copiar el secreto una
+sola vez, consultar último uso y revocar. El secreto sólo vive en la señal del
+componente mientras se muestra: no se guarda en `localStorage`, PocketBase ni
+la caché PWA.
+
+La pantalla consume `GET/POST /api/openjornada/mcp-tokens` y
+`POST /api/openjornada/mcp-tokens/{id}/revoke`. El protocolo remoto se publica
+en `/mcp`.
 
 ## Control horario
 

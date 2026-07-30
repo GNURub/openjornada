@@ -121,6 +121,14 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/team/team.component').then((component) => component.TeamComponent),
       },
+      {
+        path: 'integraciones',
+        canActivate: [teamManagerGuard],
+        loadComponent: () =>
+          import('./features/integrations/integrations.component').then(
+            (component) => component.IntegrationsComponent,
+          ),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

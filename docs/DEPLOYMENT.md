@@ -235,6 +235,8 @@ Guarda la clave generada en un gestor de secretos y edita `.env`:
 PB_APP_NAME=OpenJornada
 PB_PUBLIC_URL=https://jornada.example.com
 PB_ENCRYPTION_KEY=32-caracteres-generados
+PB_MCP_ENABLED=true
+PB_MCP_INTERNAL_URL=http://127.0.0.1:8090
 PB_ORGANIZATION_NAME=Empresa de ejemplo
 PB_ORGANIZATION_TAX_ID=B12345678
 PB_TIMEZONE=Europe/Madrid
@@ -365,6 +367,14 @@ una lista de IP autorizadas. No elimines el bloqueo global sin otro control.
 
 Configura el proxy para aceptar el tamaño máximo de los documentos permitidos
 por la aplicación y transmitir correctamente conexiones HTTP largas.
+`/mcp` usa Streamable HTTP: conserva `Authorization`, `Origin`, `Accept` y
+`Content-Type`, admite `POST`, y desactiva buffering y caché para esa ruta. No
+registres la cabecera `Authorization`.
+
+Las descargas MCP pasan por `/api/openjornada/mcp-files` con una firma efímera
+en la query. Excluye esa ruta de logs de acceso o redacta por completo su query
+string; nunca la envíes a analítica. Respeta su respuesta
+`Cache-Control: private, no-store`.
 No sobrescribas la cabecera `Cache-Control: no-store` de
 `/api/openjornada/branding/*/manifest.json`: el manifiesto y los recursos de
 marca pueden cambiar desde la configuración de cada empresa.
@@ -384,7 +394,8 @@ GET /api/health
 ```
 
 Monitoriza además espacio en disco, estado del volumen, caducidad TLS, entrega
-SMTP y errores del contenedor.
+SMTP, errores del contenedor y tasas anómalas de `401`/`429` en `/mcp` sin
+registrar tokens ni parámetros firmados.
 
 ## Copia de seguridad
 
@@ -447,6 +458,11 @@ producción.
 - Contraseñas únicas y SMTP funcional.
 - Puerto 8090 no expuesto a Internet.
 - Panel `/_/` restringido.
+- `PB_MCP_ENABLED` revisado; usa `false` como corte de emergencia si se
+  compromete un cliente.
+- Tokens MCP inventariados, con caducidad mínima y revocación probada.
+- Proxy sin logs de credenciales o queries firmadas y sin caché en `/mcp` y
+  `/api/openjornada/mcp-files`.
 - Backups externos cifrados y restauración probada.
 - Monitorización y alertas activas.
 - Revisión de [COMPLIANCE_ES.md](COMPLIANCE_ES.md) completada.

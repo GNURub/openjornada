@@ -120,9 +120,30 @@ test('an employee can sign in and start the workday', async ({ page }) => {
 
   await widget.getByRole('button', { name: 'Pausar' }).click();
   await expect(widget.getByText('Jornada en pausa')).toBeVisible();
+  await page.waitForTimeout(2_500);
   await widget.getByRole('button', { name: 'Reanudar jornada' }).click();
+  const review = page.getByTestId('worktime-review-modal');
+  await expect(review.getByRole('heading', { name: 'Revisar fin de pausa' })).toBeVisible();
+  await expect(review.getByText('Duración de la pausa')).toBeVisible();
+  const reviewedEnd = review.getByLabel('Fecha y hora final');
+  const minimumEnd = await reviewedEnd.getAttribute('min');
+  expect(minimumEnd).toBeTruthy();
+  const adjustedEnd = new Date(minimumEnd!);
+  adjustedEnd.setSeconds(adjustedEnd.getSeconds() + 2);
+  const localAdjustedEnd = new Date(
+    adjustedEnd.getTime() - adjustedEnd.getTimezoneOffset() * 60_000,
+  )
+    .toISOString()
+    .slice(0, 19);
+  await reviewedEnd.fill(localAdjustedEnd);
+  await expect(review.getByText('00:00:01')).toBeVisible();
+  await review.getByRole('button', { name: 'Confirmar' }).click();
   await expect(widget.getByText('Jornada en curso')).toBeVisible();
   await widget.getByRole('button', { name: 'Finalizar' }).click();
+  await expect(review.getByRole('heading', { name: 'Revisar fin de jornada' })).toBeVisible();
+  await expect(review.getByText('Tiempo efectivo revisado')).toBeVisible();
+  await expect(review.getByRole('button', { name: '−5 min' })).toBeVisible();
+  await review.getByRole('button', { name: 'Confirmar' }).click();
   await expect(widget).toBeHidden();
 
   await page.getByRole('tab', { name: 'Trazabilidad' }).click();
@@ -341,6 +362,7 @@ test('the trace view directs corrections to the daily timesheet', async ({ page 
   await page.getByTestId('primary-clock-action').click();
   await expect(page.getByRole('main').getByText('Jornada en curso')).toBeVisible();
   await page.getByTestId('primary-clock-action').click();
+  await page.getByTestId('worktime-review-modal').getByRole('button', { name: 'Confirmar' }).click();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
   await page.goto('/registros');
   await page.getByRole('tab', { name: 'Trazabilidad' }).click();

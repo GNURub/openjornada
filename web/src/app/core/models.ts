@@ -19,6 +19,20 @@ export interface UserRecord extends RecordModel {
   invitationAcceptedAt: string;
 }
 
+export interface McpTokenRecord {
+  id: string;
+  name: string;
+  prefix: string;
+  createdBy: string;
+  actorName: string;
+  actorRole: UserRole;
+  expiresAt: string;
+  lastUsedAt: string;
+  revokedAt: string;
+  created: string;
+  token?: string;
+}
+
 export interface OrganizationRecord extends RecordModel {
   name: string;
   taxId: string;

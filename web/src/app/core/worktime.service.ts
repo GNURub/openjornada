@@ -9,6 +9,8 @@ import {
   formatDurationWithSeconds,
 } from './time-calculations';
 
+export type ReviewableWorkEventKind = 'clock_out' | 'break_end';
+
 @Injectable({ providedIn: 'root' })
 export class WorktimeService {
   private readonly pb = inject(PocketBaseService).client;
@@ -19,6 +21,8 @@ export class WorktimeService {
   readonly submitting = signal(false);
   readonly error = signal('');
   readonly status = computed(() => deriveStatus(this.events()));
+  readonly reviewKind = signal<ReviewableWorkEventKind | null>(null);
+  readonly reviewEndAt = signal('');
 
   async loadToday(): Promise<void> {
     const user = this.auth.user();
@@ -53,7 +57,19 @@ export class WorktimeService {
     return formatDurationWithSeconds(calculateWorkedMs(this.events(), now));
   }
 
-  async record(kind: WorkEventKind): Promise<boolean> {
+  openReview(kind: ReviewableWorkEventKind): void {
+    this.error.set('');
+    this.reviewEndAt.set(this.localDateTimeValue(new Date()));
+    this.reviewKind.set(kind);
+  }
+
+  closeReview(): void {
+    if (this.submitting()) return;
+    this.reviewKind.set(null);
+    this.reviewEndAt.set('');
+  }
+
+  async record(kind: WorkEventKind, reviewedAt?: string): Promise<boolean> {
     const user = this.auth.user();
     if (!user || this.submitting()) {
       return false;
@@ -65,7 +81,10 @@ export class WorktimeService {
         employee: user.id,
         organization: user.organization,
         kind,
-        occurredAt: new Date().toISOString(),
+        occurredAt:
+          reviewedAt && (kind === 'clock_out' || kind === 'break_end')
+            ? reviewedAt
+            : new Date().toISOString(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         source: this.deviceSource(),
         createdBy: user.id,
@@ -102,5 +121,11 @@ export class WorktimeService {
       return 'tablet';
     }
     return 'desktop';
+  }
+
+  private localDateTimeValue(date: Date): string {
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 19);
   }
 }

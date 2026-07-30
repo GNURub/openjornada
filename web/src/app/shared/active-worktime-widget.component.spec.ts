@@ -11,6 +11,7 @@ describe('ActiveWorktimeWidgetComponent', () => {
   const submitting = signal(false);
   const error = signal('');
   const record = vi.fn<(kind: string) => Promise<boolean>>();
+  const openReview = vi.fn();
   const worktime = {
     status,
     loading,
@@ -18,6 +19,7 @@ describe('ActiveWorktimeWidgetComponent', () => {
     error,
     workedTodayTimer: vi.fn(() => '01:02:03'),
     record,
+    openReview,
   };
 
   beforeEach(async () => {
@@ -27,6 +29,7 @@ describe('ActiveWorktimeWidgetComponent', () => {
     error.set('');
     record.mockReset();
     record.mockResolvedValue(true);
+    openReview.mockReset();
 
     await TestBed.configureTestingModule({
       imports: [ActiveWorktimeWidgetComponent],
@@ -66,8 +69,9 @@ describe('ActiveWorktimeWidgetComponent', () => {
         '[data-testid="worktime-widget-finish"]',
       ) as HTMLButtonElement
     ).click();
-    expect(record).toHaveBeenNthCalledWith(1, 'break_start');
-    expect(record).toHaveBeenNthCalledWith(2, 'clock_out');
+    expect(record).toHaveBeenCalledOnce();
+    expect(record).toHaveBeenCalledWith('break_start');
+    expect(openReview).toHaveBeenCalledWith('clock_out');
 
     status.set('paused');
     fixture.detectChanges();
@@ -76,7 +80,7 @@ describe('ActiveWorktimeWidgetComponent', () => {
         '[data-testid="worktime-widget-resume"]',
       ) as HTMLButtonElement
     ).click();
-    expect(record).toHaveBeenNthCalledWith(3, 'break_end');
+    expect(openReview).toHaveBeenNthCalledWith(2, 'break_end');
   });
 
   it('disables actions while saving and exposes service errors', () => {
