@@ -1,0 +1,131 @@
+- generic [ref=e34]:
+  - complementary [ref=e35]:
+    - link "Mi empresa de estética Gestión de jornada" [ref=e36] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e37]:
+        - generic [ref=e38]: Mi empresa de estética
+        - generic [ref=e39]: Gestión de jornada
+    - navigation "Navegación principal" [ref=e40]:
+      - link "Mi jornada" [ref=e41] [cursor=pointer]:
+        - /url: /
+      - link "Control horario" [ref=e45] [cursor=pointer]:
+        - /url: /registros
+      - link "Ausencias" [ref=e48] [cursor=pointer]:
+        - /url: /ausencias
+      - link "Horarios" [ref=e52] [cursor=pointer]:
+        - /url: /horarios
+      - link "Avisos" [ref=e56] [cursor=pointer]:
+        - /url: /avisos
+      - link "Gastos" [ref=e59] [cursor=pointer]:
+        - /url: /gastos
+      - link "Documentos" [ref=e63] [cursor=pointer]:
+        - /url: /documentos
+      - link "Tareas" [ref=e66] [cursor=pointer]:
+        - /url: /tareas
+      - link "Objetivos" [ref=e69] [cursor=pointer]:
+        - /url: /objetivos
+      - link "Informes" [ref=e74] [cursor=pointer]:
+        - /url: /informes
+      - link "Equipo" [ref=e77] [cursor=pointer]:
+        - /url: /equipo
+      - link "Ajustes" [ref=e82] [cursor=pointer]:
+        - /url: /ajustes
+    - generic [ref=e86]:
+      - generic [ref=e87]:
+        - generic [ref=e88]: A
+        - generic [ref=e89]:
+          - paragraph [ref=e90]: Administración
+          - paragraph [ref=e91]: Equipo
+      - button "Cerrar sesión" [ref=e92]
+  - banner [ref=e93]:
+    - paragraph [ref=e95]: Espacio de trabajo
+    - generic [ref=e96]: Administración
+  - main [ref=e98]:
+    - generic [ref=e179]:
+      - generic [ref=e181]:
+        - paragraph [ref=e182]: Jornada
+        - heading "Mi control horario" [level=1] [ref=e183]
+        - paragraph [ref=e184]: Revisa tu hoja de fichajes, completa jornadas olvidadas y consulta la trazabilidad conservada por la empresa.
+      - tablist "Vistas de control horario" [ref=e185]:
+        - tab "Hoja de fichajes" [selected] [ref=e186]
+        - tab "Trazabilidad" [ref=e187]
+      - generic [ref=e191]:
+        - generic [ref=e192]:
+          - generic [ref=e193]:
+            - generic [ref=e194]:
+              - paragraph [ref=e195]: Hoja de fichajes
+              - heading "Administración" [level=2] [ref=e196]
+            - generic [ref=e197]:
+              - generic [ref=e198]:
+                - generic [ref=e199]: Persona
+                - combobox "Persona" [ref=e200]:
+                  - option "Administración · ADMIN" [selected]
+                  - option "Diego Solape E2E · E2E-OVERLAP-PENDING"
+                  - option "Laura Solape E2E · E2E-OVERLAP-APPROVED"
+                  - option "Marina Estética · EST-001"
+              - generic [ref=e201]:
+                - generic [ref=e202]: Vista
+                - generic [ref=e203]:
+                  - button "Día" [ref=e204]
+                  - button "Mes" [ref=e205]
+              - generic [ref=e206]:
+                - generic [ref=e207]: Periodo
+                - generic [ref=e208]:
+                  - button "Periodo anterior" [ref=e209]: ‹
+                  - textbox "Día de la hoja" [ref=e210]: 2026-07-30
+                  - button "Periodo siguiente" [ref=e211]: ›
+                  - button "Hoy" [ref=e212]
+          - generic [ref=e213]:
+            - generic [ref=e214]:
+              - paragraph [ref=e215]: Trabajado
+              - paragraph [ref=e216]: 0h 00m
+            - generic [ref=e217]:
+              - paragraph [ref=e218]: Planificado
+              - paragraph [ref=e219]: 0h 00m
+            - generic [ref=e220]:
+              - paragraph [ref=e221]: Balance
+              - paragraph [ref=e222]: 0h 00m
+            - generic [ref=e223]:
+              - paragraph [ref=e224]: Horas extra
+              - paragraph [ref=e225]: 0h 00m
+        - article [ref=e227]:
+          - generic [ref=e228]:
+            - paragraph [ref=e230]: jueves, 30 jul
+            - paragraph [ref=e232]: 0h 00m /0h 00m
+            - generic [ref=e233]:
+              - paragraph [ref=e234]: Balance
+              - paragraph [ref=e235]: 0h 00m
+            - generic [ref=e236]:
+              - paragraph [ref=e237]: Horas extra
+              - paragraph [ref=e238]: 0h 00m
+            - button "Contraer jueves, 30 jul" [ref=e239]
+          - generic [ref=e243]:
+            - generic [ref=e244]:
+              - paragraph [ref=e245]: Jornada efectiva
+              - list [ref=e246]:
+                - listitem [ref=e247]:
+                  - generic [ref=e248]: Trabajo
+                  - strong [ref=e249]: 11:51 — 11:51
+                - listitem [ref=e250]:
+                  - generic [ref=e251]: Trabajo
+                  - strong [ref=e252]: 11:51 — 11:51
+            - generic [ref=e253]:
+              - button "Corregir jornada" [expanded] [ref=e254]
+              - dialog [ref=e255]:
+                - generic [ref=e256]:
+                  - generic [ref=e257]:
+                    - paragraph [ref=e258]: Corregir jornada · jueves, 30 jul
+                    - paragraph [ref=e259]: Hoy solo puedes guardar tramos que ya hayan terminado.
+                    - generic [ref=e260]: La corrección anulará todos los tramos de esta jornada. Puedes añadir uno nuevo antes de enviarla.
+                    - generic [ref=e293]:
+                      - button "+ Trabajo" [ref=e294]
+                      - button "+ Pausa" [ref=e295]
+                    - generic [ref=e296]:
+                      - generic [ref=e297]: Motivo de la corrección
+                      - textbox "Motivo de la corrección Añade 1 carácter más para explicar el motivo." [ref=e304]:
+                        - /placeholder: "Por ejemplo: olvidé registrar la salida"
+                        - text: dsfsadf
+                      - generic [ref=e299]: Añade 1 carácter más para explicar el motivo.
+                  - generic [ref=e301]:
+                    - button "Cancelar" [ref=e302]
+                    - button "Enviar corrección" [disabled] [ref=e303]

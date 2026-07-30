@@ -1,0 +1,90 @@
+- generic [ref=e34]:
+  - complementary [ref=e35]:
+    - link "Mi empresa de estética Gestión de jornada" [ref=e36] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e37]:
+        - generic [ref=e38]: Mi empresa de estética
+        - generic [ref=e39]: Gestión de jornada
+    - navigation "Navegación principal" [ref=e40]:
+      - link "Mi jornada" [ref=e41] [cursor=pointer]:
+        - /url: /
+      - link "Control horario" [ref=e45] [cursor=pointer]:
+        - /url: /registros
+      - link "Ausencias" [ref=e48] [cursor=pointer]:
+        - /url: /ausencias
+      - link "Horarios" [ref=e52] [cursor=pointer]:
+        - /url: /horarios
+      - link "Avisos" [ref=e56] [cursor=pointer]:
+        - /url: /avisos
+      - link "Gastos" [ref=e59] [cursor=pointer]:
+        - /url: /gastos
+      - link "Documentos" [ref=e63] [cursor=pointer]:
+        - /url: /documentos
+      - link "Tareas" [ref=e66] [cursor=pointer]:
+        - /url: /tareas
+      - link "Objetivos" [ref=e69] [cursor=pointer]:
+        - /url: /objetivos
+      - link "Informes" [ref=e74] [cursor=pointer]:
+        - /url: /informes
+      - link "Equipo" [ref=e77] [cursor=pointer]:
+        - /url: /equipo
+      - link "Ajustes" [ref=e82] [cursor=pointer]:
+        - /url: /ajustes
+    - generic [ref=e86]:
+      - generic [ref=e87]:
+        - generic [ref=e88]: A
+        - generic [ref=e89]:
+          - paragraph [ref=e90]: Administración
+          - paragraph [ref=e91]: Equipo
+      - button "Cerrar sesión" [ref=e92]
+  - banner [ref=e93]:
+    - paragraph [ref=e95]: Espacio de trabajo
+    - generic [ref=e96]: Administración
+  - main [ref=e98]:
+    - generic [ref=e100]:
+      - generic [ref=e101]:
+        - generic [ref=e102]:
+          - paragraph [ref=e103]: jueves, 30 de julio
+          - heading "Buenas tardes, Administración" [level=1] [ref=e104]
+        - generic [ref=e105]: Fuera de jornada
+      - generic [ref=e107]:
+        - generic [ref=e111]:
+          - paragraph [ref=e112]: Hora actual
+          - paragraph [ref=e113]: 15:44:41
+          - button [ref=e115]
+          - paragraph [ref=e119]: La hora se registra en el servidor. Cada evento queda protegido por una huella de integridad.
+        - generic [ref=e120]:
+          - generic [ref=e122]:
+            - paragraph [ref=e123]: Tiempo efectivo hoy
+            - paragraph [ref=e124]: 00:00
+          - generic [ref=e131]:
+            - generic [ref=e132]: Objetivo diario
+            - generic [ref=e133]: 08:00 h
+          - generic [ref=e134]: Las pausas no cuentan como tiempo efectivo y se muestran por separado en tu historial.
+      - generic [ref=e135]:
+        - generic [ref=e136]:
+          - generic [ref=e137]:
+            - heading "Actividad de hoy" [level=2] [ref=e138]
+            - paragraph [ref=e139]: Tus entradas, pausas y salidas
+          - generic [ref=e140]: 4 eventos
+        - list [ref=e141]:
+          - listitem [ref=e142]:
+            - generic [ref=e147]:
+              - paragraph [ref=e148]: Salida
+              - paragraph [ref=e149]: Ordenador · Registro verificado
+            - time [ref=e150]: 11:51
+          - listitem [ref=e151]:
+            - generic [ref=e156]:
+              - paragraph [ref=e157]: Entrada
+              - paragraph [ref=e158]: Ordenador · Registro verificado
+            - time [ref=e159]: 11:51
+          - listitem [ref=e160]:
+            - generic [ref=e165]:
+              - paragraph [ref=e166]: Salida
+              - paragraph [ref=e167]: Ordenador · Registro verificado
+            - time [ref=e168]: 11:51
+          - listitem [ref=e169]:
+            - generic [ref=e174]:
+              - paragraph [ref=e175]: Entrada
+              - paragraph [ref=e176]: Ordenador · Registro verificado
+            - time [ref=e177]: 11:51
