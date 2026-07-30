@@ -35,7 +35,6 @@ export class DashboardComponent {
   constructor() {
     const timer = window.setInterval(() => this.now.set(new Date()), 1_000);
     inject(DestroyRef).onDestroy(() => window.clearInterval(timer));
-    void this.worktime.loadToday();
   }
 
   protected formatClock(date: Date): string {

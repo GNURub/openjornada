@@ -259,7 +259,12 @@
 
   <main class="pb-24 lg:ml-64 lg:pb-10">
     <router-outlet />
+    @if (!worktime.loading() && worktime.status() !== 'off') {
+      <div aria-hidden="true" class="h-44"></div>
+    }
   </main>
+
+  <app-active-worktime-widget />
 
   <nav
     aria-label="Navegación móvil"

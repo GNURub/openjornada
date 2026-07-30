@@ -91,6 +91,17 @@ export function formatDuration(milliseconds: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
+export function formatDurationWithSeconds(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1_000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  return [
+    String(hours).padStart(2, '0'),
+    String(minutes % 60).padStart(2, '0'),
+    String(seconds % 60).padStart(2, '0'),
+  ].join(':');
+}
+
 export function eventLabel(kind: WorkEventRecord['kind']): string {
   return (
     {

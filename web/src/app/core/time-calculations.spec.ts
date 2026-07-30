@@ -4,6 +4,7 @@ import {
   deriveStatus,
   eventLabel,
   formatDuration,
+  formatDurationWithSeconds,
 } from './time-calculations';
 
 function event(
@@ -46,6 +47,14 @@ describe('time calculations', () => {
     expect(result).toBe(8 * 60 * 60 * 1_000);
   });
 
+  it('stops an open daily timer while the employee is paused', () => {
+    const result = calculateWorkedMs(
+      [event('clock_in', '2026-07-29T08:00:00Z'), event('break_start', '2026-07-29T09:00:00Z')],
+      new Date('2026-07-29T12:00:00Z'),
+    );
+    expect(formatDurationWithSeconds(result)).toBe('01:00:00');
+  });
+
   it('counts a paid pause as worked time', () => {
     const paidBreakStart = {
       ...event('break_start', '2026-07-29T10:00:00Z'),
@@ -73,6 +82,10 @@ describe('time calculations', () => {
       new Date('2026-07-29T09:45:00Z'),
     );
     expect(formatDuration(result)).toBe('01:45');
+  });
+
+  it('formats a live duration including seconds', () => {
+    expect(formatDurationWithSeconds(3_723_999)).toBe('01:02:03');
   });
 
   it('ignores correction audit markers in status calculations', () => {

@@ -107,6 +107,12 @@ La compilación de producción registra el service worker de Angular y genera
 `ngsw.json`. La aplicación se puede instalar desde un navegador compatible y
 ofrece el shell estático cuando no hay conexión.
 
+Cuando hay una jornada activa o pausada, el shell autenticado muestra un widget
+flotante en móvil, tablet y escritorio. El widget conserva el estado al navegar,
+muestra el tiempo efectivo acumulado con segundos y permite pausar, reanudar o
+finalizar sin volver a **Mi jornada**. El widget sólo permanece visible dentro
+de OpenJornada; no crea una ventana Picture-in-Picture del sistema.
+
 La cuenta `admin` puede personalizar en **Ajustes → Configuración de empresa**
 el color principal, el color secundario, el logotipo, el nombre completo y
 corto de la PWA. El logotipo admite PNG, JPEG o WebP de hasta 5 MB. Al

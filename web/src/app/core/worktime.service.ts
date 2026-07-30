@@ -6,6 +6,7 @@ import {
   calculateWorkedMs,
   deriveStatus,
   formatDuration,
+  formatDurationWithSeconds,
 } from './time-calculations';
 
 @Injectable({ providedIn: 'root' })
@@ -46,6 +47,10 @@ export class WorktimeService {
 
   workedToday(now = new Date()): string {
     return formatDuration(calculateWorkedMs(this.events(), now));
+  }
+
+  workedTodayTimer(now = new Date()): string {
+    return formatDurationWithSeconds(calculateWorkedMs(this.events(), now));
   }
 
   async record(kind: WorkEventKind): Promise<boolean> {

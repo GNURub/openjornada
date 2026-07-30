@@ -103,15 +103,28 @@ test('an employee can sign in and start the workday', async ({ page }) => {
 
   await page.getByTestId('primary-clock-action').click();
 
-  await expect(page.getByText('Jornada en curso')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Jornada en curso')).toBeVisible();
   await expect(page.getByText('Entrada', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Registro verificado').first()).toBeVisible();
-
-  await page.getByTestId('primary-clock-action').click();
-  await expect(page.getByText('Fuera de jornada')).toBeVisible();
+  const widget = page.getByTestId('active-worktime-widget');
+  await expect(widget).toBeVisible();
+  await expect(widget.getByText('Tiempo efectivo hoy')).toBeVisible();
 
   await page.getByRole('link', { name: 'Control horario', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();
+  await expect(widget).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();
+  await expect(widget).toBeVisible();
+
+  await widget.getByRole('button', { name: 'Pausar' }).click();
+  await expect(widget.getByText('Jornada en pausa')).toBeVisible();
+  await widget.getByRole('button', { name: 'Reanudar jornada' }).click();
+  await expect(widget.getByText('Jornada en curso')).toBeVisible();
+  await widget.getByRole('button', { name: 'Finalizar' }).click();
+  await expect(widget).toBeHidden();
+
   await page.getByRole('tab', { name: 'Trazabilidad' }).click();
   await expect(page.getByText(/\d+ eventos en el periodo/)).toBeVisible();
 });
@@ -326,7 +339,7 @@ test('the trace view directs corrections to the daily timesheet', async ({ page 
   await signIn(page, 'empleada@example.com', 'DemoPassword123!');
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
   await page.getByTestId('primary-clock-action').click();
-  await expect(page.getByText('Jornada en curso')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Jornada en curso')).toBeVisible();
   await page.getByTestId('primary-clock-action').click();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
   await page.goto('/registros');
