@@ -1,0 +1,9 @@
+.env
+backend/pb_data/
+backend/bin/
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+.codegraph/
+*.log

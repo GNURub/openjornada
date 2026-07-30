@@ -1,0 +1,138 @@
+<div class="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+  <div class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Personas</p>
+      <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Tu equipo</h1>
+      <p class="mt-2 text-stone-500">Gestiona quién puede acceder y fichar en la empresa.</p>
+    </div>
+    <button type="button" (click)="formOpen.set(true)" class="btn-primary w-full sm:w-auto">
+      <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
+      Añadir persona
+    </button>
+  </div>
+
+  @if (error()) {
+    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p>
+  }
+
+  @if (formOpen()) {
+    <section class="mt-8 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-display text-2xl font-bold">Nueva persona</h2>
+          <p class="mt-1 text-sm text-stone-400">Crearemos su acceso y enviaremos la verificación por correo.</p>
+        </div>
+        <button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500">
+          <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <form (ngSubmit)="createMember()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <label class="block sm:col-span-2 lg:col-span-1">
+          <span class="field-label">Nombre completo</span>
+          <input [(ngModel)]="newMember.name" name="name" required class="field-input" />
+        </label>
+        <label class="block sm:col-span-2 lg:col-span-1">
+          <span class="field-label">Correo</span>
+          <input [(ngModel)]="newMember.email" name="email" type="email" required class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Código de empleada</span>
+          <input [(ngModel)]="newMember.employeeCode" name="employeeCode" required class="field-input" placeholder="EST-002" />
+        </label>
+        <label class="block">
+          <span class="field-label">Puesto</span>
+          <input [(ngModel)]="newMember.jobTitle" name="jobTitle" required class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Jornada semanal</span>
+          <input [(ngModel)]="newMember.weeklyHours" name="weeklyHours" type="number" min="1" max="80" required class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Rol</span>
+          <select [(ngModel)]="newMember.role" name="role" class="field-input">
+            <option value="employee">Empleada</option>
+            <option value="manager">Responsable</option>
+            @if (auth.user()?.role === 'admin') {
+              <option value="representative">Representante</option>
+              <option value="admin">Administración</option>
+            }
+          </select>
+        </label>
+        <label class="block sm:col-span-2">
+          <span class="field-label">Contraseña temporal</span>
+          <input [(ngModel)]="newMember.password" name="password" type="password" minlength="10" required class="field-input" autocomplete="new-password" />
+          <span class="mt-2 block text-xs text-stone-400">Mínimo 10 caracteres. Compártela por un canal seguro.</span>
+        </label>
+        <div class="flex items-end gap-3">
+          <button type="submit" [disabled]="saving()" class="btn-primary flex-1">
+            {{ saving() ? 'Creando…' : 'Crear acceso' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  }
+
+  <section class="mt-8 overflow-hidden rounded-[2rem] border border-stone-200 bg-white shadow-sm">
+    <div class="border-b border-stone-100 px-6 py-5 sm:px-8">
+      <p class="font-display text-xl font-bold">{{ members().length }} personas</p>
+    </div>
+    @if (loading()) {
+      <div class="space-y-4 p-6 sm:p-8">
+        <div class="h-16 animate-pulse rounded-2xl bg-stone-100"></div>
+        <div class="h-16 animate-pulse rounded-2xl bg-stone-100"></div>
+      </div>
+    } @else {
+      <ul class="divide-y divide-stone-100">
+        @for (member of members(); track member.id) {
+          <li class="flex items-center gap-4 px-6 py-4 sm:px-8">
+            <span class="grid size-11 shrink-0 place-items-center rounded-full bg-stone-900 text-sm font-bold text-white">
+              {{ member.name.slice(0, 1).toUpperCase() }}
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="truncate font-semibold">{{ member.name }}</p>
+                @if (!member.active) {
+                  <span class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-bold text-stone-500">Inactiva</span>
+                }
+              </div>
+              <p class="mt-0.5 truncate text-sm text-stone-400">{{ member.jobTitle || member.email }}</p>
+            </div>
+            <div class="hidden text-right sm:block">
+              @if (auth.user()?.role === 'admin' && member.id !== auth.user()?.id) {
+                <select
+                  aria-label="Rol de {{ member.name }}"
+                  [ngModel]="member.role"
+                  (ngModelChange)="updateMember(member, { role: $event })"
+                  class="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold"
+                >
+                  <option value="employee">Empleada</option>
+                  <option value="manager">Responsable</option>
+                  <option value="representative">Representante</option>
+                  <option value="admin">Administración</option>
+                </select>
+              } @else {
+                <p class="text-sm font-semibold">{{ roleLabel(member.role) }}</p>
+              }
+              <p class="mt-0.5 text-xs text-stone-400">{{ member.weeklyHours || 0 }} h / semana</p>
+            </div>
+            @if (
+              member.id !== auth.user()?.id &&
+              (auth.user()?.role === 'admin' || member.role === 'employee')
+            ) {
+              <button
+                type="button"
+                (click)="updateMember(member, { active: !member.active })"
+                class="hidden rounded-xl border border-stone-200 px-3 py-2 text-xs font-bold text-stone-500 hover:bg-stone-50 md:block"
+              >
+                {{ member.active ? 'Desactivar' : 'Activar' }}
+              </button>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+</div>

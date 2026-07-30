@@ -1,0 +1,48 @@
+<div class="mx-auto max-w-4xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+  <div>
+    <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Administración</p>
+    <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Configuración de empresa</h1>
+    <p class="mt-2 text-stone-500">Datos generales, zona horaria y política mínima de conservación.</p>
+  </div>
+
+  @if (error()) { <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p> }
+  @if (success()) { <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p> }
+
+  @if (loading()) {
+    <div class="mt-8 h-96 animate-pulse rounded-[2rem] bg-stone-200"></div>
+  } @else if (organization(); as company) {
+    <form (ngSubmit)="save()" class="mt-8 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <label class="block sm:col-span-2">
+          <span class="field-label">Nombre de la empresa</span>
+          <input [(ngModel)]="company.name" name="name" required maxlength="160" class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">NIF · sólo lectura</span>
+          <input [value]="company.taxId" readonly class="field-input !bg-stone-50 !text-stone-400" />
+        </label>
+        <label class="block">
+          <span class="field-label">Contacto de privacidad</span>
+          <input [(ngModel)]="company.privacyContact" name="privacyContact" type="email" class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Zona horaria</span>
+          <select [(ngModel)]="company.timezone" name="timezone" class="field-input">
+            <option value="Europe/Madrid">Península · Europe/Madrid</option>
+            <option value="Atlantic/Canary">Canarias · Atlantic/Canary</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="field-label">Conservación de registros · años</span>
+          <input [(ngModel)]="company.retentionYears" name="retentionYears" type="number" min="4" max="10" required class="field-input" />
+          <span class="mt-2 block text-xs text-stone-400">La legislación exige un mínimo de cuatro años.</span>
+        </label>
+      </div>
+      <div class="mt-8 rounded-2xl bg-stone-50 p-5">
+        <h2 class="font-semibold">Correo y seguridad</h2>
+        <p class="mt-2 text-sm leading-6 text-stone-500">Las credenciales SMTP, la clave de cifrado, HTTPS y las copias de seguridad se configuran mediante variables de entorno para que no se expongan en el navegador.</p>
+      </div>
+      <button type="submit" [disabled]="saving()" class="btn-primary mt-7">{{ saving() ? 'Guardando…' : 'Guardar cambios' }}</button>
+    </form>
+  }
+</div>

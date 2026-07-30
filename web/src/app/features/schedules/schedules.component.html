@@ -1,0 +1,131 @@
+<div class="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+  <div class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Planificación</p>
+      <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Horarios</h1>
+      <p class="mt-2 text-stone-500">
+        {{ canManage() ? 'Asigna jornadas habituales y conserva su vigencia histórica.' : 'Consulta el horario que te ha asignado la empresa.' }}
+      </p>
+    </div>
+    @if (canManage()) {
+      <button type="button" (click)="formOpen.set(true)" class="btn-primary w-full sm:w-auto">
+        <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
+        Asignar horario
+      </button>
+    }
+  </div>
+
+  @if (error()) {
+    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p>
+  }
+
+  @if (formOpen() && canManage()) {
+    <section class="mt-8 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8">
+      <div class="flex items-start justify-between">
+        <div>
+          <h2 class="font-display text-2xl font-bold">Asignar horario</h2>
+          <p class="mt-1 text-sm text-stone-400">Los cambios futuros no alterarán los horarios históricos.</p>
+        </div>
+        <button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500">
+          <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <form (ngSubmit)="createSchedule()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <label class="block">
+          <span class="field-label">Persona</span>
+          <select [(ngModel)]="employee" name="employee" required class="field-input">
+            @for (member of members(); track member.id) {
+              <option [value]="member.id">{{ member.name }} · {{ member.employeeCode }}</option>
+            }
+          </select>
+        </label>
+        <label class="block">
+          <span class="field-label">Nombre</span>
+          <input [(ngModel)]="name" name="name" required maxlength="120" class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Válido desde</span>
+          <input [(ngModel)]="validFrom" name="validFrom" type="date" required class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Válido hasta · opcional</span>
+          <input [(ngModel)]="validUntil" name="validUntil" type="date" class="field-input" />
+        </label>
+        <div class="sm:col-span-2">
+          <span class="field-label">Días de trabajo</span>
+          <div class="flex flex-wrap gap-2">
+            @for (day of weekdayOptions; track day.value) {
+              <button
+                type="button"
+                (click)="toggleWeekday(day.value)"
+                class="grid size-11 place-items-center rounded-xl border text-sm font-bold transition"
+                [class.border-coral-500]="weekdays.includes(day.value)"
+                [class.bg-coral-50]="weekdays.includes(day.value)"
+                [class.text-coral-700]="weekdays.includes(day.value)"
+                [class.border-stone-200]="!weekdays.includes(day.value)"
+                [class.text-stone-400]="!weekdays.includes(day.value)"
+              >{{ day.label }}</button>
+            }
+          </div>
+        </div>
+        <label class="block">
+          <span class="field-label">Entrada</span>
+          <input [(ngModel)]="startTime" name="startTime" type="time" required class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Salida</span>
+          <input [(ngModel)]="endTime" name="endTime" type="time" required class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Pausa prevista · minutos</span>
+          <input [(ngModel)]="breakMinutes" name="breakMinutes" type="number" min="0" max="240" required class="field-input" />
+        </label>
+        <div class="flex items-end">
+          <button type="submit" [disabled]="saving() || weekdays.length === 0" class="btn-primary w-full">{{ saving() ? 'Guardando…' : 'Asignar' }}</button>
+        </div>
+      </form>
+    </section>
+  }
+
+  <section class="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+    @if (loading()) {
+      @for (item of [1, 2, 3]; track item) {
+        <div class="h-56 animate-pulse rounded-[2rem] bg-stone-200"></div>
+      }
+    } @else if (schedules().length === 0) {
+      <div class="rounded-[2rem] border border-stone-200 bg-white p-10 text-center md:col-span-2 xl:col-span-3">
+        <p class="font-semibold">No hay horarios asignados</p>
+        <p class="mt-1 text-sm text-stone-400">Los horarios aparecerán aquí cuando se creen.</p>
+      </div>
+    } @else {
+      @for (schedule of schedules(); track schedule.id) {
+        <article class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm" [class.opacity-55]="!schedule.active">
+          <div class="flex items-start justify-between gap-4">
+            <span class="rounded-full px-3 py-1 text-xs font-bold" [class.bg-emerald-100]="schedule.active" [class.text-emerald-700]="schedule.active" [class.bg-stone-100]="!schedule.active" [class.text-stone-500]="!schedule.active">
+              {{ schedule.active ? 'Activo' : 'Archivado' }}
+            </span>
+            <span class="text-xs font-semibold text-stone-400">{{ schedule.breakMinutes }} min pausa</span>
+          </div>
+          <h2 class="mt-5 font-display text-xl font-bold">{{ schedule.name }}</h2>
+          @if (canManage()) {
+            <p class="mt-1 text-sm font-semibold text-stone-500">{{ schedule.expand?.employee?.name }}</p>
+          }
+          <p class="mt-5 font-display text-3xl font-bold tabular-nums">{{ schedule.startTime }} — {{ schedule.endTime }}</p>
+          <p class="mt-3 text-sm font-semibold text-coral-600">{{ weekdayNames(schedule.weekdays) }}</p>
+          <p class="mt-3 text-xs text-stone-400">
+            Desde {{ formatDate(schedule.validFrom) }}
+            @if (schedule.validUntil) { · hasta {{ formatDate(schedule.validUntil) }} }
+          </p>
+          @if (canManage()) {
+            <button type="button" (click)="setActive(schedule, !schedule.active)" class="mt-5 text-sm font-bold text-stone-500 hover:text-coral-700">
+              {{ schedule.active ? 'Archivar horario' : 'Volver a activar' }}
+            </button>
+          }
+        </article>
+      }
+    }
+  </section>
+</div>
