@@ -24,7 +24,8 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Correcciones de jornada con aprobación y trazabilidad inmutable.
 - Ausencias con tipos, cupos anuales distintos por persona, saldos, arrastres,
   ajustes, festivos, medias jornadas, bloqueos, justificantes, calendario,
-  asignación y aprobación.
+  asignación y aprobación. Los días descontados respetan el horario vigente de
+  cada persona, incluidos sábados laborables y días libres entre semana.
 - Gastos con categorías, recibos protegidos, revisión, aprobación y pago.
 - Documentos privados o corporativos con confirmación de lectura y aviso al
   destinatario.

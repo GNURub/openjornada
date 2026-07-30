@@ -123,7 +123,13 @@ onRecordAfterUpdateSuccess((e) => {
 onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next();
   if (!e.auth) throw new UnauthorizedError("Debes iniciar sesión.");
-  const requestedDaysFor = (organization, startValue, endValue, dayPart) => {
+  const requestedDaysFor = (
+    organization,
+    employeeId,
+    startValue,
+    endValue,
+    dayPart,
+  ) => {
     const first = new Date(startValue);
     const last = new Date(endValue);
     const holidayRecords = e.app.findRecordsByFilter(
@@ -138,6 +144,14 @@ onRecordCreateRequest((e) => {
     for (const holiday of holidayRecords) {
       holidays[holiday.getString("date").slice(0, 10)] = true;
     }
+    const schedules = e.app.findRecordsByFilter(
+      "work_schedules",
+      "employee = {:employee} && active = true",
+      "-validFrom",
+      500,
+      0,
+      { employee: employeeId },
+    );
     let days = 0;
     const cursor = new Date(
       Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), first.getUTCDate()),
@@ -150,7 +164,28 @@ onRecordCreateRequest((e) => {
     while (cursor.getTime() <= limit) {
       const weekday = cursor.getUTCDay();
       const key = cursor.toISOString().slice(0, 10);
-      if (weekday !== 0 && weekday !== 6 && !holidays[key]) days += 1;
+      if (holidays[key]) {
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+        continue;
+      }
+      let selectedSchedule = null;
+      for (const schedule of schedules) {
+        const validFrom = schedule.getString("validFrom").slice(0, 10);
+        const validUntil = schedule.getString("validUntil").slice(0, 10);
+        if (validFrom <= key && (!validUntil || validUntil >= key)) {
+          selectedSchedule = schedule;
+          break;
+        }
+      }
+      let isWorkingDay = weekday !== 0 && weekday !== 6;
+      if (selectedSchedule) {
+        let weekdays = [];
+        try {
+          weekdays = JSON.parse(selectedSchedule.getString("weekdays") || "[]");
+        } catch (_) {}
+        isWorkingDay = weekdays.indexOf(Number(weekday)) >= 0;
+      }
+      if (isWorkingDay) days += 1;
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
     return days === 1 && dayPart !== "full" ? 0.5 : days;
@@ -181,6 +216,7 @@ onRecordCreateRequest((e) => {
 
   let requestedDays = requestedDaysFor(
     organization,
+    employeeId,
     e.record.getString("startDate"),
     e.record.getString("endDate"),
     e.record.getString("dayPart"),

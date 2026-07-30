@@ -96,7 +96,9 @@ En `/ausencias`, administración dispone de **Políticas y saldos → Cupo anual
 por persona**. Puede fijar un número distinto para cada persona, tipo y año,
 en días completos o medios días. El cupo contractual se conserva separado del
 arrastre y de los ajustes excepcionales; el servidor bloquea cambios de empresa,
-persona, tipo o año y audita cada modificación.
+persona, tipo o año y audita cada modificación. La estimación de la solicitud y
+la validación de PocketBase usan el horario vigente de la persona: un sábado
+planificado cuenta como vacaciones y un descanso entre semana no se descuenta.
 
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde

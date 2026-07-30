@@ -17,6 +17,7 @@ import {
   LeaveTypeRecord,
   PublicHolidayRecord,
   UserRecord,
+  WorkScheduleRecord,
 } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
 
@@ -52,6 +53,7 @@ export class LeaveComponent {
   protected readonly blackouts = signal<LeaveBlackoutRecord[]>([]);
   protected readonly holidays = signal<PublicHolidayRecord[]>([]);
   protected readonly members = signal<UserRecord[]>([]);
+  protected readonly schedules = signal<WorkScheduleRecord[]>([]);
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);
   protected readonly formOpen = signal(false);
@@ -136,38 +138,44 @@ export class LeaveComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      const [types, requests, balances, blackouts, holidays, members] = await Promise.all([
-        this.pb.collection('leave_types').getFullList({
-          sort: 'name',
-          filter: 'active = true',
-        }),
-        this.pb.collection('leave_requests').getFullList({
-          sort: '-created',
-          expand: 'employee,leaveType',
-        }),
-        this.pb.collection('leave_balances').getFullList({
-          sort: 'year',
-          expand: 'employee,leaveType',
-        }),
-        this.pb.collection('leave_blackout_periods').getFullList({
-          sort: 'startDate',
-          expand: 'leaveType',
-        }),
-        this.pb.collection('public_holidays').getFullList({ sort: 'date' }),
-        this.canManage()
-          ? this.pb.collection('users').getFullList({
-              sort: 'name',
-              filter: 'active = true',
-              fields: 'id,name,employeeCode,role',
-            })
-          : Promise.resolve([]),
-      ]);
+      const [types, requests, balances, blackouts, holidays, members, schedules] =
+        await Promise.all([
+          this.pb.collection('leave_types').getFullList({
+            sort: 'name',
+            filter: 'active = true',
+          }),
+          this.pb.collection('leave_requests').getFullList({
+            sort: '-created',
+            expand: 'employee,leaveType',
+          }),
+          this.pb.collection('leave_balances').getFullList({
+            sort: 'year',
+            expand: 'employee,leaveType',
+          }),
+          this.pb.collection('leave_blackout_periods').getFullList({
+            sort: 'startDate',
+            expand: 'leaveType',
+          }),
+          this.pb.collection('public_holidays').getFullList({ sort: 'date' }),
+          this.canManage()
+            ? this.pb.collection('users').getFullList({
+                sort: 'name',
+                filter: 'active = true',
+                fields: 'id,name,employeeCode,role',
+              })
+            : Promise.resolve([]),
+          this.pb.collection('work_schedules').getFullList({
+            sort: '-validFrom',
+            filter: 'active = true',
+          }),
+        ]);
       this.leaveTypes.set(types as LeaveTypeRecord[]);
       this.requests.set(requests as LeaveRequestRecord[]);
       this.balances.set(balances as LeaveBalanceRecord[]);
       this.blackouts.set(blackouts as LeaveBlackoutRecord[]);
       this.holidays.set(holidays as PublicHolidayRecord[]);
       this.members.set(members as UserRecord[]);
+      this.schedules.set(schedules as WorkScheduleRecord[]);
       this.leaveType ||=
         (types as LeaveTypeRecord[]).find((type) => type.code === 'vacation')?.id ??
         (types[0] as LeaveTypeRecord | undefined)?.id ??
@@ -196,6 +204,8 @@ export class LeaveComponent {
       this.endDate,
       this.dayPart,
       this.holidays().map((holiday) => holiday.date),
+      this.schedules(),
+      this.employee,
     );
   }
 

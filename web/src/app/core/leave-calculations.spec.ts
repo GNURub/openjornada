@@ -2,10 +2,11 @@ import {
   availableLeaveDays,
   countBusinessDays,
   countRequestedDays,
+  countScheduledDays,
   findLeaveConflicts,
   normalizeLeaveAllowance,
 } from './leave-calculations';
-import type { LeaveRequestRecord } from './models';
+import type { LeaveRequestRecord, WorkScheduleRecord } from './models';
 
 function leaveRequest(overrides: Partial<LeaveRequestRecord> = {}): LeaveRequestRecord {
   return {
@@ -34,6 +35,28 @@ function leaveRequest(overrides: Partial<LeaveRequestRecord> = {}): LeaveRequest
   };
 }
 
+function schedule(overrides: Partial<WorkScheduleRecord> = {}): WorkScheduleRecord {
+  return {
+    id: 'schedule',
+    created: '2026-07-01T10:00:00.000Z',
+    updated: '2026-07-01T10:00:00.000Z',
+    organization: 'organization',
+    employee: 'employee-a',
+    name: 'Martes a sábado',
+    validFrom: '2026-01-01',
+    validUntil: '2026-12-31',
+    weekdays: [2, 3, 4, 5, 6],
+    startTime: '09:00',
+    endTime: '13:00',
+    breakMinutes: 0,
+    active: true,
+    createdBy: 'admin',
+    collectionId: 'work_schedules',
+    collectionName: 'work_schedules',
+    ...overrides,
+  };
+}
+
 describe('leave calculations', () => {
   it('counts weekdays in an inclusive interval', () => {
     expect(countBusinessDays('2026-07-27', '2026-07-31')).toBe(5);
@@ -54,6 +77,28 @@ describe('leave calculations', () => {
 
   it('supports half-day requests', () => {
     expect(countRequestedDays('2026-07-29', '2026-07-29', 'morning')).toBe(0.5);
+  });
+
+  it('uses the employee schedule for Saturday work and a free Monday', () => {
+    const workSchedule = schedule();
+    expect(countScheduledDays('2026-08-15', '2026-08-17', [], [workSchedule], 'employee-a')).toBe(
+      1,
+    );
+    expect(
+      countRequestedDays('2026-08-15', '2026-08-15', 'full', [], [workSchedule], 'employee-a'),
+    ).toBe(1);
+  });
+
+  it('uses the most recent schedule that covers each requested date', () => {
+    const oldSchedule = schedule({ id: 'old', weekdays: [1, 2, 3, 4, 5] });
+    const newSchedule = schedule({
+      id: 'new',
+      validFrom: '2026-08-01',
+      weekdays: [2, 3, 4, 5, 6],
+    });
+    expect(
+      countScheduledDays('2026-08-15', '2026-08-17', [], [oldSchedule, newSchedule], 'employee-a'),
+    ).toBe(1);
   });
 
   it('calculates the available balance with carry-over and adjustments', () => {
