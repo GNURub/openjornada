@@ -46,6 +46,27 @@ describe('time calculations', () => {
     expect(result).toBe(8 * 60 * 60 * 1_000);
   });
 
+  it('counts a paid pause as worked time', () => {
+    const paidBreakStart = {
+      ...event('break_start', '2026-07-29T10:00:00Z'),
+      breakPaid: true,
+    } as WorkEventRecord;
+    const paidBreakEnd = {
+      ...event('break_end', '2026-07-29T10:30:00Z'),
+      breakPaid: true,
+    } as WorkEventRecord;
+    const result = calculateWorkedMs(
+      [
+        event('clock_in', '2026-07-29T08:00:00Z'),
+        paidBreakStart,
+        paidBreakEnd,
+        event('clock_out', '2026-07-29T16:00:00Z'),
+      ],
+      new Date('2026-07-29T18:00:00Z'),
+    );
+    expect(result).toBe(8 * 60 * 60 * 1_000);
+  });
+
   it('keeps counting an open work interval up to now', () => {
     const result = calculateWorkedMs(
       [event('clock_in', '2026-07-29T08:00:00Z')],

@@ -1,12 +1,7 @@
 import type { RecordModel } from 'pocketbase';
 
 export type UserRole = 'admin' | 'manager' | 'employee' | 'representative';
-export type WorkEventKind =
-  | 'clock_in'
-  | 'break_start'
-  | 'break_end'
-  | 'clock_out'
-  | 'correction';
+export type WorkEventKind = 'clock_in' | 'break_start' | 'break_end' | 'clock_out' | 'correction';
 export type WorkStatus = 'off' | 'working' | 'paused';
 
 export interface UserRecord extends RecordModel {
@@ -18,6 +13,26 @@ export interface UserRecord extends RecordModel {
   employeeCode: string;
   weeklyHours: number;
   jobTitle: string;
+  invitationStatus: '' | 'pending' | 'accepted';
+  invitationSentAt: string;
+  invitationExpiresAt: string;
+  invitationAcceptedAt: string;
+}
+
+export interface OrganizationRecord extends RecordModel {
+  name: string;
+  taxId: string;
+  timezone: string;
+  retentionYears: number;
+  privacyContact: string;
+  brandPrimaryColor: string;
+  brandSecondaryColor: string;
+  brandLogo: string;
+  pwaName: string;
+  pwaShortName: string;
+  pwaIcon: string;
+  manualTimeApprovalRequired: boolean;
+  timeCorrectionApprovalRequired: boolean;
 }
 
 export interface WorkEventRecord extends RecordModel {
@@ -28,7 +43,7 @@ export interface WorkEventRecord extends RecordModel {
   kind: WorkEventKind;
   occurredAt: string;
   timezone: string;
-  source: 'desktop' | 'mobile' | 'tablet' | 'admin';
+  source: 'desktop' | 'mobile' | 'tablet' | 'admin' | 'manual';
   note: string;
   createdBy: string;
   corrects: string;
@@ -36,6 +51,109 @@ export interface WorkEventRecord extends RecordModel {
   previousHash: string;
   integrityHash: string;
   clientRequestId: string;
+  manualRequest: string;
+  breakType: string;
+  breakPaid: boolean;
+  voidsTarget: boolean;
+}
+
+export interface BreakTypeRecord extends RecordModel {
+  created: string;
+  updated: string;
+  organization: string;
+  name: string;
+  paid: boolean;
+  active: boolean;
+}
+
+export interface ManualTimeInterval {
+  kind: 'work' | 'break';
+  start: string;
+  end: string;
+  startNextDay: boolean;
+  breakType: string;
+  breakTypeName?: string;
+  breakPaid?: boolean;
+  startAt?: string;
+  endAt?: string;
+}
+
+export interface ManualTimeRequestRecord extends RecordModel {
+  created: string;
+  updated: string;
+  organization: string;
+  employee: string;
+  workDate: string;
+  timezone: string;
+  intervals: ManualTimeInterval[];
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  approvalRequired: boolean;
+  requestType: 'addition' | 'replacement';
+  timeStorageVersion: 'utc_wall_v0' | 'iana_v1';
+  originalIntervals: ManualTimeInterval[];
+  targetEvents: string[];
+  baseFingerprint: string;
+  resolvedBy: string;
+  resolvedAt: string;
+  resolutionNote: string;
+  expand?: { employee?: UserRecord };
+}
+
+export interface TimesheetEvent {
+  id: string;
+  kind: Exclude<WorkEventKind, 'correction'>;
+  occurredAt: string;
+  source: WorkEventRecord['source'];
+  note: string;
+  manualRequest: string;
+  breakType: string;
+  breakPaid: boolean;
+  integrityHash: string;
+}
+
+export interface TimesheetRequestSummary {
+  id: string;
+  requestType: 'addition' | 'replacement';
+  status: ManualTimeRequestRecord['status'];
+  reason: string;
+  intervals: ManualTimeInterval[];
+  originalIntervals: ManualTimeInterval[];
+  approvalRequired: boolean;
+  resolutionNote: string;
+  created: string;
+}
+
+export interface TimesheetDay {
+  date: string;
+  workedMinutes: number;
+  plannedMinutes: number;
+  balanceMinutes: number;
+  overtimeMinutes: number;
+  holiday: string;
+  absences: Array<{ name: string; dayPart: 'full' | 'morning' | 'afternoon' }>;
+  events: TimesheetEvent[];
+  editableIntervals: ManualTimeInterval[];
+  requests: TimesheetRequestSummary[];
+  anomaly: boolean;
+  canAddManualTime: boolean;
+  canCorrectTime: boolean;
+}
+
+export interface TimesheetResponse {
+  employee: { id: string; name: string; employeeCode: string };
+  timezone: string;
+  from: string;
+  to: string;
+  approvalRequired: boolean;
+  correctionApprovalRequired: boolean;
+  totals: {
+    workedMinutes: number;
+    plannedMinutes: number;
+    balanceMinutes: number;
+    overtimeMinutes: number;
+  };
+  days: TimesheetDay[];
 }
 
 export interface CorrectionRequestRecord extends RecordModel {
@@ -151,12 +269,7 @@ export interface ExpenseCategoryRecord extends RecordModel {
 }
 
 export type ExpenseStatus =
-  | 'draft'
-  | 'pending'
-  | 'changes_requested'
-  | 'approved'
-  | 'rejected'
-  | 'paid';
+  'draft' | 'pending' | 'changes_requested' | 'approved' | 'rejected' | 'paid';
 
 export interface ExpenseRecord extends RecordModel {
   created: string;
@@ -184,14 +297,37 @@ export interface EmployeeDocumentRecord extends RecordModel {
   updated: string;
   organization: string;
   employee: string;
+  folder: string;
   title: string;
   category: 'contract' | 'payroll' | 'identity' | 'medical' | 'training' | 'other';
-  visibility: 'employee' | 'company' | 'management';
+  visibility: 'employee' | 'company' | 'management' | 'folder';
   file: string;
   acknowledgementRequired: boolean;
   acknowledgedAt: string;
   uploadedBy: string;
-  expand?: { employee?: UserRecord };
+  expand?: { employee?: UserRecord; folder?: DocumentFolderRecord };
+}
+
+export type DocumentFolderVisibility = 'company' | 'selected' | 'management';
+
+export interface DocumentFolderRecord extends RecordModel {
+  created: string;
+  updated: string;
+  organization: string;
+  name: string;
+  visibility: DocumentFolderVisibility;
+  allowedUsers: string[];
+  createdBy: string;
+  expand?: { allowedUsers?: UserRecord[] };
+}
+
+export interface DocumentAcknowledgementRecord extends RecordModel {
+  created: string;
+  organization: string;
+  document: string;
+  user: string;
+  acknowledgedAt: string;
+  expand?: { user?: UserRecord };
 }
 
 export interface EmployeeTaskRecord extends RecordModel {

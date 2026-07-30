@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/@angular/service-worker/config/schema.json",
+  "index": "/index.html",
+  "assetGroups": [
+    {
+      "name": "app",
+      "installMode": "prefetch",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": [
+          "/favicon.ico",
+          "/favicon-16x16.png",
+          "/favicon-32x32.png",
+          "/apple-touch-icon.png",
+          "/index.html",
+          "/manifest.json",
+          "/*.css",
+          "/*.js"
+        ]
+      }
+    },
+    {
+      "name": "brand-assets",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": [
+          "/brand/**",
+          "/icons/**"
+        ]
+      }
+    }
+  ],
+  "navigationUrls": [
+    "/**",
+    "!/**/*.*",
+    "!/api/**",
+    "!/_/**"
+  ]
+}

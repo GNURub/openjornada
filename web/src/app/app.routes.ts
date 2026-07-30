@@ -9,6 +9,13 @@ import {
 
 export const routes: Routes = [
   {
+    path: 'invitacion/:token',
+    loadComponent: () =>
+      import('./features/account/accept-invitation.component').then(
+        (component) => component.AcceptInvitationComponent,
+      ),
+  },
+  {
     path: 'restablecer/:token',
     canActivate: [guestGuard],
     loadComponent: () =>
@@ -27,17 +34,13 @@ export const routes: Routes = [
     path: 'login',
     canActivate: [guestGuard],
     loadComponent: () =>
-      import('./features/login/login.component').then(
-        (component) => component.LoginComponent,
-      ),
+      import('./features/login/login.component').then((component) => component.LoginComponent),
   },
   {
     path: '',
     canActivate: [authGuard],
     loadComponent: () =>
-      import('./shared/shell.component').then(
-        (component) => component.ShellComponent,
-      ),
+      import('./shared/shell.component').then((component) => component.ShellComponent),
     children: [
       {
         path: '',
@@ -56,9 +59,7 @@ export const routes: Routes = [
       {
         path: 'ausencias',
         loadComponent: () =>
-          import('./features/leave/leave.component').then(
-            (component) => component.LeaveComponent,
-          ),
+          import('./features/leave/leave.component').then((component) => component.LeaveComponent),
       },
       {
         path: 'horarios',
@@ -91,16 +92,12 @@ export const routes: Routes = [
       {
         path: 'tareas',
         loadComponent: () =>
-          import('./features/tasks/tasks.component').then(
-            (component) => component.TasksComponent,
-          ),
+          import('./features/tasks/tasks.component').then((component) => component.TasksComponent),
       },
       {
         path: 'objetivos',
         loadComponent: () =>
-          import('./features/goals/goals.component').then(
-            (component) => component.GoalsComponent,
-          ),
+          import('./features/goals/goals.component').then((component) => component.GoalsComponent),
       },
       {
         path: 'informes',
@@ -122,9 +119,7 @@ export const routes: Routes = [
         path: 'equipo',
         canActivate: [teamManagerGuard],
         loadComponent: () =>
-          import('./features/team/team.component').then(
-            (component) => component.TeamComponent,
-          ),
+          import('./features/team/team.component').then((component) => component.TeamComponent),
       },
     ],
   },

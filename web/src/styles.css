@@ -15,6 +15,11 @@
 }
 
 @layer base {
+  :root {
+    --brand-primary: #ef4d32;
+    --brand-secondary: #1c1917;
+  }
+
   * {
     box-sizing: border-box;
   }
@@ -35,7 +40,7 @@
   a:focus-visible,
   input:focus-visible,
   select:focus-visible {
-    outline: 3px solid color-mix(in srgb, #ef4d32 35%, transparent);
+    outline: 3px solid color-mix(in srgb, var(--brand-primary) 35%, transparent);
     outline-offset: 2px;
   }
 }
@@ -84,19 +89,19 @@
     justify-content: center;
     gap: 0.55rem;
     border-radius: 1rem;
-    background: #ef4d32;
+    background: var(--brand-primary);
     padding: 0.8rem 1.35rem;
     color: white;
     font-size: 0.9rem;
     font-weight: 700;
-    box-shadow: 0 10px 24px rgb(239 77 50 / 18%);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--brand-primary) 18%, transparent);
     transition:
       background 160ms ease,
       transform 160ms ease;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: #d9361d;
+    background: color-mix(in srgb, var(--brand-primary) 88%, black);
     transform: translateY(-1px);
   }
 
@@ -146,8 +151,8 @@
   }
 
   .field-input:focus {
-    border-color: #ef4d32;
-    box-shadow: 0 0 0 4px rgb(239 77 50 / 10%);
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-primary) 10%, transparent);
     outline: none;
   }
 }

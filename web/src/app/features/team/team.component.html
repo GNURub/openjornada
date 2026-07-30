@@ -6,27 +6,58 @@
       <p class="mt-2 text-stone-500">Gestiona quién puede acceder y fichar en la empresa.</p>
     </div>
     <button type="button" (click)="formOpen.set(true)" class="btn-primary w-full sm:w-auto">
-      <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        class="size-5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </svg>
       Añadir persona
     </button>
   </div>
 
   @if (error()) {
-    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p>
+    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+      {{ error() }}
+    </p>
   }
   @if (success()) {
-    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p>
+    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">
+      {{ success() }}
+    </p>
   }
 
   @if (formOpen()) {
-    <section class="mt-8 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8">
+    <section
+      class="mt-8 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8"
+    >
       <div class="flex items-center justify-between">
         <div>
           <h2 class="font-display text-2xl font-bold">Nueva persona</h2>
-          <p class="mt-1 text-sm text-stone-400">Crearemos su acceso y enviaremos la verificación por correo.</p>
+          <p class="mt-1 text-sm text-stone-400">
+            Crea su acceso y después envíale una invitación válida durante 72 horas.
+          </p>
         </div>
-        <button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500">
-          <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        <button
+          type="button"
+          aria-label="Cerrar formulario"
+          (click)="formOpen.set(false)"
+          class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
         </button>
       </div>
       <form (ngSubmit)="createMember()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -36,11 +67,23 @@
         </label>
         <label class="block sm:col-span-2 lg:col-span-1">
           <span class="field-label">Correo</span>
-          <input [(ngModel)]="newMember.email" name="email" type="email" required class="field-input" />
+          <input
+            [(ngModel)]="newMember.email"
+            name="email"
+            type="email"
+            required
+            class="field-input"
+          />
         </label>
         <label class="block">
           <span class="field-label">Código de empleada</span>
-          <input [(ngModel)]="newMember.employeeCode" name="employeeCode" required class="field-input" placeholder="EST-002" />
+          <input
+            [(ngModel)]="newMember.employeeCode"
+            name="employeeCode"
+            required
+            class="field-input"
+            placeholder="EST-002"
+          />
         </label>
         <label class="block">
           <span class="field-label">Puesto</span>
@@ -48,7 +91,15 @@
         </label>
         <label class="block">
           <span class="field-label">Jornada semanal</span>
-          <input [(ngModel)]="newMember.weeklyHours" name="weeklyHours" type="number" min="1" max="80" required class="field-input" />
+          <input
+            [(ngModel)]="newMember.weeklyHours"
+            name="weeklyHours"
+            type="number"
+            min="1"
+            max="80"
+            required
+            class="field-input"
+          />
         </label>
         <label class="block">
           <span class="field-label">Rol</span>
@@ -63,8 +114,18 @@
         </label>
         <label class="block sm:col-span-2">
           <span class="field-label">Contraseña temporal</span>
-          <input [(ngModel)]="newMember.password" name="password" type="password" minlength="10" required class="field-input" autocomplete="new-password" />
-          <span class="mt-2 block text-xs text-stone-400">Mínimo 10 caracteres. Compártela por un canal seguro.</span>
+          <input
+            [(ngModel)]="newMember.password"
+            name="password"
+            type="password"
+            minlength="10"
+            required
+            class="field-input"
+            autocomplete="new-password"
+          />
+          <span class="mt-2 block text-xs text-stone-400"
+            >Mínimo 10 caracteres. Compártela por un canal seguro.</span
+          >
         </label>
         <div class="flex items-end gap-3">
           <button type="submit" [disabled]="saving()" class="btn-primary flex-1">
@@ -87,18 +148,68 @@
     } @else {
       <ul class="divide-y divide-stone-100">
         @for (member of members(); track member.id) {
-          <li class="flex items-center gap-4 px-6 py-4 sm:px-8">
-            <span class="grid size-11 shrink-0 place-items-center rounded-full bg-stone-900 text-sm font-bold text-white">
+          <li
+            class="flex flex-wrap items-center gap-4 px-6 py-4 sm:px-8"
+            [attr.data-member-email]="member.email"
+          >
+            <span
+              class="grid size-11 shrink-0 place-items-center rounded-full bg-stone-900 text-sm font-bold text-white"
+            >
               {{ member.name.slice(0, 1).toUpperCase() }}
             </span>
-            <div class="min-w-0 flex-1">
+            <div class="min-w-44 flex-1">
               <div class="flex flex-wrap items-center gap-2">
                 <p class="truncate font-semibold">{{ member.name }}</p>
                 @if (!member.active) {
-                  <span class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-bold text-stone-500">Inactiva</span>
+                  <span
+                    class="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-bold text-stone-500"
+                    >Inactiva</span
+                  >
                 }
               </div>
-              <p class="mt-0.5 truncate text-sm text-stone-400">{{ member.jobTitle || member.email }}</p>
+              <p class="mt-0.5 truncate text-sm text-stone-500">{{ member.email }}</p>
+              @if (member.jobTitle) {
+                <p class="mt-0.5 truncate text-xs text-stone-400">{{ member.jobTitle }}</p>
+              }
+            </div>
+            <div class="min-w-32">
+              @switch (invitationState(member)) {
+                @case ('accepted') {
+                  <span
+                    class="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700"
+                  >
+                    Invitación aceptada
+                  </span>
+                  <p class="mt-1 text-xs text-stone-400">
+                    {{ invitationDate(member.invitationAcceptedAt) }}
+                  </p>
+                }
+                @case ('pending') {
+                  <span
+                    class="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700"
+                  >
+                    Invitación pendiente
+                  </span>
+                  <p class="mt-1 text-xs text-stone-400">
+                    Caduca {{ invitationDate(member.invitationExpiresAt) }}
+                  </p>
+                }
+                @case ('expired') {
+                  <span
+                    class="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700"
+                  >
+                    Invitación caducada
+                  </span>
+                  <p class="mt-1 text-xs text-stone-400">Envía un enlace nuevo</p>
+                }
+                @default {
+                  <span
+                    class="inline-flex rounded-full bg-stone-100 px-2.5 py-1 text-xs font-bold text-stone-500"
+                  >
+                    Sin invitación
+                  </span>
+                }
+              }
             </div>
             <div class="hidden text-right sm:block">
               @if (auth.user()?.role === 'admin' && member.id !== auth.user()?.id) {
@@ -122,13 +233,34 @@
               member.id !== auth.user()?.id &&
               (auth.user()?.role === 'admin' || member.role === 'employee')
             ) {
-              <button
-                type="button"
-                (click)="updateMember(member, { active: !member.active })"
-                class="hidden rounded-xl border border-stone-200 px-3 py-2 text-xs font-bold text-stone-500 hover:bg-stone-50 md:block"
-              >
-                {{ member.active ? 'Desactivar' : 'Activar' }}
-              </button>
+              <div class="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  (click)="sendInvitation(member)"
+                  [disabled]="inviting() !== ''"
+                  class="rounded-xl border border-coral-200 px-3 py-2 text-xs font-bold text-coral-700 transition hover:bg-coral-50 disabled:cursor-wait disabled:opacity-50"
+                  [attr.aria-label]="
+                    (invitationState(member) === 'none' ? 'Enviar' : 'Reenviar') +
+                    ' invitación a ' +
+                    member.name
+                  "
+                >
+                  {{
+                    inviting() === member.id
+                      ? 'Enviando…'
+                      : invitationState(member) === 'none'
+                        ? 'Invitar'
+                        : 'Reenviar'
+                  }}
+                </button>
+                <button
+                  type="button"
+                  (click)="updateMember(member, { active: !member.active })"
+                  class="hidden rounded-xl border border-stone-200 px-3 py-2 text-xs font-bold text-stone-500 hover:bg-stone-50 md:block"
+                >
+                  {{ member.active ? 'Desactivar' : 'Activar' }}
+                </button>
+              </div>
             }
           </li>
         }
@@ -136,3 +268,19 @@
     }
   </section>
 </div>
+
+@if (toast(); as notice) {
+  <div
+    class="fixed right-4 top-4 z-50 max-w-sm rounded-2xl border px-5 py-4 text-sm font-semibold shadow-2xl sm:right-6 sm:top-6"
+    [class.border-red-200]="notice.type === 'error'"
+    [class.bg-red-50]="notice.type === 'error'"
+    [class.text-red-700]="notice.type === 'error'"
+    [class.border-emerald-200]="notice.type === 'success'"
+    [class.bg-emerald-50]="notice.type === 'success'"
+    [class.text-emerald-700]="notice.type === 'success'"
+    [attr.role]="notice.type === 'error' ? 'alert' : 'status'"
+    aria-live="polite"
+  >
+    {{ notice.message }}
+  </div>
+}

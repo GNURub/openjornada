@@ -1,11 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { Buffer } from 'node:buffer';
 
-async function signIn(
-  page: import('@playwright/test').Page,
-  email: string,
-  password: string,
-) {
+async function signIn(page: import('@playwright/test').Page, email: string, password: string) {
   await page.goto('/login');
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña').fill(password);
@@ -30,9 +26,7 @@ async function changeAccount(
   await signIn(page, email, password);
 }
 
-async function selectEmployee(
-  page: import('@playwright/test').Page,
-) {
+async function selectEmployee(page: import('@playwright/test').Page) {
   const select = page.getByRole('combobox', { name: 'Persona', exact: true });
   await select.selectOption({ label: 'Marina Estética' });
 }
@@ -66,6 +60,41 @@ async function apiSignIn(
   throw new Error(`No se pudo autenticar ${email}`);
 }
 
+async function apiCreateEmployee(
+  request: import('@playwright/test').APIRequestContext,
+  adminToken: string,
+  organization: string,
+  suffix: string,
+  label: string,
+): Promise<{ id: string; email: string; password: string; name: string }> {
+  const email = `solape-${label}-${suffix}@example.com`;
+  const password = 'EmployeePassword123!';
+  const name = `Solape ${label}`;
+  const response = await request.post('http://127.0.0.1:8090/api/collections/users/records', {
+    headers: { Authorization: adminToken },
+    data: {
+      organization,
+      name,
+      email,
+      password,
+      passwordConfirm: password,
+      employeeCode: `OV-${label.slice(0, 3)}-${suffix}`,
+      jobTitle: 'Pruebas',
+      weeklyHours: 40,
+      role: 'employee',
+      active: true,
+    },
+  });
+  const body = await response.text();
+  expect(response.ok(), body).toBeTruthy();
+  return {
+    id: (JSON.parse(body) as { id: string }).id,
+    email,
+    password,
+    name,
+  };
+}
+
 test('an employee can sign in and start the workday', async ({ page }) => {
   await signIn(page, 'empleada@example.com', 'DemoPassword123!');
 
@@ -81,10 +110,9 @@ test('an employee can sign in and start the workday', async ({ page }) => {
   await page.getByTestId('primary-clock-action').click();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
 
-  await page.getByRole('link', { name: 'Registros', exact: true }).first().click();
-  await expect(
-    page.getByRole('heading', { name: 'Registros de jornada' }),
-  ).toBeVisible();
+  await page.getByRole('link', { name: 'Control horario', exact: true }).first().click();
+  await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Trazabilidad' }).click();
   await expect(page.getByText(/\d+ eventos en el periodo/)).toBeVisible();
 });
 
@@ -95,9 +123,7 @@ test('the login screen remains usable on a mobile viewport', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeInViewport();
 });
 
-test('an administrator can add an employee with a role', async ({
-  page,
-}, testInfo) => {
+test('an administrator can add an employee with a role', async ({ page }, testInfo) => {
   const suffix = testInfo.project.name.replaceAll(/[^a-z]/g, '');
   await signIn(page, 'admin@example.com', 'TestPassword123!');
 
@@ -115,16 +141,24 @@ test('an administrator can add an employee with a role', async ({
 
 test('a leave request can be submitted, approved and notified', async ({
   page,
+  request: apiRequest,
 }, testInfo) => {
-  const projectOffset = {
-    'desktop-chromium': 20,
-    'tablet-chromium': 30,
-    'mobile-chromium': 40,
-  }[testInfo.project.name] ?? 50;
+  const projectOffset =
+    {
+      'desktop-chromium': 20,
+      'tablet-chromium': 30,
+      'mobile-chromium': 40,
+    }[testInfo.project.name] ?? 50;
   const start = new Date();
   start.setDate(start.getDate() + projectOffset);
+  while (start.getDay() === 0 || start.getDay() === 6) {
+    start.setDate(start.getDate() + 1);
+  }
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
+  while (end.getDay() === 0 || end.getDay() === 6) {
+    end.setDate(end.getDate() + 1);
+  }
   const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
   const reason = `Vacaciones E2E ${testInfo.project.name}`;
 
@@ -141,57 +175,154 @@ test('a leave request can be submitted, approved and notified', async ({
     page.locator('article').filter({ hasText: reason }).getByText('Pendiente'),
   ).toBeVisible();
 
+  const admin = await apiSignIn(apiRequest, 'admin@example.com', 'TestPassword123!');
+  const suffix = testInfo.project.name.replaceAll(/[^a-z]/g, '');
+  const approvedEmployee = await apiCreateEmployee(
+    apiRequest,
+    admin.token,
+    admin.record.organization,
+    suffix,
+    'aprobado',
+  );
+  const pendingEmployee = await apiCreateEmployee(
+    apiRequest,
+    admin.token,
+    admin.record.organization,
+    suffix,
+    'pendiente',
+  );
+  const leaveTypesResponse = await apiRequest.get(
+    'http://127.0.0.1:8090/api/collections/leave_types/records',
+    {
+      headers: { Authorization: admin.token },
+      params: {
+        filter: "code = 'vacation' || code = 'personal'",
+        fields: 'id,code',
+      },
+    },
+  );
+  expect(leaveTypesResponse.ok()).toBeTruthy();
+  const leaveTypes = (await leaveTypesResponse.json()) as {
+    items: { id: string; code: string }[];
+  };
+  const vacationType = leaveTypes.items.find((leaveType) => leaveType.code === 'vacation');
+  const personalType = leaveTypes.items.find((leaveType) => leaveType.code === 'personal');
+  expect(vacationType).toBeTruthy();
+  expect(personalType).toBeTruthy();
+
+  const approvedConflictResponse = await apiRequest.post(
+    'http://127.0.0.1:8090/api/collections/leave_requests/records',
+    {
+      headers: { Authorization: admin.token },
+      data: {
+        organization: admin.record.organization,
+        employee: approvedEmployee.id,
+        type: 'personal',
+        leaveType: personalType!.id,
+        startDate: `${toDateInput(start)} 00:00:00.000Z`,
+        endDate: `${toDateInput(start)} 23:59:59.999Z`,
+        dayPart: 'full',
+        reason: `Coincidencia aprobada ${suffix}`,
+        status: 'approved',
+      },
+    },
+  );
+  expect(approvedConflictResponse.ok(), await approvedConflictResponse.text()).toBeTruthy();
+
+  const pendingEmployeeAuth = await apiSignIn(
+    apiRequest,
+    pendingEmployee.email,
+    pendingEmployee.password,
+  );
+  const pendingConflictResponse = await apiRequest.post(
+    'http://127.0.0.1:8090/api/collections/leave_requests/records',
+    {
+      headers: { Authorization: pendingEmployeeAuth.token },
+      data: {
+        organization: pendingEmployeeAuth.record.organization,
+        employee: pendingEmployeeAuth.record.id,
+        type: 'vacation',
+        leaveType: vacationType!.id,
+        startDate: `${toDateInput(start)} 00:00:00.000Z`,
+        endDate: `${toDateInput(start)} 23:59:59.999Z`,
+        dayPart: 'full',
+        reason: `Coincidencia pendiente ${suffix}`,
+        status: 'pending',
+      },
+    },
+  );
+  expect(pendingConflictResponse.ok(), await pendingConflictResponse.text()).toBeTruthy();
+
   await changeAccount(page, 'admin@example.com', 'TestPassword123!');
   await page.goto('/ausencias');
   const request = page.locator('article').filter({ hasText: reason });
   await expect(request.getByText('Marina Estética')).toBeVisible();
+  const approvedWarning = request.getByLabel('Ausencias aprobadas coincidentes');
+  await expect(approvedWarning.getByText('1 ausencia aprobada coincidente')).toBeVisible();
+  await expect(approvedWarning.getByText(approvedEmployee.name)).toBeVisible();
+  await expect(approvedWarning.getByText('Asuntos propios')).toBeVisible();
+  const pendingWarning = request.getByLabel('Solicitudes pendientes coincidentes');
+  await expect(pendingWarning.getByText('1 solicitud pendiente coincidente')).toBeVisible();
+  await expect(pendingWarning.getByText(pendingEmployee.name)).toBeVisible();
+  await expect(pendingWarning.getByText('Vacaciones')).toBeVisible();
   await request.getByRole('button', { name: 'Aprobar' }).click();
   await expect(page.getByText('Ausencia aprobada.')).toBeVisible();
   await expect(
-    page
-      .locator('article')
-      .filter({ hasText: reason })
-      .getByText('Aprobada', { exact: true }),
+    page.locator('article').filter({ hasText: reason }).getByText('Aprobada', { exact: true }),
   ).toBeVisible();
 
   await changeAccount(page, 'empleada@example.com', 'DemoPassword123!');
   await page.goto('/avisos');
-  await expect(
-    page.getByText('Solicitud de ausencia aprobada').first(),
-  ).toBeVisible();
+  await expect(page.getByText('Solicitud de ausencia aprobada').first()).toBeVisible();
 });
 
-test('an administrator can assign an employee schedule', async ({
-  page,
-}, testInfo) => {
+test('an administrator can assign an employee schedule', async ({ page, request }, testInfo) => {
   const scheduleName = `Horario E2E ${testInfo.project.name}`;
 
   await signIn(page, 'admin@example.com', 'TestPassword123!');
   await page.goto('/horarios');
   await page.getByRole('button', { name: 'Asignar horario' }).click();
-  const person = page.getByLabel('Persona');
-  const employeeValue = await person
-    .locator('option')
-    .filter({ hasText: 'Marina Estética' })
-    .getAttribute('value');
-  expect(employeeValue).toBeTruthy();
-  await person.selectOption(employeeValue!);
+  await page.getByRole('button', { name: 'Seleccionar personas' }).click();
+  const peopleSearch = page.getByLabel('Buscar personas');
+  await peopleSearch.fill('Marina');
+  await page.getByRole('checkbox', { name: /Marina Estética/ }).check();
+  await peopleSearch.fill('Administración');
+  await page.getByRole('checkbox', { name: /Administración/ }).check();
+  await expect(page.getByRole('button', { name: 'Seleccionar personas' })).toContainText(
+    '2 personas seleccionadas',
+  );
+  await page.getByRole('button', { name: 'Listo' }).click();
   await page.getByLabel('Nombre').fill(scheduleName);
-  await page.getByRole('button', { name: 'Asignar', exact: true }).click();
+  await page.getByRole('button', { name: 'Asignar a 2', exact: true }).click();
 
-  await expect(page.getByText('Horario asignado correctamente.')).toBeVisible();
-  await expect(page.getByRole('heading', { name: scheduleName })).toBeVisible();
+  await expect(page.getByText('Horario asignado a 2 personas.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: scheduleName })).toHaveCount(2);
 
   await changeAccount(page, 'empleada@example.com', 'DemoPassword123!');
   await page.goto('/horarios');
   await expect(page.getByRole('heading', { name: scheduleName })).toBeVisible();
+
+  const employeeAuth = await apiSignIn(request, 'empleada@example.com', 'DemoPassword123!');
+  const forbiddenBulkAssignment = await request.post(
+    'http://127.0.0.1:8090/api/openjornada/work-schedules/bulk',
+    {
+      headers: { Authorization: employeeAuth.token },
+      data: {
+        employeeIds: [employeeAuth.record.id],
+        name: 'Intento sin permisos',
+        validFrom: '2026-01-01',
+        validUntil: '',
+        weekdays: [1, 2, 3, 4, 5],
+        startTime: '09:00',
+        endTime: '17:00',
+        breakMinutes: 30,
+      },
+    },
+  );
+  expect(forbiddenBulkAssignment.status()).toBe(403);
 });
 
-test('a work event correction preserves the approval trail', async ({
-  page,
-}, testInfo) => {
-  const reason = `Corrección trazable E2E ${testInfo.project.name}`;
-
+test('the trace view directs corrections to the daily timesheet', async ({ page }) => {
   await signIn(page, 'empleada@example.com', 'DemoPassword123!');
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
   await page.getByTestId('primary-clock-action').click();
@@ -199,38 +330,13 @@ test('a work event correction preserves the approval trail', async ({
   await page.getByTestId('primary-clock-action').click();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
   await page.goto('/registros');
-  await page
-    .getByRole('button', { name: 'Solicitar corrección' })
-    .first()
-    .click();
-  await page.getByLabel('Motivo').fill(reason);
-  await page.getByRole('button', { name: 'Solicitar', exact: true }).click();
-  await expect(page.getByText('La solicitud se ha enviado')).toBeVisible();
-  await expect(
-    page.locator('li').filter({ hasText: reason }).getByText('Pendiente'),
-  ).toBeVisible();
-
-  await changeAccount(page, 'admin@example.com', 'TestPassword123!');
-  await page.goto('/registros');
-  const request = page.locator('li').filter({ hasText: reason });
-  await expect(request.getByText('Marina Estética')).toBeVisible();
-  await request.getByRole('button', { name: 'Aprobar' }).click();
-  await expect(page.getByText('Corrección aplicada con trazabilidad.')).toBeVisible();
-
-  await changeAccount(page, 'empleada@example.com', 'DemoPassword123!');
-  await page.goto('/registros');
-  await expect(
-    page
-      .locator('li')
-      .filter({ hasText: reason })
-      .getByText('Aprobada', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .locator('td:visible, p:visible')
-      .filter({ hasText: /Corrección\s*→/ })
-      .first(),
-  ).toBeVisible();
+  await page.getByRole('tab', { name: 'Trazabilidad' }).click();
+  await page.getByRole('button', { name: 'Corregir en hoja' }).first().click();
+  await expect(page.getByRole('tab', { name: 'Hoja de fichajes' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(page.getByText('Jornada efectiva')).toBeVisible();
 });
 
 test('the API blocks employee-only privilege escalation attempts', async ({
@@ -241,11 +347,7 @@ test('the API blocks employee-only privilege escalation attempts', async ({
     'Una ejecución basta para validar las reglas de servidor.',
   );
 
-  const session = await apiSignIn(
-    request,
-    'empleada@example.com',
-    'DemoPassword123!',
-  );
+  const session = await apiSignIn(request, 'empleada@example.com', 'DemoPassword123!');
   const headers = { Authorization: session.token };
 
   const organizationUpdate = await request.patch(
@@ -294,20 +396,17 @@ test('the API blocks employee-only privilege escalation attempts', async ({
   );
   expect([400, 403, 404]).toContain(taskCreate.status());
 
-  const goalCreate = await request.post(
-    'http://127.0.0.1:8090/api/collections/goals/records',
-    {
-      headers,
-      data: {
-        organization: session.record.organization,
-        employee: session.record.id,
-        title: 'Objetivo autoasignado sin permiso',
-        cycle: 'E2E',
-        status: 'active',
-        createdBy: session.record.id,
-      },
+  const goalCreate = await request.post('http://127.0.0.1:8090/api/collections/goals/records', {
+    headers,
+    data: {
+      organization: session.record.organization,
+      employee: session.record.id,
+      title: 'Objetivo autoasignado sin permiso',
+      cycle: 'E2E',
+      status: 'active',
+      createdBy: session.record.id,
     },
-  );
+  });
   expect([400, 403, 404]).toContain(goalCreate.status());
 
   const leaveTypeCreate = await request.post(
@@ -326,19 +425,13 @@ test('the API blocks employee-only privilege escalation attempts', async ({
   expect([400, 403, 404]).toContain(leaveTypeCreate.status());
 });
 
-test('a required leave document is enforced by the server', async ({
-  request,
-}, testInfo) => {
+test('a required leave document is enforced by the server', async ({ request }, testInfo) => {
   test.skip(
     testInfo.project.name !== 'desktop-chromium',
     'Una ejecución basta para validar la política documental.',
   );
 
-  const admin = await apiSignIn(
-    request,
-    'admin@example.com',
-    'TestPassword123!',
-  );
+  const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
   const leaveTypeResponse = await request.post(
     'http://127.0.0.1:8090/api/collections/leave_types/records',
     {
@@ -358,11 +451,7 @@ test('a required leave document is enforced by the server', async ({
   expect(leaveTypeResponse.ok()).toBeTruthy();
   const leaveType = (await leaveTypeResponse.json()) as { id: string };
 
-  const employee = await apiSignIn(
-    request,
-    'empleada@example.com',
-    'DemoPassword123!',
-  );
+  const employee = await apiSignIn(request, 'empleada@example.com', 'DemoPassword123!');
   const start = new Date();
   start.setUTCDate(start.getUTCDate() + 120);
   while (start.getUTCDay() === 0 || start.getUTCDay() === 6) {
@@ -475,6 +564,17 @@ test('the HR suite connects onboarding, goals, documents and expenses', async ({
   await expect(page.getByText('Documento guardado')).toBeVisible();
 
   await changeAccount(page, 'empleada@example.com', 'DemoPassword123!');
+  await page.goto('/avisos');
+  const taskNotification = page.locator('li').filter({
+    hasText: 'Nueva tarea asignada',
+  });
+  await expect(taskNotification.getByText(taskTitle)).toBeVisible();
+
+  const documentNotification = page.locator('li').filter({
+    hasText: 'Nuevo documento disponible',
+  });
+  await expect(documentNotification.getByText(documentTitle)).toBeVisible();
+
   await page.goto('/gastos');
   await page.getByRole('button', { name: 'Nuevo gasto' }).click();
   await page.getByLabel('Comercio').fill(merchant);

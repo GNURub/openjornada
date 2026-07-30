@@ -1,0 +1,43 @@
+name: openjornada
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        PB_VERSION: "0.39.9"
+    environment:
+      PB_APP_NAME: ${PB_APP_NAME:-OpenJornada}
+      PB_PUBLIC_URL: ${PB_PUBLIC_URL:?Configura la URL HTTPS pública}
+      PB_ENCRYPTION_KEY: ${PB_ENCRYPTION_KEY:?Configura una clave aleatoria de 32 caracteres}
+      PB_ORGANIZATION_NAME: ${PB_ORGANIZATION_NAME:?Configura el nombre de la empresa}
+      PB_ORGANIZATION_TAX_ID: ${PB_ORGANIZATION_TAX_ID:?Configura el identificador fiscal}
+      PB_TIMEZONE: ${PB_TIMEZONE:-Europe/Madrid}
+      PB_BOOTSTRAP_ADMIN_EMAIL: ${PB_BOOTSTRAP_ADMIN_EMAIL:?Configura el correo administrador}
+      PB_BOOTSTRAP_ADMIN_PASSWORD: ${PB_BOOTSTRAP_ADMIN_PASSWORD:?Configura una contraseña robusta}
+      PB_BOOTSTRAP_ADMIN_NAME: ${PB_BOOTSTRAP_ADMIN_NAME:-Administración}
+      PB_MAIL_SENDER_NAME: ${PB_MAIL_SENDER_NAME:-OpenJornada}
+      PB_MAIL_SENDER_ADDRESS: ${PB_MAIL_SENDER_ADDRESS:-no-reply@example.invalid}
+      PB_SMTP_HOST: ${PB_SMTP_HOST:-}
+      PB_SMTP_PORT: ${PB_SMTP_PORT:-587}
+      PB_SMTP_USERNAME: ${PB_SMTP_USERNAME:-}
+      PB_SMTP_PASSWORD: ${PB_SMTP_PASSWORD:-}
+      PB_SMTP_TLS: ${PB_SMTP_TLS:-false}
+      PB_DEMO_ENABLED: "false"
+    expose:
+      - "8090"
+    volumes:
+      - openjornada_data:/app/pb_data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8090/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  openjornada_data:

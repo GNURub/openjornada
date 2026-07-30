@@ -1,6 +1,6 @@
 # Cumplimiento del registro de jornada en España
 
-Última revisión técnica: 29 de julio de 2026.
+Última revisión técnica: 30 de julio de 2026.
 
 Este documento describe las salvaguardas incorporadas y las decisiones que la empresa debe completar. No sustituye el asesoramiento laboral o de protección de datos ni la consulta del convenio colectivo aplicable.
 
@@ -8,19 +8,26 @@ Este documento describe las salvaguardas incorporadas y las decisiones que la em
 
 El artículo 34.9 del Estatuto de los Trabajadores exige un registro diario con el horario concreto de inicio y finalización, conservación durante cuatro años y disponibilidad para personas trabajadoras, representación legal e Inspección de Trabajo.
 
-| Obligación o riesgo | Control de OpenJornada |
-| --- | --- |
-| Inicio y final concretos | Eventos `clock_in` y `clock_out` con fecha y hora asignadas por PocketBase. |
-| Pausas | Eventos explícitos `break_start` y `break_end`; el cálculo de tiempo efectivo las excluye. |
-| Fiabilidad e invariabilidad | La API impide actualizar o borrar `work_events`; cada evento enlaza su hash con el anterior. |
-| Correcciones trazables | La persona solicita una corrección motivada; administración o responsables la aprueban o rechazan. Al aprobarse se crea un evento corrector inmutable, vinculado al original y al actor, sin sobrescribirlo. |
-| Conservación de cuatro años | No existe borrado de eventos en la API. La organización almacena `retentionYears >= 4`. La política de backup debe respetarlo. |
-| Acceso de la persona trabajadora | La vista Registros permite consultar y descargar CSV propios por fechas. |
-| Representación legal | El rol `representative` puede consultar registros de su empresa y exportarlos. |
-| Inspección | Administración puede seleccionar una persona, consultar un periodo y entregar un CSV junto con la cadena de integridad. |
-| Control de acceso | Reglas por organización y rol en PocketBase, reforzadas por hooks contra elevación de privilegios. |
-| Minimización | No se recoge geolocalización, biometría ni IP; los logs de PocketBase no guardan IP. |
-| Información y ejercicio de derechos | La empresa debe entregar la cláusula informativa y completar sus datos; el producto conserva la fecha de aceptación. |
+| Obligación o riesgo                    | Control de OpenJornada                                                                                                                                                                                                                                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Inicio y final concretos               | Eventos `clock_in` y `clock_out` con fecha y hora asignadas por PocketBase.                                                                                                                                                                                                                               |
+| Pausas                                 | Eventos explícitos `break_start` y `break_end`. Cada tipo se configura como remunerado o no remunerado; sólo las no remuneradas se excluyen del tiempo efectivo.                                                                                                                                          |
+| Fiabilidad e invariabilidad            | La API impide actualizar o borrar `work_events`; cada evento enlaza su hash con el anterior.                                                                                                                                                                                                              |
+| Correcciones trazables                 | La persona solicita una corrección con un motivo de al menos ocho caracteres; puede sustituir o anular uno o todos los tramos. Administración o responsables la aprueban o rechazan. Al aprobarse se crean eventos correctores inmutables vinculados al original y al actor, sin sobrescribirlo.          |
+| Jornadas olvidadas                     | La persona puede declarar una fecha pasada mediante tramos de trabajo y pausa y un motivo obligatorio. Según la política de la empresa, se aplica automáticamente o queda pendiente de aprobación. La solicitud, resolución y eventos generados se enlazan y auditan; los eventos no se editan ni borran. |
+| Validación temporal                    | PocketBase interpreta las horas en la zona horaria de la empresa, admite turnos que terminan al día siguiente y rechaza horas futuras, intervalos inválidos y solapamientos con trabajo o solicitudes pendientes.                                                                                         |
+| Conservación de cuatro años            | No existe borrado de eventos en la API. La organización almacena `retentionYears >= 4`. La política de backup debe respetarlo.                                                                                                                                                                            |
+| Acceso de la persona trabajadora       | La vista Control horario ofrece hoja diaria/mensual, detalle de eventos, solicitudes y descarga CSV propia por fechas.                                                                                                                                                                                    |
+| Representación legal                   | El rol `representative` puede consultar registros de su empresa y exportarlos.                                                                                                                                                                                                                            |
+| Inspección                             | Administración puede seleccionar una persona, consultar un periodo y entregar un CSV junto con la cadena de integridad.                                                                                                                                                                                   |
+| Control de acceso                      | Reglas por organización y rol en PocketBase, reforzadas por hooks contra elevación de privilegios.                                                                                                                                                                                                        |
+| Invitaciones de acceso                 | Los enlaces se generan con aleatoriedad criptográfica, sólo se almacena su hash, caducan a las 72 horas y quedan inutilizados al aceptarse o sustituirse. El envío y la aceptación se auditan sin registrar el token ni la contraseña.                                                                    |
+| Minimización                           | No se recoge geolocalización, biometría ni IP; los logs de PocketBase no guardan IP.                                                                                                                                                                                                                      |
+| Carpetas documentales                  | Los documentos compartidos heredan obligatoriamente el acceso de su carpeta: empresa, personas seleccionadas o sólo responsables. Los archivos siguen protegidos y cada relación se valida contra la organización autenticada.                                                                            |
+| Identidad corporativa                  | Sólo administración puede modificarla. El icono PWA y los favicons se derivan automáticamente del logotipo. El logotipo y sus variantes se sirven públicamente por requisitos del navegador, por lo que deben limitarse a recursos de marca sin datos personales.                                         |
+| Confirmación de documentos compartidos | Cada persona confirma su propia lectura mediante un registro independiente y trazable. La confirmación acredita una acción en la aplicación, no una firma electrónica avanzada o cualificada.                                                                                                             |
+| Avisos de documentos y tareas          | El correo sólo informa de que hay un elemento disponible; no incluye título, categoría, descripción, adjunto ni enlace de descarga. El acceso exige autenticación.                                                                                                                                        |
+| Información y ejercicio de derechos    | La empresa debe entregar la cláusula informativa y completar sus datos; el producto conserva la fecha de aceptación.                                                                                                                                                                                      |
 
 Referencias oficiales:
 
@@ -39,7 +46,18 @@ Referencias oficiales:
 6. Configurar HTTPS, SMTP, una clave de cifrado única, contraseñas robustas y acceso restringido al panel PocketBase.
 7. Implantar backups diarios cifrados, monitorización, un procedimiento de restauración probado y un plan de respuesta a brechas.
 8. Documentar el procedimiento de corrección: petición de la persona, motivo, autorización y conservación del evento original.
-9. Validar la exportación con la asesoría laboral y realizar una prueba de entrega ante una simulación de inspección.
+9. Decidir si las altas retroactivas requieren aprobación, quién las revisa y en
+   qué plazo; aunque se introduzcan desde el editor rápido de cada día, exigir
+   siempre motivo y trazabilidad, y configurar qué pausas son remuneradas según
+   convenio y política interna.
+   Para la fecha actual, la aplicación sólo admite periodos que ya hayan
+   terminado según la zona horaria de la empresa y mantiene el bloqueo de horas
+   futuras en el servidor.
+   Definir por separado si las correcciones o anulaciones de fichajes existentes
+   requieren aprobación. La aplicación conserva los eventos originales y evita
+   sobrescribir o borrar el registro histórico.
+10. Validar la exportación con la asesoría laboral y realizar una prueba de entrega ante una simulación de inspección.
+11. Revisar periódicamente las personas incluidas en carpetas compartidas y retirar accesos que ya no sean necesarios.
 
 Las funciones de ausencias, horarios, avisos e informes apoyan la gestión interna, pero no sustituyen la política laboral de la empresa, el convenio aplicable ni los procedimientos formales de comunicación.
 

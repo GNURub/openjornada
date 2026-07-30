@@ -17,11 +17,28 @@ export class SchedulesComponent {
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);
   protected readonly formOpen = signal(false);
+  protected readonly peoplePickerOpen = signal(false);
+  protected readonly memberSearch = signal('');
+  protected readonly selectedEmployeeIds = signal<string[]>([]);
   protected readonly error = signal('');
   protected readonly success = signal('');
   protected readonly canManage = computed(() => {
     const role = this.auth.user()?.role;
     return role === 'admin' || role === 'manager';
+  });
+  protected readonly filteredMembers = computed(() => {
+    const query = this.memberSearch().trim().toLocaleLowerCase('es');
+    if (!query) return this.members();
+    return this.members().filter((member) =>
+      [member.name, member.employeeCode, member.jobTitle]
+        .join(' ')
+        .toLocaleLowerCase('es')
+        .includes(query),
+    );
+  });
+  protected readonly selectedMembers = computed(() => {
+    const selected = new Set(this.selectedEmployeeIds());
+    return this.members().filter((member) => selected.has(member.id));
   });
   protected readonly weekdayOptions = [
     { value: 1, label: 'L' },
@@ -32,7 +49,6 @@ export class SchedulesComponent {
     { value: 6, label: 'S' },
     { value: 0, label: 'D' },
   ];
-  protected employee = '';
   protected name = 'Horario habitual';
   protected validFrom = this.today();
   protected validUntil = '';
@@ -67,38 +83,105 @@ export class SchedulesComponent {
       : [...this.weekdays, day];
   }
 
+  protected openForm(): void {
+    this.formOpen.set(true);
+    this.peoplePickerOpen.set(false);
+    this.memberSearch.set('');
+    this.selectedEmployeeIds.set([]);
+    this.error.set('');
+    this.success.set('');
+  }
+
+  protected closeForm(): void {
+    this.formOpen.set(false);
+    this.peoplePickerOpen.set(false);
+    this.memberSearch.set('');
+    this.selectedEmployeeIds.set([]);
+  }
+
+  protected toggleEmployee(employeeId: string): void {
+    this.selectedEmployeeIds.update((selected) =>
+      selected.includes(employeeId)
+        ? selected.filter((id) => id !== employeeId)
+        : [...selected, employeeId],
+    );
+  }
+
+  protected removeEmployee(employeeId: string): void {
+    this.selectedEmployeeIds.update((selected) =>
+      selected.filter((id) => id !== employeeId),
+    );
+  }
+
+  protected selectVisibleEmployees(): void {
+    const selected = new Set(this.selectedEmployeeIds());
+    for (const member of this.filteredMembers()) selected.add(member.id);
+    this.selectedEmployeeIds.set([...selected]);
+  }
+
+  protected clearEmployees(): void {
+    this.selectedEmployeeIds.set([]);
+  }
+
+  protected isEmployeeSelected(employeeId: string): boolean {
+    return this.selectedEmployeeIds().includes(employeeId);
+  }
+
   protected async createSchedule(): Promise<void> {
     const user = this.auth.user();
-    if (!user || !this.employee) return;
+    const employeeIds = this.selectedEmployeeIds();
+    if (!user || employeeIds.length === 0) return;
     this.saving.set(true);
     this.error.set('');
     this.success.set('');
     try {
-      await this.pb.collection('work_schedules').create({
-        organization: user.organization,
-        employee: this.employee,
-        name: this.name,
-        validFrom: new Date(`${this.validFrom}T00:00:00`).toISOString(),
-        validUntil: this.validUntil
-          ? new Date(`${this.validUntil}T23:59:59`).toISOString()
-          : '',
-        weekdays: this.weekdays,
-        startTime: this.startTime,
-        endTime: this.endTime,
-        breakMinutes: this.breakMinutes,
-        active: true,
-        createdBy: user.id,
-      });
-      this.formOpen.set(false);
-      this.success.set('Horario asignado correctamente.');
+      const response = await this.pb.send<{ total: number }>(
+        '/api/openjornada/work-schedules/bulk',
+        {
+          method: 'POST',
+          body: {
+            employeeIds,
+            name: this.name,
+            validFrom: this.validFrom,
+            validUntil: this.validUntil,
+            weekdays: this.weekdays,
+            startTime: this.startTime,
+            endTime: this.endTime,
+            breakMinutes: this.breakMinutes,
+          },
+        },
+      );
+      this.closeForm();
+      this.success.set(
+        response.total === 1
+          ? 'Horario asignado correctamente.'
+          : `Horario asignado a ${response.total} personas.`,
+      );
       await this.load();
-    } catch {
+    } catch (error) {
       this.error.set(
-        'No se pudo guardar el horario. Comprueba las horas y la persona seleccionada.',
+        this.responseMessage(
+          error,
+          'No se pudo guardar el horario. Comprueba las horas y las personas seleccionadas.',
+        ),
       );
     } finally {
       this.saving.set(false);
     }
+  }
+
+  private responseMessage(error: unknown, fallback: string): string {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'response' in error &&
+      typeof error.response === 'object' &&
+      error.response !== null &&
+      'message' in error.response
+    ) {
+      return String(error.response.message);
+    }
+    return fallback;
   }
 
   protected async setActive(
@@ -141,10 +224,9 @@ export class SchedulesComponent {
         const users = await this.pb.collection('users').getFullList({
           sort: 'name',
           filter: 'active = true',
-          fields: 'id,name,employeeCode,role',
+          fields: 'id,name,employeeCode,role,jobTitle',
         });
         this.members.set(users as UserRecord[]);
-        this.employee = users[0]?.id ?? '';
       } catch {
         this.error.set('No se pudo cargar el equipo.');
       }

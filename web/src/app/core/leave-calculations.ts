@@ -1,3 +1,14 @@
+import type { LeaveRequestRecord } from './models';
+
+export type LeaveConflictStatus = 'approved' | 'pending';
+
+export interface LeaveConflict {
+  request: LeaveRequestRecord;
+  status: LeaveConflictStatus;
+  overlapStart: string;
+  overlapEnd: string;
+}
+
 export function countBusinessDays(
   startValue: string,
   endValue: string,
@@ -47,4 +58,68 @@ export function availableLeaveDays(
   approvedDays: number,
 ): number {
   return Math.max(0, allowance + carriedOver + adjustment - approvedDays);
+}
+
+export function findLeaveConflicts(
+  target: LeaveRequestRecord,
+  requests: readonly LeaveRequestRecord[],
+): LeaveConflict[] {
+  const targetStart = dateKey(target.startDate);
+  const targetEnd = dateKey(target.endDate);
+  if (!targetStart || !targetEnd || targetStart > targetEnd) return [];
+
+  return requests
+    .filter(
+      (request): request is LeaveRequestRecord & {
+        status: LeaveConflictStatus;
+      } =>
+        request.id !== target.id &&
+        request.employee !== target.employee &&
+        (request.status === 'approved' || request.status === 'pending'),
+    )
+    .flatMap((request) => {
+      const requestStart = dateKey(request.startDate);
+      const requestEnd = dateKey(request.endDate);
+      if (!requestStart || !requestEnd || requestStart > requestEnd) return [];
+
+      const overlapStart =
+        targetStart > requestStart ? targetStart : requestStart;
+      const overlapEnd = targetEnd < requestEnd ? targetEnd : requestEnd;
+      if (
+        overlapStart > overlapEnd ||
+        !dayPartsOverlap(target, request)
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          request,
+          status: request.status,
+          overlapStart,
+          overlapEnd,
+        },
+      ];
+    })
+    .sort(
+      (left, right) =>
+        left.overlapStart.localeCompare(right.overlapStart) ||
+        left.overlapEnd.localeCompare(right.overlapEnd) ||
+        left.request.created.localeCompare(right.request.created),
+    );
+}
+
+function dateKey(value: string): string {
+  return value.slice(0, 10);
+}
+
+function dayPartsOverlap(
+  left: LeaveRequestRecord,
+  right: LeaveRequestRecord,
+): boolean {
+  const leftPart =
+    dateKey(left.startDate) === dateKey(left.endDate) ? left.dayPart : 'full';
+  const rightPart =
+    dateKey(right.startDate) === dateKey(right.endDate) ? right.dayPart : 'full';
+  return leftPart === 'full' || rightPart === 'full' || leftPart === rightPart;
 }

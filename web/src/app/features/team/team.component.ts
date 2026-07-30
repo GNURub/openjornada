@@ -14,6 +14,15 @@ interface NewMember {
   password: string;
 }
 
+interface InvitationResponse {
+  userId: string;
+  status: 'pending';
+  sentAt: string;
+  expiresAt: string;
+}
+
+type InvitationDisplayState = 'none' | 'pending' | 'expired' | 'accepted';
+
 @Component({
   selector: 'app-team',
   imports: [FormsModule],
@@ -25,10 +34,13 @@ export class TeamComponent {
   protected readonly members = signal<UserRecord[]>([]);
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);
+  protected readonly inviting = signal('');
   protected readonly formOpen = signal(false);
   protected readonly error = signal('');
   protected readonly success = signal('');
+  protected readonly toast = signal<{ type: 'success' | 'error'; message: string } | null>(null);
   protected newMember: NewMember = this.emptyMember();
+  private toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
     void this.load();
@@ -63,20 +75,11 @@ export class TeamComponent {
         active: true,
       });
       this.members.update((members) =>
-        [...members, created as UserRecord].sort((a, b) =>
-          a.name.localeCompare(b.name, 'es'),
-        ),
+        [...members, created as UserRecord].sort((a, b) => a.name.localeCompare(b.name, 'es')),
       );
-      try {
-        await this.pb
-          .collection('users')
-          .requestVerification(this.newMember.email);
-      } catch {
-        // The account remains usable after an administrator shares the password.
-      }
       this.newMember = this.emptyMember();
       this.formOpen.set(false);
-      this.success.set('Persona añadida. Se ha solicitado el correo de bienvenida.');
+      this.success.set('Persona añadida. Ya puedes enviarle una invitación por correo.');
     } catch (error) {
       const data =
         typeof error === 'object' &&
@@ -97,6 +100,40 @@ export class TeamComponent {
     }
   }
 
+  protected async sendInvitation(member: UserRecord): Promise<void> {
+    if (this.inviting()) return;
+    this.inviting.set(member.id);
+    this.error.set('');
+    this.success.set('');
+    try {
+      const invitation = await this.pb.send<InvitationResponse>(
+        `/api/openjornada/team/${member.id}/invitation`,
+        { method: 'POST' },
+      );
+      this.members.update((members) =>
+        members.map((item) =>
+          item.id === member.id
+            ? {
+                ...item,
+                invitationStatus: invitation.status,
+                invitationSentAt: invitation.sentAt,
+                invitationExpiresAt: invitation.expiresAt,
+                invitationAcceptedAt: '',
+              }
+            : item,
+        ),
+      );
+      this.showToast(`Invitación enviada a ${member.email}.`, 'success');
+    } catch (error) {
+      this.showToast(
+        this.errorMessage(error, 'No se pudo enviar la invitación. Revisa la configuración SMTP.'),
+        'error',
+      );
+    } finally {
+      this.inviting.set('');
+    }
+  }
+
   protected async updateMember(
     member: UserRecord,
     changes: Partial<Pick<UserRecord, 'active' | 'role'>>,
@@ -104,13 +141,9 @@ export class TeamComponent {
     this.error.set('');
     this.success.set('');
     try {
-      const updated = await this.pb
-        .collection('users')
-        .update(member.id, changes);
+      const updated = await this.pb.collection('users').update(member.id, changes);
       this.members.update((members) =>
-        members.map((item) =>
-          item.id === member.id ? (updated as UserRecord) : item,
-        ),
+        members.map((item) => (item.id === member.id ? (updated as UserRecord) : item)),
       );
       this.success.set('Los permisos se han actualizado.');
     } catch {
@@ -126,6 +159,40 @@ export class TeamComponent {
       employee: 'Empleada',
       representative: 'Representante',
     }[role];
+  }
+
+  protected invitationState(member: UserRecord): InvitationDisplayState {
+    if (member.invitationStatus === 'accepted') return 'accepted';
+    if (member.invitationStatus !== 'pending') return 'none';
+    return new Date(member.invitationExpiresAt).getTime() <= Date.now() ? 'expired' : 'pending';
+  }
+
+  protected invitationDate(value: string): string {
+    if (!value) return '';
+    return new Intl.DateTimeFormat('es-ES', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(value));
+  }
+
+  private showToast(message: string, type: 'success' | 'error'): void {
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toast.set({ message, type });
+    this.toastTimer = setTimeout(() => this.toast.set(null), 6_000);
+  }
+
+  private errorMessage(error: unknown, fallback: string): string {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'response' in error &&
+      typeof error.response === 'object' &&
+      error.response !== null &&
+      'message' in error.response
+    ) {
+      return String(error.response.message);
+    }
+    return fallback;
   }
 
   private emptyMember(): NewMember {

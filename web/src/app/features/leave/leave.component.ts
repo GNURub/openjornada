@@ -4,6 +4,9 @@ import { AuthService } from '../../core/auth.service';
 import {
   availableLeaveDays,
   countRequestedDays,
+  findLeaveConflicts,
+  type LeaveConflict,
+  type LeaveConflictStatus,
 } from '../../core/leave-calculations';
 import {
   LeaveBalanceRecord,
@@ -23,6 +26,16 @@ interface CalendarCell {
   requests: LeaveRequestRecord[];
   holiday?: PublicHolidayRecord;
 }
+
+interface LeaveConflictGroups {
+  approved: LeaveConflict[];
+  pending: LeaveConflict[];
+}
+
+const EMPTY_CONFLICT_GROUPS: LeaveConflictGroups = {
+  approved: [],
+  pending: [],
+};
 
 @Component({
   selector: 'app-leave',
@@ -60,6 +73,21 @@ export class LeaveComponent {
   protected readonly pendingCount = computed(
     () => this.requests().filter((request) => request.status === 'pending').length,
   );
+  protected readonly requestConflicts = computed(() => {
+    const conflictsByRequest = new Map<string, LeaveConflictGroups>();
+    if (!this.canManage()) return conflictsByRequest;
+
+    const requests = this.requests();
+    for (const request of requests) {
+      if (request.status !== 'pending') continue;
+      const groups: LeaveConflictGroups = { approved: [], pending: [] };
+      for (const conflict of findLeaveConflicts(request, requests)) {
+        groups[conflict.status].push(conflict);
+      }
+      conflictsByRequest.set(request.id, groups);
+    }
+    return conflictsByRequest;
+  });
 
   protected employee = '';
   protected leaveType = '';
@@ -371,6 +399,31 @@ export class LeaveComponent {
     );
   }
 
+  protected conflictsFor(request: LeaveRequestRecord): LeaveConflictGroups {
+    return this.requestConflicts().get(request.id) ?? EMPTY_CONFLICT_GROUPS;
+  }
+
+  protected conflictTitle(
+    status: LeaveConflictStatus,
+    count: number,
+  ): string {
+    if (status === 'approved') {
+      return count === 1
+        ? '1 ausencia aprobada coincidente'
+        : `${count} ausencias aprobadas coincidentes`;
+    }
+    return count === 1
+      ? '1 solicitud pendiente coincidente'
+      : `${count} solicitudes pendientes coincidentes`;
+  }
+
+  protected conflictDateRange(conflict: LeaveConflict): string {
+    const start = this.formatDateKey(conflict.overlapStart);
+    return conflict.overlapStart === conflict.overlapEnd
+      ? start
+      : `${start} — ${this.formatDateKey(conflict.overlapEnd)}`;
+  }
+
   protected statusLabel(status: LeaveStatus): string {
     return {
       pending: 'Pendiente',
@@ -381,11 +434,15 @@ export class LeaveComponent {
   }
 
   protected formatDate(value: string): string {
+    return this.formatDateKey(value.slice(0, 10));
+  }
+
+  private formatDateKey(value: string): string {
     return new Intl.DateTimeFormat('es-ES', {
       day: 'numeric',
       month: 'short',
       year: 'numeric',
-    }).format(new Date(value));
+    }).format(new Date(`${value}T12:00:00`));
   }
 
   protected monthLabel(): string {

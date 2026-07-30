@@ -9,10 +9,11 @@ import {
 } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
 import { eventLabel } from '../../core/time-calculations';
+import { TimesheetComponent } from './timesheet.component';
 
 @Component({
   selector: 'app-records',
-  imports: [FormsModule],
+  imports: [FormsModule, TimesheetComponent],
   templateUrl: './records.component.html',
 })
 export class RecordsComponent {
@@ -27,6 +28,7 @@ export class RecordsComponent {
   protected readonly savingCorrection = signal(false);
   protected readonly correctionTarget = signal<WorkEventRecord | null>(null);
   protected readonly eventLabel = eventLabel;
+  protected readonly activeTab = signal<'sheet' | 'trace'>('sheet');
   protected readonly canViewCompany = computed(
     () => this.auth.user()?.role !== 'employee',
   );

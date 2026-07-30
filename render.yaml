@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: openjornada
+    runtime: docker
+    repo: https://github.com/GNURub/openjornada
+    branch: main
+    plan: starter
+    region: frankfurt
+    numInstances: 1
+    autoDeployTrigger: "off"
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    disk:
+      name: openjornada-data
+      mountPath: /app/pb_data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: "8090"
+      - key: PB_APP_NAME
+        value: OpenJornada
+      - key: PB_PUBLIC_URL
+        fromService:
+          type: web
+          name: openjornada
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: PB_ENCRYPTION_KEY
+        sync: false
+      - key: PB_ORGANIZATION_NAME
+        sync: false
+      - key: PB_ORGANIZATION_TAX_ID
+        sync: false
+      - key: PB_TIMEZONE
+        value: Europe/Madrid
+      - key: PB_BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: PB_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: PB_BOOTSTRAP_ADMIN_NAME
+        value: Administración
+      - key: PB_DEMO_ENABLED
+        value: "false"

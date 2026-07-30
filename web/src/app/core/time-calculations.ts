@@ -63,11 +63,15 @@ export function calculateWorkedMs(
 
   for (const event of ordered) {
     const at = new Date(event.occurredAt).getTime();
-    if (event.kind === 'clock_in' || event.kind === 'break_end') {
+    if (
+      event.kind === 'clock_in' ||
+      (event.kind === 'break_end' && !event.breakPaid)
+    ) {
       activeSince ??= at;
     }
     if (
-      (event.kind === 'break_start' || event.kind === 'clock_out') &&
+      ((event.kind === 'break_start' && !event.breakPaid) ||
+        event.kind === 'clock_out') &&
       activeSince !== null
     ) {
       total += Math.max(0, at - activeSince);

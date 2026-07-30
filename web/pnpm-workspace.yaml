@@ -1,0 +1,25 @@
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - '@angular-devkit/architect@0.2201.0'
+  - '@angular-devkit/core@22.1.0'
+  - '@angular-devkit/schematics@22.1.0'
+  - '@angular/build@22.1.0'
+  - '@angular/cli@22.1.0'
+  - '@angular/common@22.1.0'
+  - '@angular/compiler-cli@22.1.0'
+  - '@angular/compiler@22.1.0'
+  - '@angular/core@22.1.0'
+  - '@angular/forms@22.1.0'
+  - '@angular/platform-browser@22.1.0'
+  - '@angular/router@22.1.0'
+  - '@angular/service-worker@22.1.0'
+  - '@napi-rs/wasm-runtime@1.2.1'
+  - '@schematics/angular@22.1.0'
+  - 'baseline-browser-mapping@2.11.7'
+  - 'jose@6.2.5'
+  - 'postcss@8.5.25'

@@ -19,6 +19,11 @@ export PB_BOOTSTRAP_ADMIN_PASSWORD="TestPassword123!"
 export PB_DEMO_ENABLED="true"
 export PB_DEMO_EMAIL="empleada@example.com"
 export PB_DEMO_PASSWORD="DemoPassword123!"
+export PB_MAIL_SENDER_NAME="Aura E2E"
+export PB_MAIL_SENDER_ADDRESS="no-reply@example.com"
+export PB_SMTP_HOST="127.0.0.1"
+export PB_SMTP_PORT="1026"
+export PB_SMTP_TLS="false"
 
 "$pb_binary" migrate up \
   --dir "$test_data_dir" \
@@ -38,4 +43,4 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$project_root/web"
-exec npm start -- --host 127.0.0.1 --port 4217
+exec pnpm start --host 127.0.0.1 --port 4217

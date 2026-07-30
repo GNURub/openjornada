@@ -1,44 +1,79 @@
 <main class="grid min-h-dvh bg-[#f7f4ef] lg:grid-cols-[1.05fr_0.95fr]">
-  <section class="relative hidden overflow-hidden bg-stone-950 p-12 text-white lg:flex lg:flex-col">
+  <section
+    class="relative hidden overflow-hidden p-12 text-white lg:flex lg:flex-col"
+    [style.backgroundColor]="branding.secondaryColor()"
+  >
     <div class="absolute -left-20 top-20 size-80 rounded-full bg-coral-500/25 blur-3xl"></div>
     <div class="absolute -bottom-10 right-0 size-96 rounded-full bg-amber-300/10 blur-3xl"></div>
     <div class="relative flex items-center gap-3">
-      <span class="grid size-11 place-items-center rounded-2xl bg-coral-500 text-xl font-black">O</span>
-      <span class="font-display text-xl font-bold">OpenJornada</span>
+      <img
+        [src]="branding.logoUrl()"
+        alt=""
+        width="44"
+        height="44"
+        class="size-11 object-contain"
+      />
+      <span class="font-display text-xl font-bold">{{ branding.displayName() }}</span>
     </div>
     <div class="relative my-auto max-w-xl">
-      <p class="mb-5 text-sm font-bold uppercase tracking-[0.24em] text-coral-300">Tu tiempo, bien cuidado</p>
+      <p class="mb-5 text-sm font-bold uppercase tracking-[0.24em] text-coral-300">
+        Tu tiempo, bien cuidado
+      </p>
       <h1 class="font-display text-6xl font-bold leading-[1.02] tracking-[-0.04em]">
         Fichar debería ser la parte más sencilla del día.
       </h1>
       <p class="mt-7 max-w-lg text-lg leading-8 text-stone-300">
-        Una experiencia clara y humana para que tu equipo se centre en lo importante: cuidar de cada cliente.
+        Una experiencia clara y humana para que tu equipo se centre en lo importante: cuidar de cada
+        cliente.
       </p>
     </div>
     <div class="relative flex gap-8 text-sm text-stone-400">
-      <span>Registro fiable</span><span>Datos protegidos</span><span>Acceso desde cualquier dispositivo</span>
+      <span>Registro fiable</span><span>Datos protegidos</span
+      ><span>Acceso desde cualquier dispositivo</span>
     </div>
   </section>
 
   <section class="flex items-center justify-center px-5 py-10 sm:px-10">
     <div class="w-full max-w-md">
       <div class="mb-12 flex items-center gap-3 lg:hidden">
-        <span class="grid size-10 place-items-center rounded-2xl bg-coral-500 text-lg font-black text-white">O</span>
-        <span class="font-display text-xl font-bold">OpenJornada</span>
+        <img
+          [src]="branding.logoUrl()"
+          alt=""
+          width="40"
+          height="40"
+          class="size-10 object-contain"
+        />
+        <span class="font-display text-xl font-bold">{{ branding.displayName() }}</span>
       </div>
 
       @if (sent()) {
-        <div class="rounded-[2rem] border border-stone-200 bg-white p-8 shadow-xl shadow-stone-200/60">
-          <div class="mb-6 grid size-14 place-items-center rounded-full bg-emerald-100 text-emerald-700">
-            <svg aria-hidden="true" viewBox="0 0 24 24" class="size-7" fill="none" stroke="currentColor" stroke-width="2">
+        <div
+          class="rounded-[2rem] border border-stone-200 bg-white p-8 shadow-xl shadow-stone-200/60"
+        >
+          <div
+            class="mb-6 grid size-14 place-items-center rounded-full bg-emerald-100 text-emerald-700"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              class="size-7"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
               <path d="m5 12 4 4L19 6" />
             </svg>
           </div>
           <h1 class="font-display text-3xl font-bold tracking-tight">Revisa tu correo</h1>
           <p class="mt-3 leading-7 text-stone-500">
-            Si existe una cuenta con ese correo, recibirás las instrucciones para recuperar el acceso.
+            Si existe una cuenta con ese correo, recibirás las instrucciones para recuperar el
+            acceso.
           </p>
-          <button type="button" (click)="sent.set(false); resetMode.set(false)" class="btn-secondary mt-8 w-full">
+          <button
+            type="button"
+            (click)="sent.set(false); resetMode.set(false)"
+            class="btn-secondary mt-8 w-full"
+          >
             Volver al acceso
           </button>
         </div>
@@ -88,7 +123,10 @@
             }
 
             @if (auth.error()) {
-              <p role="alert" class="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              <p
+                role="alert"
+                class="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+              >
                 {{ auth.error() }}
               </p>
             }

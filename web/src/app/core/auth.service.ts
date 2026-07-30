@@ -1,6 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ClientResponseError } from 'pocketbase';
+import { BrandingService } from './branding.service';
 import { UserRecord } from './models';
 import { PocketBaseService } from './pocketbase.service';
 
@@ -8,10 +9,9 @@ import { PocketBaseService } from './pocketbase.service';
 export class AuthService {
   private readonly pb = inject(PocketBaseService).client;
   private readonly router = inject(Router);
+  private readonly branding = inject(BrandingService);
 
-  readonly user = signal<UserRecord | null>(
-    this.pb.authStore.record as UserRecord | null,
-  );
+  readonly user = signal<UserRecord | null>(this.pb.authStore.record as UserRecord | null);
   readonly loading = signal(false);
   readonly error = signal('');
   readonly authenticated = computed(() => Boolean(this.user()));
@@ -21,15 +21,16 @@ export class AuthService {
   });
   readonly canViewReports = computed(() => {
     const role = this.user()?.role;
-    return (
-      role === 'admin' || role === 'manager' || role === 'representative'
-    );
+    return role === 'admin' || role === 'manager' || role === 'representative';
   });
 
   constructor() {
     this.pb.authStore.onChange((_token, record) => {
-      this.user.set(record as UserRecord | null);
+      const user = record as UserRecord | null;
+      this.user.set(user);
+      void this.branding.syncForOrganization(user?.organization ?? null);
     });
+    void this.branding.syncForOrganization(this.user()?.organization ?? null);
     void this.refresh();
   }
 

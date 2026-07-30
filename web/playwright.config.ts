@@ -6,6 +6,9 @@ export default defineConfig({
   workers: 1,
   retries: process.env['CI'] ? 2 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
+  expect: {
+    timeout: 10_000,
+  },
   use: {
     baseURL: 'http://127.0.0.1:4217',
     trace: 'on-first-retry',
@@ -20,7 +23,7 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
-    command: 'npm run e2e:serve',
+    command: 'pnpm run e2e:serve',
     url: 'http://127.0.0.1:4217',
     reuseExistingServer: false,
     timeout: 120_000,

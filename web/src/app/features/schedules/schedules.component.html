@@ -8,7 +8,7 @@
       </p>
     </div>
     @if (canManage()) {
-      <button type="button" (click)="formOpen.set(true)" class="btn-primary w-full sm:w-auto">
+      <button type="button" (click)="openForm()" class="btn-primary w-full sm:w-auto">
         <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
         Asignar horario
       </button>
@@ -29,20 +29,152 @@
           <h2 class="font-display text-2xl font-bold">Asignar horario</h2>
           <p class="mt-1 text-sm text-stone-400">Los cambios futuros no alterarán los horarios históricos.</p>
         </div>
-        <button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500">
+        <button type="button" aria-label="Cerrar formulario" (click)="closeForm()" class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500">
           <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18" /></svg>
         </button>
       </div>
       <form (ngSubmit)="createSchedule()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        <label class="block">
-          <span class="field-label">Persona</span>
-          <select [(ngModel)]="employee" name="employee" required class="field-input">
-            @for (member of members(); track member.id) {
-              <option [value]="member.id">{{ member.name }} · {{ member.employeeCode }}</option>
-            }
-          </select>
-        </label>
-        <label class="block">
+        <div class="relative sm:col-span-2">
+          <span class="field-label">Personas</span>
+          <button
+            type="button"
+            aria-label="Seleccionar personas"
+            aria-haspopup="listbox"
+            [attr.aria-expanded]="peoplePickerOpen()"
+            (click)="peoplePickerOpen.set(!peoplePickerOpen())"
+            class="field-input flex items-center justify-between gap-4 text-left"
+          >
+            <span class="min-w-0">
+              @if (selectedEmployeeIds().length === 0) {
+                <span class="text-stone-400">Busca y selecciona una o varias personas</span>
+              } @else {
+                <span class="font-semibold text-stone-800">
+                  {{ selectedEmployeeIds().length }}
+                  {{ selectedEmployeeIds().length === 1 ? 'persona seleccionada' : 'personas seleccionadas' }}
+                </span>
+              }
+            </span>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              class="size-5 shrink-0 text-stone-400 transition"
+              [class.rotate-180]="peoplePickerOpen()"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="m7 10 5 5 5-5" />
+            </svg>
+          </button>
+
+          @if (peoplePickerOpen()) {
+            <div class="absolute left-0 top-full z-30 mt-2 w-full min-w-72 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl shadow-stone-300/50">
+              <div class="border-b border-stone-100 p-4">
+                <label class="relative block">
+                  <span class="sr-only">Buscar personas</span>
+                  <svg aria-hidden="true" viewBox="0 0 24 24" class="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-stone-400" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                  <input
+                    [ngModel]="memberSearch()"
+                    (ngModelChange)="memberSearch.set($event)"
+                    name="memberSearch"
+                    type="search"
+                    autocomplete="off"
+                    placeholder="Buscar por nombre, código o puesto"
+                    class="field-input !min-h-11 !pl-11"
+                  />
+                </label>
+                <div class="mt-3 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    (click)="selectVisibleEmployees()"
+                    class="text-xs font-bold text-coral-600 hover:text-coral-700"
+                  >
+                    Seleccionar visibles
+                  </button>
+                  <button
+                    type="button"
+                    (click)="clearEmployees()"
+                    [disabled]="selectedEmployeeIds().length === 0"
+                    class="text-xs font-bold text-stone-400 hover:text-stone-700 disabled:opacity-40"
+                  >
+                    Limpiar
+                  </button>
+                </div>
+              </div>
+
+              <ul
+                role="listbox"
+                aria-label="Personas disponibles"
+                aria-multiselectable="true"
+                class="max-h-72 overflow-y-auto p-2"
+              >
+                @for (member of filteredMembers(); track member.id) {
+                  <li role="option" [attr.aria-selected]="isEmployeeSelected(member.id)">
+                    <label
+                      class="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-stone-50"
+                      [class.bg-coral-50]="isEmployeeSelected(member.id)"
+                    >
+                      <input
+                        type="checkbox"
+                        [checked]="isEmployeeSelected(member.id)"
+                        (change)="toggleEmployee(member.id)"
+                        class="size-4 shrink-0 accent-coral-500"
+                      />
+                      <span class="grid size-9 shrink-0 place-items-center rounded-full bg-stone-100 text-xs font-bold text-stone-500">
+                        {{ member.name.charAt(0) }}
+                      </span>
+                      <span class="min-w-0 flex-1">
+                        <strong class="block truncate text-sm">{{ member.name }}</strong>
+                        <span class="block truncate text-xs text-stone-400">
+                          {{ member.employeeCode }}
+                          @if (member.jobTitle) { · {{ member.jobTitle }} }
+                        </span>
+                      </span>
+                      @if (isEmployeeSelected(member.id)) {
+                        <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5 shrink-0 text-coral-600" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6" /></svg>
+                      }
+                    </label>
+                  </li>
+                } @empty {
+                  <li class="px-4 py-8 text-center text-sm text-stone-400">
+                    No hay personas que coincidan con la búsqueda.
+                  </li>
+                }
+              </ul>
+              <div class="flex items-center justify-between border-t border-stone-100 bg-stone-50 px-4 py-3">
+                <span class="text-xs font-semibold text-stone-500">
+                  {{ selectedEmployeeIds().length }} seleccionadas
+                </span>
+                <button
+                  type="button"
+                  (click)="peoplePickerOpen.set(false)"
+                  class="rounded-lg bg-stone-900 px-4 py-2 text-xs font-bold text-white"
+                >
+                  Listo
+                </button>
+              </div>
+            </div>
+          }
+
+          @if (selectedMembers().length > 0) {
+            <ul class="mt-3 flex flex-wrap gap-2" aria-label="Personas seleccionadas">
+              @for (member of selectedMembers(); track member.id) {
+                <li class="inline-flex items-center gap-2 rounded-full bg-coral-50 py-1.5 pl-3 pr-1.5 text-xs font-bold text-coral-700">
+                  {{ member.name }}
+                  <button
+                    type="button"
+                    [attr.aria-label]="'Quitar a ' + member.name"
+                    (click)="removeEmployee(member.id)"
+                    class="grid size-6 place-items-center rounded-full bg-white/80 text-coral-500 hover:bg-white"
+                  >
+                    ×
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+        <label class="block sm:col-span-2">
           <span class="field-label">Nombre</span>
           <input [(ngModel)]="name" name="name" required maxlength="120" class="field-input" />
         </label>
@@ -84,7 +216,15 @@
           <input [(ngModel)]="breakMinutes" name="breakMinutes" type="number" min="0" max="240" required class="field-input" />
         </label>
         <div class="flex items-end">
-          <button type="submit" [disabled]="saving() || weekdays.length === 0" class="btn-primary w-full">{{ saving() ? 'Guardando…' : 'Asignar' }}</button>
+          <button type="submit" [disabled]="saving() || weekdays.length === 0 || selectedEmployeeIds().length === 0" class="btn-primary w-full">
+            {{
+              saving()
+                ? 'Guardando…'
+                : selectedEmployeeIds().length > 1
+                  ? 'Asignar a ' + selectedEmployeeIds().length
+                  : 'Asignar'
+            }}
+          </button>
         </div>
       </form>
     </section>

@@ -9,7 +9,7 @@ import { PocketBaseService } from '../../core/pocketbase.service';
   template: `
     <main class="grid min-h-dvh place-items-center bg-[#f7f4ef] px-5 py-10">
       <section class="w-full max-w-md rounded-[2rem] border border-stone-200 bg-white p-8 text-center shadow-xl shadow-stone-200/60">
-        <span class="mx-auto grid size-12 place-items-center rounded-2xl bg-coral-500 font-black text-white">A</span>
+        <img src="/brand/openjornada-mark.png" alt="OpenJornada" width="48" height="48" class="mx-auto size-12 object-contain" />
         @if (loading()) {
           <h1 class="mt-7 font-display text-3xl font-bold">Verificando tu correo…</h1>
           <p class="mt-3 text-stone-500">Sólo tardará un momento.</p>

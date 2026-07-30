@@ -1,39 +1,305 @@
 <div class="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
   <div class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-    <div><p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Personas</p><h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Documentos</h1><p class="mt-2 text-stone-500">Archivos personales y de empresa con visibilidad controlada.</p></div>
-    <button type="button" (click)="formOpen.set(true)" class="btn-primary">Subir documento</button>
+    <div>
+      <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Personas</p>
+      <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Documentos</h1>
+      <p class="mt-2 text-stone-500">Archivos personales y carpetas compartidas con acceso controlado.</p>
+    </div>
+    <div class="flex flex-col gap-2 sm:flex-row">
+      @if (canManage()) {
+        <button type="button" (click)="openFolderForm()" class="btn-secondary">Nueva carpeta</button>
+      }
+      <button type="button" (click)="openUpload()" class="btn-primary">Subir documento</button>
+    </div>
   </div>
 
-  @if (pendingAcknowledgements()) { <div class="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">Tienes {{ pendingAcknowledgements() }} documentos pendientes de confirmar.</div> }
-  @if (error()) { <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p> }
-  @if (success()) { <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p> }
+  @if (pendingAcknowledgements()) {
+    <div class="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-800">
+      Tienes {{ pendingAcknowledgements() }} documentos pendientes de confirmar.
+    </div>
+  }
+  @if (error()) {
+    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p>
+  }
 
-  @if (formOpen()) {
+  @if (folderFormOpen()) {
     <section class="mt-7 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8">
-      <div class="flex items-center justify-between"><h2 class="font-display text-2xl font-bold">Nuevo documento</h2><button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100">×</button></div>
-      <form (ngSubmit)="upload()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        @if (canManage()) { <label><span class="field-label">Persona</span><select [(ngModel)]="employee" name="employee" class="field-input">@for (member of members(); track member.id) { <option [value]="member.id">{{ member.name }}</option> }</select></label> }
-        <label><span class="field-label">Título</span><input [(ngModel)]="title" name="title" required class="field-input" /></label>
-        <label><span class="field-label">Categoría</span><select [(ngModel)]="category" name="category" class="field-input"><option value="contract">Contrato</option><option value="payroll">Nómina</option><option value="identity">Identidad</option><option value="medical">Médico</option><option value="training">Formación</option><option value="other">Otro</option></select></label>
-        @if (canManage()) { <label><span class="field-label">Visibilidad</span><select [(ngModel)]="visibility" name="visibility" class="field-input"><option value="employee">Persona y responsables</option><option value="company">Toda la empresa</option><option value="management">Sólo responsables</option></select></label> }
-        <label class="sm:col-span-2"><span class="field-label">Archivo · PDF, imagen o DOCX</span><input type="file" (change)="onFile($event)" required accept=".pdf,.docx,image/*" class="field-input file:mr-3 file:border-0 file:bg-transparent file:font-bold" /></label>
-        @if (canManage()) { <label class="flex items-center gap-2 self-center text-sm font-semibold"><input [(ngModel)]="acknowledgementRequired" name="acknowledgementRequired" type="checkbox" /> Requiere confirmar lectura</label> }
-        <button type="submit" [disabled]="saving() || !file" class="btn-primary self-end">{{ saving() ? 'Subiendo…' : 'Guardar documento' }}</button>
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">Biblioteca compartida</p>
+          <h2 class="mt-2 font-display text-2xl font-bold">{{ editingFolder() ? 'Editar carpeta' : 'Nueva carpeta' }}</h2>
+        </div>
+        <button type="button" aria-label="Cerrar formulario de carpeta" (click)="folderFormOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100">×</button>
+      </div>
+      <form (ngSubmit)="saveFolder()" class="mt-7 grid gap-5 lg:grid-cols-3">
+        <label>
+          <span class="field-label">Nombre</span>
+          <input [(ngModel)]="folderName" name="folderName" required maxlength="120" class="field-input" placeholder="Políticas internas" />
+        </label>
+        <label>
+          <span class="field-label">Visibilidad</span>
+          <select [(ngModel)]="folderVisibility" name="folderVisibility" class="field-input">
+            <option value="management">Solo responsables</option>
+            <option value="company">Toda la empresa</option>
+            <option value="selected">Usuarios seleccionados</option>
+          </select>
+        </label>
+        <div class="flex items-end">
+          <button type="submit" [disabled]="saving() || !folderName.trim() || (folderVisibility === 'selected' && folderUsers.length === 0)" class="btn-primary w-full">
+            {{ saving() ? 'Guardando…' : 'Guardar carpeta' }}
+          </button>
+        </div>
+        @if (folderVisibility === 'selected') {
+          <fieldset class="rounded-2xl border border-stone-200 p-4 lg:col-span-3">
+            <legend class="px-2 text-sm font-bold text-stone-700">Personas con acceso</legend>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              @for (member of members(); track member.id) {
+                <label class="flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    [checked]="folderUserSelected(member.id)"
+                    (change)="toggleFolderUser(member.id, $any($event.target).checked)"
+                  />
+                  {{ member.name }}
+                </label>
+              }
+            </div>
+          </fieldset>
+        }
       </form>
     </section>
   }
 
-  <section class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-    @if (loading()) { @for (item of [1,2,3]; track item) { <div class="h-52 animate-pulse rounded-[2rem] bg-stone-200"></div> } }
-    @else if (documents().length === 0) { <div class="rounded-[2rem] border border-stone-200 bg-white p-12 text-center sm:col-span-2 xl:col-span-3"><p class="font-semibold">No hay documentos</p></div> }
-    @else { @for (document of documents(); track document.id) {
-      <article class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm">
-        <div class="flex items-start justify-between"><div class="grid size-12 place-items-center rounded-2xl bg-coral-50 font-bold text-coral-700">PDF</div><span class="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-500">{{ categoryLabel(document.category) }}</span></div>
-        <h2 class="mt-5 font-display text-xl font-bold">{{ document.title }}</h2>
-        @if (canManage()) { <p class="mt-1 text-sm font-semibold text-stone-500">{{ document.expand?.employee?.name }}</p> }
-        <p class="mt-3 text-xs text-stone-400">Subido el {{ date(document.created) }}</p>
-        <div class="mt-5 flex items-center justify-between"><button type="button" (click)="open(document)" class="text-sm font-bold text-coral-600">Abrir documento</button>@if (document.acknowledgementRequired && document.employee === auth.user()?.id && !document.acknowledgedAt) { <button type="button" (click)="acknowledge(document)" class="btn-primary !min-h-10 !px-3">Confirmar lectura</button> } @else if (document.acknowledgedAt) { <span class="text-xs font-bold text-emerald-700">Lectura confirmada</span> }</div>
-      </article>
-    } }
-  </section>
+  @if (formOpen()) {
+    <section class="mt-7 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">Archivo protegido</p>
+          <h2 class="mt-2 font-display text-2xl font-bold">Nuevo documento</h2>
+        </div>
+        <button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100">×</button>
+      </div>
+      <form #documentForm="ngForm" (ngSubmit)="upload()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        @if (canManage()) {
+          <label>
+            <span class="field-label">Destino</span>
+            <select [(ngModel)]="uploadFolder" name="uploadFolder" class="field-input">
+              <option value="">Sin carpeta</option>
+              @for (folder of folders(); track folder.id) {
+                <option [value]="folder.id">{{ folder.name }}</option>
+              }
+            </select>
+          </label>
+        }
+        @if (!uploadFolder && canManage()) {
+          <label>
+            <span class="field-label">Persona</span>
+            <select [(ngModel)]="employee" name="employee" required class="field-input">
+              @for (member of members(); track member.id) {
+                <option [value]="member.id">{{ member.name }}</option>
+              }
+            </select>
+          </label>
+        }
+        <div>
+          <label for="document-title" class="field-label">
+            Título <span aria-hidden="true" class="text-red-600">*</span>
+            <span class="sr-only">(obligatorio)</span>
+          </label>
+          <input
+            id="document-title"
+            #titleControl="ngModel"
+            [(ngModel)]="title"
+            name="title"
+            required
+            maxlength="160"
+            aria-required="true"
+            aria-describedby="document-title-help document-title-error"
+            [attr.aria-invalid]="(titleControl.touched || documentForm.submitted) && (titleControl.invalid || !title.trim())"
+            [class.border-red-400]="(titleControl.touched || documentForm.submitted) && (titleControl.invalid || !title.trim())"
+            class="field-input"
+          />
+          <p id="document-title-help" class="mt-1 text-xs text-stone-500">Obligatorio · máximo 160 caracteres.</p>
+          @if ((titleControl.touched || documentForm.submitted) && (titleControl.errors?.['required'] || !title.trim())) {
+            <p id="document-title-error" class="mt-1 text-sm font-semibold text-red-700">El título es obligatorio.</p>
+          } @else if ((titleControl.touched || documentForm.submitted) && titleControl.errors?.['maxlength']) {
+            <p id="document-title-error" class="mt-1 text-sm font-semibold text-red-700">El título no puede superar los 160 caracteres.</p>
+          }
+        </div>
+        <label>
+          <span class="field-label">Categoría</span>
+          <select [(ngModel)]="category" name="category" class="field-input">
+            <option value="contract">Contrato</option>
+            <option value="payroll">Nómina</option>
+            <option value="identity">Identidad</option>
+            <option value="medical">Médico</option>
+            <option value="training">Formación</option>
+            <option value="other">Otro</option>
+          </select>
+        </label>
+        @if (!uploadFolder && canManage()) {
+          <label>
+            <span class="field-label">Visibilidad</span>
+            <select [(ngModel)]="visibility" name="visibility" class="field-input">
+              <option value="employee">Persona y responsables</option>
+              <option value="company">Toda la empresa</option>
+              <option value="management">Solo responsables</option>
+            </select>
+          </label>
+        } @else if (uploadFolder) {
+          <div class="rounded-2xl bg-stone-50 px-4 py-3 text-sm text-stone-600">
+            <span class="block font-bold">Acceso heredado</span>
+            {{ folderVisibilityLabel(folderById(uploadFolder)?.visibility || 'management') }}
+          </div>
+        }
+        <label class="sm:col-span-2">
+          <span class="field-label">Archivo · PDF, imagen o DOCX</span>
+          <input type="file" (change)="onFile($event)" required accept=".pdf,.docx,image/*" class="field-input file:mr-3 file:border-0 file:bg-transparent file:font-bold" />
+        </label>
+        @if (canManage()) {
+          <label class="flex items-center gap-2 self-center text-sm font-semibold">
+            <input [(ngModel)]="acknowledgementRequired" name="acknowledgementRequired" type="checkbox" />
+            Requiere confirmar lectura
+          </label>
+        }
+        <button type="submit" [disabled]="saving() || documentForm.invalid || !title.trim() || !file || (!uploadFolder && !employee)" class="btn-primary self-end">
+          {{ saving() ? 'Subiendo…' : 'Guardar documento' }}
+        </button>
+      </form>
+    </section>
+  }
+
+  @if (movingDocument()) {
+    <section class="mt-7 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-lg sm:p-8">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">Mover documento</p>
+          <h2 class="mt-2 font-display text-2xl font-bold">{{ movingDocument()!.title }}</h2>
+        </div>
+        <button type="button" aria-label="Cerrar movimiento" (click)="movingDocument.set(null)" class="grid size-10 place-items-center rounded-full bg-stone-100">×</button>
+      </div>
+      <form (ngSubmit)="moveDocument()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <label>
+          <span class="field-label">Destino</span>
+          <select [(ngModel)]="moveFolder" name="moveFolder" class="field-input">
+            <option value="">Sin carpeta</option>
+            @for (folder of folders(); track folder.id) {
+              <option [value]="folder.id">{{ folder.name }}</option>
+            }
+          </select>
+        </label>
+        @if (!moveFolder) {
+          <label>
+            <span class="field-label">Persona</span>
+            <select [(ngModel)]="moveEmployee" name="moveEmployee" required class="field-input">
+              @for (member of members(); track member.id) {
+                <option [value]="member.id">{{ member.name }}</option>
+              }
+            </select>
+          </label>
+          <label>
+            <span class="field-label">Visibilidad</span>
+            <select [(ngModel)]="moveVisibility" name="moveVisibility" class="field-input">
+              <option value="employee">Persona y responsables</option>
+              <option value="company">Toda la empresa</option>
+              <option value="management">Solo responsables</option>
+            </select>
+          </label>
+        }
+        <button type="submit" [disabled]="saving() || (!moveFolder && !moveEmployee)" class="btn-primary self-end">
+          {{ saving() ? 'Moviendo…' : 'Mover documento' }}
+        </button>
+      </form>
+    </section>
+  }
+
+  <div class="mt-7 grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+    <aside class="self-start rounded-[2rem] border border-stone-200 bg-white p-3 shadow-sm lg:sticky lg:top-6">
+      <p class="px-3 pb-2 pt-1 text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Carpetas</p>
+      <nav aria-label="Carpetas de documentos" class="space-y-1">
+        <button type="button" (click)="selectFolder('all')" class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-bold" [class.bg-stone-900]="selectedFolder() === 'all'" [class.text-white]="selectedFolder() === 'all'">
+          <span>Todos</span><span>{{ documents().length }}</span>
+        </button>
+        <button type="button" (click)="selectFolder('root')" class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-bold" [class.bg-stone-900]="selectedFolder() === 'root'" [class.text-white]="selectedFolder() === 'root'">
+          <span>Sin carpeta</span><span>{{ rootDocumentCount() }}</span>
+        </button>
+        @for (folder of folders(); track folder.id) {
+          <div class="rounded-xl" [class.bg-coral-50]="selectedFolder() === folder.id">
+            <button type="button" (click)="selectFolder(folder.id)" class="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm font-bold">
+              <span class="truncate">📁 {{ folder.name }}</span>
+              <span>{{ folderDocumentCount(folder.id) }}</span>
+            </button>
+            @if (canManage() && selectedFolder() === folder.id) {
+              <div class="flex gap-3 px-3 pb-2 text-xs font-bold">
+                <button type="button" (click)="openFolderForm(folder)" class="text-coral-700">Editar</button>
+                <button type="button" (click)="deleteFolder(folder)" class="text-red-600">Eliminar</button>
+              </div>
+            }
+          </div>
+        }
+      </nav>
+    </aside>
+
+    <section>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="font-display text-2xl font-bold">{{ selectedFolderRecord()?.name || (selectedFolder() === 'root' ? 'Sin carpeta' : 'Todos los documentos') }}</h2>
+          @if (selectedFolderRecord(); as folder) {
+            <p class="mt-1 text-sm font-semibold text-stone-500">{{ folderVisibilityLabel(folder.visibility) }}</p>
+          }
+        </div>
+        <p class="text-sm font-semibold text-stone-400">{{ filteredDocuments().length }} documentos</p>
+      </div>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        @if (loading()) {
+          @for (item of [1,2,3]; track item) {
+            <div class="h-64 animate-pulse rounded-[2rem] bg-stone-200"></div>
+          }
+        } @else if (filteredDocuments().length === 0) {
+          <div class="rounded-[2rem] border border-stone-200 bg-white p-12 text-center sm:col-span-2 xl:col-span-3">
+            <p class="font-semibold">No hay documentos en esta ubicación</p>
+          </div>
+        } @else {
+          @for (document of filteredDocuments(); track document.id) {
+            <article class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-3">
+                <div class="grid size-12 place-items-center rounded-2xl bg-coral-50 font-bold text-coral-700">DOC</div>
+                <span class="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-500">{{ categoryLabel(document.category) }}</span>
+              </div>
+              <h3 class="mt-5 font-display text-xl font-bold">{{ document.title }}</h3>
+              @if (document.folder) {
+                <p class="mt-1 text-sm font-semibold text-stone-500">📁 {{ folderFor(document)?.name }}</p>
+              } @else if (canManage()) {
+                <p class="mt-1 text-sm font-semibold text-stone-500">{{ document.expand?.employee?.name }}</p>
+              }
+              <p class="mt-2 text-xs font-semibold text-stone-400">
+                {{ document.folder ? folderVisibilityLabel(folderFor(document)?.visibility || 'management') : visibilityLabel(document.visibility) }}
+              </p>
+              <p class="mt-3 text-xs text-stone-400">Subido el {{ date(document.created) }}</p>
+
+              @if (document.acknowledgementRequired && canManage()) {
+                <p class="mt-3 rounded-xl bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600">{{ readProgress(document) }}</p>
+              }
+
+              <div class="mt-5 flex flex-wrap items-center gap-3">
+                <button type="button" (click)="open(document)" class="text-sm font-bold text-coral-600">Abrir documento</button>
+                @if (canManage()) {
+                  <button type="button" (click)="openMove(document)" class="text-sm font-bold text-stone-500">Mover</button>
+                }
+                @if (document.acknowledgementRequired && canCurrentUserAcknowledge(document) && !hasCurrentUserAcknowledged(document)) {
+                  <button type="button" (click)="acknowledge(document)" class="btn-primary !min-h-10 !px-3">Confirmar lectura</button>
+                } @else if (document.acknowledgementRequired && hasCurrentUserAcknowledged(document)) {
+                  <span class="text-xs font-bold text-emerald-700">Lectura confirmada</span>
+                }
+              </div>
+            </article>
+          }
+        }
+      </div>
+    </section>
+  </div>
 </div>

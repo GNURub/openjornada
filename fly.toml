@@ -1,0 +1,41 @@
+primary_region = "mad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8090"
+  PB_APP_NAME = "OpenJornada"
+  PB_TIMEZONE = "Europe/Madrid"
+  PB_BOOTSTRAP_ADMIN_NAME = "Administración"
+  PB_DEMO_ENABLED = "false"
+
+[http_service]
+  internal_port = 8090
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 150
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "15s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/health"
+
+[[mounts]]
+  source = "openjornada_data"
+  destination = "/app/pb_data"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

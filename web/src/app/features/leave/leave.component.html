@@ -84,6 +84,41 @@
             @if (request.attachment) { <button type="button" (click)="openAttachment(request)" class="mt-3 text-sm font-bold text-coral-600 hover:text-coral-700">Ver justificante protegido</button> }
             @if (request.response) { <p class="mt-3 rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-500">{{ request.response }}</p> }
             @if (canManage() && request.status === 'pending') {
+              @let conflicts = conflictsFor(request);
+              @if (conflicts.approved.length) {
+                <aside class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900" aria-label="Ausencias aprobadas coincidentes">
+                  <p class="text-xs font-bold uppercase tracking-wide">{{ conflictTitle('approved', conflicts.approved.length) }}</p>
+                  <ul class="mt-2 space-y-1.5 text-xs">
+                    @for (conflict of conflicts.approved.slice(0, 3); track conflict.request.id) {
+                      <li>
+                        <span class="font-bold">{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</span>
+                        · {{ typeFor(conflict.request)?.name || conflict.request.type }}
+                        · {{ conflictDateRange(conflict) }}
+                      </li>
+                    }
+                  </ul>
+                  @if (conflicts.approved.length > 3) {
+                    <p class="mt-2 text-xs font-semibold">Y {{ conflicts.approved.length - 3 }} más.</p>
+                  }
+                </aside>
+              }
+              @if (conflicts.pending.length) {
+                <aside class="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-900" aria-label="Solicitudes pendientes coincidentes">
+                  <p class="text-xs font-bold uppercase tracking-wide">{{ conflictTitle('pending', conflicts.pending.length) }}</p>
+                  <ul class="mt-2 space-y-1.5 text-xs">
+                    @for (conflict of conflicts.pending.slice(0, 3); track conflict.request.id) {
+                      <li>
+                        <span class="font-bold">{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</span>
+                        · {{ typeFor(conflict.request)?.name || conflict.request.type }}
+                        · {{ conflictDateRange(conflict) }}
+                      </li>
+                    }
+                  </ul>
+                  @if (conflicts.pending.length > 3) {
+                    <p class="mt-2 text-xs font-semibold">Y {{ conflicts.pending.length - 3 }} más.</p>
+                  }
+                </aside>
+              }
               <div class="mt-5 flex gap-2"><button type="button" (click)="resolve(request, 'rejected')" class="btn-secondary !min-h-10 flex-1 !px-3">Rechazar</button><button type="button" (click)="resolve(request, 'approved')" class="btn-primary !min-h-10 flex-1 !px-3">Aprobar</button></div>
             } @else if (request.employee === auth.user()?.id && request.status === 'pending') {
               <button type="button" (click)="cancel(request)" class="mt-5 text-sm font-bold text-stone-500 hover:text-red-600">Cancelar solicitud</button>

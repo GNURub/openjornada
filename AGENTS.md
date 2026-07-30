@@ -23,7 +23,7 @@ openssl rand -hex 16
 docker compose up -d --build app
 
 cd web
-npm ci
+pnpm install --frozen-lockfile
 ```
 
 No leas, muestres ni confirmes el contenido de `.env`. Nunca lo añadas a Git.
@@ -33,10 +33,10 @@ No leas, muestres ni confirmes el contenido de `.env`. Nunca lo añadas a Git.
 Desde `web/`:
 
 ```bash
-npm run build
-npm run test:ci
-npm run e2e
-npm audit --omit=dev
+pnpm run build
+pnpm run test:ci
+pnpm run e2e
+pnpm audit --prod
 ```
 
 Desde la raíz:
@@ -84,7 +84,7 @@ Actualiza en el mismo cambio:
 
 - `README.md` cuando varíen instalación, comandos, variables o arquitectura.
 - `docs/DEPLOYMENT.md` cuando varíen Docker, proxy, backups o producción.
-- `docs/FACTORIAL_FEATURES.md` cuando varíe la cobertura funcional.
+- `docs/FEATURES.md` cuando varíe la cobertura funcional.
 - `docs/COMPLIANCE_ES.md` cuando varíen controles relacionados con jornada o privacidad.
 - `web/README.md` cuando varíe el flujo específico del frontend.
 

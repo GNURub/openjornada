@@ -1,48 +1,386 @@
-<div class="mx-auto max-w-4xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+<div class="mx-auto max-w-5xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
   <div>
     <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Administración</p>
     <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Configuración de empresa</h1>
-    <p class="mt-2 text-stone-500">Datos generales, zona horaria y política mínima de conservación.</p>
+    <p class="mt-2 text-stone-500">Datos generales e identidad corporativa de la aplicación.</p>
   </div>
 
-  @if (error()) { <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p> }
-  @if (success()) { <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p> }
+  @if (error()) {
+    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+      {{ error() }}
+    </p>
+  }
+  @if (success()) {
+    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">
+      {{ success() }}
+    </p>
+  }
 
   @if (loading()) {
     <div class="mt-8 h-96 animate-pulse rounded-[2rem] bg-stone-200"></div>
   } @else if (organization(); as company) {
-    <form (ngSubmit)="save()" class="mt-8 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
-      <div class="grid gap-5 sm:grid-cols-2">
-        <label class="block sm:col-span-2">
-          <span class="field-label">Nombre de la empresa</span>
-          <input [(ngModel)]="company.name" name="name" required maxlength="160" class="field-input" />
+    <form #settingsForm="ngForm" (ngSubmit)="save()" class="mt-8 space-y-6">
+      <section class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+        <h2 class="font-display text-2xl font-bold">Datos generales</h2>
+        <div class="mt-6 grid gap-5 sm:grid-cols-2">
+          <label class="block sm:col-span-2">
+            <span class="field-label">Nombre de la empresa</span>
+            <input
+              [(ngModel)]="company.name"
+              name="name"
+              required
+              maxlength="160"
+              class="field-input"
+            />
+          </label>
+          <label class="block">
+            <span class="field-label">NIF · sólo lectura</span>
+            <input
+              [value]="company.taxId"
+              readonly
+              class="field-input !bg-stone-50 !text-stone-400"
+            />
+          </label>
+          <label class="block">
+            <span class="field-label">Contacto de privacidad</span>
+            <input
+              [(ngModel)]="company.privacyContact"
+              name="privacyContact"
+              type="email"
+              class="field-input"
+            />
+          </label>
+          <label class="block">
+            <span class="field-label">Zona horaria</span>
+            <select [(ngModel)]="company.timezone" name="timezone" class="field-input">
+              <option value="Europe/Madrid">Península · Europe/Madrid</option>
+              <option value="Atlantic/Canary">Canarias · Atlantic/Canary</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="field-label">Conservación de registros · años</span>
+            <input
+              [(ngModel)]="company.retentionYears"
+              name="retentionYears"
+              type="number"
+              min="4"
+              max="10"
+              required
+              class="field-input"
+            />
+            <span class="mt-2 block text-xs text-stone-400"
+              >La legislación exige un mínimo de cuatro años.</span
+            >
+          </label>
+        </div>
+      </section>
+
+      <section class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+        <div class="max-w-2xl">
+          <p class="text-sm font-bold uppercase tracking-[0.16em] text-coral-600">
+            Control horario
+          </p>
+          <h2 class="mt-2 font-display text-2xl font-bold">
+            Jornadas manuales, correcciones y pausas
+          </h2>
+          <p class="mt-2 text-sm leading-6 text-stone-500">
+            Define si una jornada olvidada necesita revisión y qué pausas puede seleccionar la
+            plantilla. El servidor conserva el motivo, el origen y la cadena de integridad.
+          </p>
+        </div>
+
+        <label class="mt-6 flex items-start gap-3 rounded-2xl bg-stone-50 p-5">
+          <input
+            [(ngModel)]="company.manualTimeApprovalRequired"
+            name="manualTimeApprovalRequired"
+            type="checkbox"
+            class="mt-1 size-5 accent-coral-500"
+          />
+          <span>
+            <strong class="block">Exigir aprobación para jornadas introducidas a posteriori</strong>
+            <span class="mt-1 block text-sm leading-6 text-stone-500">
+              Si está desactivado, la jornada válida se incorpora automáticamente. Si está activado,
+              queda pendiente hasta que admin o manager la apruebe.
+            </span>
+          </span>
         </label>
-        <label class="block">
-          <span class="field-label">NIF · sólo lectura</span>
-          <input [value]="company.taxId" readonly class="field-input !bg-stone-50 !text-stone-400" />
+
+        <label class="mt-3 flex items-start gap-3 rounded-2xl bg-stone-50 p-5">
+          <input
+            [(ngModel)]="company.timeCorrectionApprovalRequired"
+            name="timeCorrectionApprovalRequired"
+            type="checkbox"
+            class="mt-1 size-5 accent-coral-500"
+          />
+          <span>
+            <strong class="block">Exigir aprobación para corregir jornadas registradas</strong>
+            <span class="mt-1 block text-sm leading-6 text-stone-500">
+              Si está desactivado, las correcciones válidas se aplican automáticamente. El registro
+              original se conserva en ambos casos.
+            </span>
+          </span>
         </label>
-        <label class="block">
-          <span class="field-label">Contacto de privacidad</span>
-          <input [(ngModel)]="company.privacyContact" name="privacyContact" type="email" class="field-input" />
-        </label>
-        <label class="block">
-          <span class="field-label">Zona horaria</span>
-          <select [(ngModel)]="company.timezone" name="timezone" class="field-input">
-            <option value="Europe/Madrid">Península · Europe/Madrid</option>
-            <option value="Atlantic/Canary">Canarias · Atlantic/Canary</option>
-          </select>
-        </label>
-        <label class="block">
-          <span class="field-label">Conservación de registros · años</span>
-          <input [(ngModel)]="company.retentionYears" name="retentionYears" type="number" min="4" max="10" required class="field-input" />
-          <span class="mt-2 block text-xs text-stone-400">La legislación exige un mínimo de cuatro años.</span>
-        </label>
-      </div>
-      <div class="mt-8 rounded-2xl bg-stone-50 p-5">
+
+        <div class="mt-7">
+          <div class="flex flex-wrap items-end gap-3">
+            <label class="min-w-52 flex-1">
+              <span class="field-label">Nuevo tipo de pausa</span>
+              <input
+                [(ngModel)]="newBreakTypeName"
+                name="newBreakTypeName"
+                minlength="2"
+                maxlength="80"
+                class="field-input"
+                placeholder="Por ejemplo, Comida"
+              />
+            </label>
+            <label
+              class="flex min-h-13 items-center gap-2 rounded-xl bg-stone-50 px-4 text-sm font-semibold"
+            >
+              <input
+                [(ngModel)]="newBreakTypePaid"
+                name="newBreakTypePaid"
+                type="checkbox"
+                class="size-4 accent-coral-500"
+              />
+              Remunerada
+            </label>
+            <button
+              type="button"
+              (click)="createBreakType()"
+              [disabled]="newBreakTypeName.trim().length < 2 || !!savingBreakType()"
+              class="btn-secondary"
+            >
+              {{ savingBreakType() === 'new' ? 'Creando…' : 'Añadir pausa' }}
+            </button>
+          </div>
+
+          @if (breakTypes().length === 0) {
+            <p class="mt-5 rounded-2xl bg-amber-50 px-5 py-4 text-sm text-amber-800">
+              Crea al menos un tipo para que el empleado pueda registrar pausas.
+            </p>
+          } @else {
+            <ul class="mt-5 divide-y divide-stone-100 rounded-2xl border border-stone-200">
+              @for (item of breakTypes(); track item.id; let index = $index) {
+                <li class="grid gap-3 p-4 md:grid-cols-[1fr_auto_auto_auto] md:items-center">
+                  <input
+                    [(ngModel)]="item.name"
+                    [name]="'breakTypeName' + index"
+                    minlength="2"
+                    maxlength="80"
+                    aria-label="Nombre del tipo de pausa"
+                    class="field-input !min-h-11"
+                  />
+                  <label class="flex items-center gap-2 text-sm font-semibold">
+                    <input
+                      [(ngModel)]="item.paid"
+                      [name]="'breakTypePaid' + index"
+                      type="checkbox"
+                      class="size-4 accent-coral-500"
+                    />
+                    Remunerada
+                  </label>
+                  <label class="flex items-center gap-2 text-sm font-semibold">
+                    <input
+                      [(ngModel)]="item.active"
+                      [name]="'breakTypeActive' + index"
+                      type="checkbox"
+                      class="size-4 accent-coral-500"
+                    />
+                    Disponible
+                  </label>
+                  <button
+                    type="button"
+                    (click)="saveBreakType(item)"
+                    [disabled]="item.name.trim().length < 2 || !!savingBreakType()"
+                    class="btn-secondary !min-h-10 !px-4"
+                  >
+                    {{ savingBreakType() === item.id ? 'Guardando…' : 'Guardar tipo' }}
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      </section>
+
+      <section class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+        <div class="max-w-2xl">
+          <p class="text-sm font-bold uppercase tracking-[0.16em] text-coral-600">Marca</p>
+          <h2 class="mt-2 font-display text-2xl font-bold">Identidad corporativa</h2>
+          <p class="mt-2 text-sm leading-6 text-stone-500">
+            Se aplica al menú, botones, título del navegador, favicon y aplicación instalable de las
+            personas de esta empresa.
+          </p>
+        </div>
+
+        <div class="mt-7 grid gap-7 lg:grid-cols-[1fr_20rem]">
+          <div class="grid gap-5 sm:grid-cols-2">
+            <label class="block">
+              <span class="field-label">Color principal</span>
+              <span class="flex items-center gap-3">
+                <input
+                  [(ngModel)]="company.brandPrimaryColor"
+                  name="brandPrimaryColorPicker"
+                  type="color"
+                  aria-label="Selector de color principal"
+                  class="h-13 w-16 cursor-pointer rounded-xl border border-stone-200 bg-white p-1"
+                />
+                <input
+                  [(ngModel)]="company.brandPrimaryColor"
+                  name="brandPrimaryColor"
+                  required
+                  pattern="^#[0-9a-fA-F]{6}$"
+                  maxlength="7"
+                  aria-label="Color principal hexadecimal"
+                  class="field-input font-mono"
+                />
+              </span>
+            </label>
+            <label class="block">
+              <span class="field-label">Color secundario</span>
+              <span class="flex items-center gap-3">
+                <input
+                  [(ngModel)]="company.brandSecondaryColor"
+                  name="brandSecondaryColorPicker"
+                  type="color"
+                  aria-label="Selector de color secundario"
+                  class="h-13 w-16 cursor-pointer rounded-xl border border-stone-200 bg-white p-1"
+                />
+                <input
+                  [(ngModel)]="company.brandSecondaryColor"
+                  name="brandSecondaryColor"
+                  required
+                  pattern="^#[0-9a-fA-F]{6}$"
+                  maxlength="7"
+                  aria-label="Color secundario hexadecimal"
+                  class="field-input font-mono"
+                />
+              </span>
+            </label>
+
+            <label class="block sm:col-span-2">
+              <span class="field-label">Nombre de la PWA</span>
+              <input
+                [(ngModel)]="company.pwaName"
+                name="pwaName"
+                required
+                maxlength="50"
+                class="field-input"
+                aria-describedby="pwa-name-help"
+              />
+              <span id="pwa-name-help" class="mt-2 block text-xs text-stone-400"
+                >Nombre mostrado al instalar la aplicación y en la cabecera.</span
+              >
+            </label>
+            <label class="block sm:col-span-2">
+              <span class="field-label">Nombre corto de la PWA</span>
+              <input
+                [(ngModel)]="company.pwaShortName"
+                name="pwaShortName"
+                required
+                maxlength="20"
+                class="field-input"
+              />
+              <span class="mt-2 block text-xs text-stone-400"
+                >Máximo 20 caracteres para la pantalla de inicio.</span
+              >
+            </label>
+
+            <div class="sm:col-span-2">
+              <span class="field-label">Logotipo corporativo</span>
+              <div class="flex flex-wrap items-center gap-3">
+                <label class="btn-secondary cursor-pointer">
+                  Seleccionar logotipo
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    class="sr-only"
+                    (change)="selectLogo($event)"
+                  />
+                </label>
+                <button
+                  type="button"
+                  (click)="clearLogo()"
+                  class="text-sm font-semibold text-stone-500 hover:text-stone-900"
+                >
+                  Usar logo de OpenJornada
+                </button>
+              </div>
+              <span class="mt-2 block text-xs text-stone-400"
+                >PNG, JPEG o WebP; máximo 5 MB. Al guardar generaremos automáticamente el icono
+                cuadrado de la PWA, el icono táctil y los favicons.</span
+              >
+              @if (logoError()) {
+                <p role="alert" class="mt-2 text-sm font-medium text-red-600">{{ logoError() }}</p>
+              }
+            </div>
+          </div>
+
+          <aside class="h-fit overflow-hidden rounded-3xl border border-stone-200 bg-stone-50">
+            <div class="p-5 text-white" [style.backgroundColor]="company.brandSecondaryColor">
+              <p class="text-xs font-bold uppercase tracking-[0.16em] text-white/65">
+                Vista previa
+              </p>
+              <div class="mt-5 flex items-center gap-3">
+                <span class="grid size-14 place-items-center rounded-2xl bg-white p-2 shadow-lg">
+                  <img
+                    [src]="logoPreview()"
+                    alt="Vista previa del logotipo"
+                    class="max-h-full max-w-full object-contain"
+                  />
+                </span>
+                <span class="min-w-0">
+                  <strong class="block truncate font-display text-lg">{{
+                    company.pwaName || company.name
+                  }}</strong>
+                  <span class="block truncate text-xs text-white/65">{{ company.name }}</span>
+                </span>
+              </div>
+            </div>
+            <div class="p-5">
+              <div class="flex items-center gap-4">
+                <img
+                  [src]="iconPreview()"
+                  alt="Vista previa del icono PWA"
+                  class="size-16 rounded-2xl object-cover shadow-sm"
+                />
+                <div>
+                  <p class="text-sm font-semibold">{{ company.pwaShortName }}</p>
+                  <p class="mt-1 text-xs text-stone-400">Icono generado desde el logotipo</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="mt-5 min-h-11 w-full rounded-xl px-4 text-sm font-bold text-white"
+                [style.backgroundColor]="company.brandPrimaryColor"
+              >
+                Acción principal
+              </button>
+            </div>
+          </aside>
+        </div>
+
+        <p class="mt-7 rounded-2xl bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
+          El logotipo y sus iconos derivados se sirven públicamente para que el navegador pueda
+          instalar la PWA. No subas fotografías, firmas ni otros datos personales.
+        </p>
+      </section>
+
+      <div class="rounded-2xl bg-stone-100 p-5">
         <h2 class="font-semibold">Correo y seguridad</h2>
-        <p class="mt-2 text-sm leading-6 text-stone-500">Las credenciales SMTP, la clave de cifrado, HTTPS y las copias de seguridad se configuran mediante variables de entorno para que no se expongan en el navegador.</p>
+        <p class="mt-2 text-sm leading-6 text-stone-500">
+          Las credenciales SMTP, la clave de cifrado, HTTPS y las copias de seguridad se configuran
+          mediante variables de entorno para que no se expongan en el navegador.
+        </p>
       </div>
-      <button type="submit" [disabled]="saving()" class="btn-primary mt-7">{{ saving() ? 'Guardando…' : 'Guardar cambios' }}</button>
+      <button
+        type="submit"
+        [disabled]="saving() || settingsForm.invalid || !!logoError()"
+        class="btn-primary"
+      >
+        {{ saving() ? 'Guardando…' : 'Guardar cambios' }}
+      </button>
     </form>
   }
 </div>
