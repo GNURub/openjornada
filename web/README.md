@@ -80,7 +80,9 @@ La ruta `/resumenes` contiene cierres mensuales inmutables. Administración o
 responsables cierran un mes ya terminado después de resolver solicitudes y
 anomalías; PocketBase separa minutos ordinarios, complementarios y
 extraordinarios. Cada nueva versión enlaza la anterior, se notifica a la
-persona y el acuse de recepción es idempotente.
+persona y el acuse de recepción es idempotente. Su CSV replica la persona,
+periodo, versión, minutos planificados, ordinarios, complementarios,
+extraordinarios y totales, la huella de integridad y el desglose de cada día.
 
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde

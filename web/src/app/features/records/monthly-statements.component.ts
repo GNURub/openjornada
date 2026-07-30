@@ -2,6 +2,10 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth.service';
 import {
+  buildMonthlyStatementCsv,
+  monthlyStatementCsvFilename,
+} from '../../core/monthly-statement-csv';
+import {
   MonthlyStatementAcknowledgement,
   MonthlyTimeStatement,
   UserRecord,
@@ -111,34 +115,12 @@ export class MonthlyStatementsComponent {
   }
 
   protected exportCsv(statement: MonthlyTimeStatement): void {
-    const rows: Array<Array<string | number>> = [
-      ['Persona', statement.expand?.employee?.name ?? statement.employee],
-      ['Periodo', statement.period],
-      ['Versión', statement.version],
-      ['Tipo de contrato', statement.employmentType],
-      ['Minutos ordinarios', statement.ordinaryMinutes],
-      ['Minutos complementarios', statement.complementaryMinutes],
-      ['Minutos extraordinarios', statement.overtimeMinutes],
-      ['Minutos totales', statement.totalMinutes],
-      ['Huella', statement.integrityHash],
-      [],
-      ['Fecha', 'Planificados', 'Trabajados', 'Ordinarios', 'Complementarios', 'Extraordinarios'],
-      ...statement.dailyRecords.map((day) => [
-        day.date,
-        day.plannedMinutes,
-        day.workedMinutes,
-        day.ordinaryMinutes,
-        day.complementaryMinutes,
-        day.overtimeMinutes,
-      ]),
-    ];
-    const csv = rows
-      .map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(','))
-      .join('\r\n');
-    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(
+      new Blob([buildMonthlyStatementCsv(statement)], { type: 'text/csv;charset=utf-8' }),
+    );
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `resumen-jornada-${statement.period}-v${statement.version}.csv`;
+    anchor.download = monthlyStatementCsvFilename(statement);
     anchor.click();
     URL.revokeObjectURL(url);
   }

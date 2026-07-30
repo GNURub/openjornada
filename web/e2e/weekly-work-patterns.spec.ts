@@ -1,4 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import type { MonthlyTimeStatement } from '../src/app/core/models';
+import {
+  buildMonthlyStatementCsv,
+  monthlyStatementCsvFilename,
+} from '../src/app/core/monthly-statement-csv';
 
 const apiBase = process.env['OPENJORNADA_E2E_API_URL'] ?? 'http://127.0.0.1:8090/api';
 const adminEmail = process.env['OPENJORNADA_E2E_ADMIN_EMAIL'] ?? 'admin@example.com';
@@ -13,17 +18,11 @@ type Authentication = {
 type EmployeeProfile = {
   id: string;
   email: string;
+  name: string;
   token: string;
 };
 
-type DailyRecord = {
-  date: string;
-  plannedMinutes: number;
-  workedMinutes: number;
-  ordinaryMinutes: number;
-  complementaryMinutes: number;
-  overtimeMinutes: number;
-};
+type DailyRecord = MonthlyTimeStatement['dailyRecords'][number];
 
 async function signIn(
   request: APIRequestContext,
@@ -82,11 +81,12 @@ async function createEmployee(
   complementaryHoursAgreement: boolean,
 ): Promise<EmployeeProfile> {
   const email = `semana-${label}-${suffix}@example.com`;
+  const name = `Semana ${label}`;
   const response = await request.post(`${apiBase}/collections/users/records`, {
     headers: { Authorization: admin.token },
     data: {
       organization: admin.record.organization,
-      name: `Semana ${label}`,
+      name,
       email,
       password: employeePassword,
       passwordConfirm: employeePassword,
@@ -103,7 +103,7 @@ async function createEmployee(
   expect(response.ok(), body).toBeTruthy();
   const employee = JSON.parse(body) as { id: string };
   const auth = await signIn(request, email, employeePassword);
-  return { id: employee.id, email, token: auth.token };
+  return { id: employee.id, email, name, token: auth.token };
 }
 
 async function assignSchedule(
@@ -183,15 +183,7 @@ async function closeMonth(
 ): Promise<{
   status: number;
   text: string;
-  statement?: {
-    employmentType: 'full_time' | 'part_time';
-    contractedMinutes: number;
-    ordinaryMinutes: number;
-    complementaryMinutes: number;
-    overtimeMinutes: number;
-    totalMinutes: number;
-    dailyRecords: DailyRecord[];
-  };
+  statement?: MonthlyTimeStatement;
 }> {
   const close = await request.post(`${apiBase}/openjornada/monthly-statements/close`, {
     headers: { Authorization: admin.token },
@@ -201,22 +193,14 @@ async function closeMonth(
   if (!close.ok()) return { status: close.status(), text };
   const closed = JSON.parse(text) as { id: string };
   const statement = await request.get(
-    `${apiBase}/collections/monthly_time_statements/records/${closed.id}`,
+    `${apiBase}/collections/monthly_time_statements/records/${closed.id}?expand=employee`,
     { headers: { Authorization: admin.token } },
   );
   expect(statement.ok(), await statement.text()).toBeTruthy();
   return {
     status: close.status(),
     text,
-    statement: (await statement.json()) as {
-      employmentType: 'full_time' | 'part_time';
-      contractedMinutes: number;
-      ordinaryMinutes: number;
-      complementaryMinutes: number;
-      overtimeMinutes: number;
-      totalMinutes: number;
-      dailyRecords: DailyRecord[];
-    },
+    statement: (await statement.json()) as MonthlyTimeStatement,
   };
 }
 
@@ -225,6 +209,109 @@ function recordsForWeek(
   week: ReturnType<typeof testWeek>,
 ): DailyRecord[] {
   return statement.dailyRecords.filter((day) => day.date >= week.monday && day.date <= week.sunday);
+}
+
+function csvLine(...cells: Array<string | number>): string {
+  return cells.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',');
+}
+
+function verifySummaryAndCsv(
+  statement: MonthlyTimeStatement,
+  employee: EmployeeProfile,
+  period: string,
+  expected: {
+    employmentType: 'full_time' | 'part_time';
+    contractedMinutes: number;
+    ordinaryMinutes: number;
+    complementaryMinutes: number;
+    overtimeMinutes: number;
+    totalMinutes: number;
+  },
+): string[] {
+  expect(statement).toMatchObject({
+    employee: employee.id,
+    period,
+    version: 1,
+    ...expected,
+  });
+  expect(statement.expand?.employee?.name).toBe(employee.name);
+  expect(statement.integrityHash).toMatch(/^[a-f0-9]{64}$/);
+  const [year, month] = period.split('-').map(Number);
+  expect(statement.dailyRecords).toHaveLength(new Date(Date.UTC(year, month, 0)).getUTCDate());
+  expect(statement.dailyRecords.reduce((total, day) => total + day.plannedMinutes, 0)).toBe(
+    expected.contractedMinutes,
+  );
+  expect(statement.dailyRecords.reduce((total, day) => total + day.workedMinutes, 0)).toBe(
+    expected.totalMinutes,
+  );
+  expect(statement.dailyRecords.reduce((total, day) => total + day.ordinaryMinutes, 0)).toBe(
+    expected.ordinaryMinutes,
+  );
+  expect(statement.dailyRecords.reduce((total, day) => total + day.complementaryMinutes, 0)).toBe(
+    expected.complementaryMinutes,
+  );
+  expect(statement.dailyRecords.reduce((total, day) => total + day.overtimeMinutes, 0)).toBe(
+    expected.overtimeMinutes,
+  );
+
+  const csv = buildMonthlyStatementCsv(statement);
+  const lines = csv.split('\r\n');
+  expect(monthlyStatementCsvFilename(statement)).toBe(`resumen-jornada-${period}-v1.csv`);
+  expect(lines.slice(0, 10)).toEqual([
+    `\uFEFF${csvLine('Persona', employee.name)}`,
+    csvLine('Periodo', period),
+    csvLine('Versión', 1),
+    csvLine('Tipo de contrato', expected.employmentType),
+    csvLine('Minutos planificados', expected.contractedMinutes),
+    csvLine('Minutos ordinarios', expected.ordinaryMinutes),
+    csvLine('Minutos complementarios', expected.complementaryMinutes),
+    csvLine('Minutos extraordinarios', expected.overtimeMinutes),
+    csvLine('Minutos totales', expected.totalMinutes),
+    csvLine('Huella', statement.integrityHash),
+  ]);
+  expect(lines[10]).toBe('');
+  expect(lines[11]).toBe(
+    csvLine(
+      'Fecha',
+      'Planificados',
+      'Trabajados',
+      'Ordinarios',
+      'Complementarios',
+      'Extraordinarios',
+    ),
+  );
+  expect(lines.slice(12)).toEqual(
+    statement.dailyRecords.map((day) =>
+      csvLine(
+        day.date,
+        day.plannedMinutes,
+        day.workedMinutes,
+        day.ordinaryMinutes,
+        day.complementaryMinutes,
+        day.overtimeMinutes,
+      ),
+    ),
+  );
+  return lines;
+}
+
+async function expectNoStatement(
+  request: APIRequestContext,
+  admin: Authentication,
+  employee: EmployeeProfile,
+  period: string,
+): Promise<void> {
+  const response = await request.get(`${apiBase}/collections/monthly_time_statements/records`, {
+    headers: { Authorization: admin.token },
+    params: {
+      page: 1,
+      perPage: 1,
+      filter: `employee = '${employee.id}' && period = '${period}'`,
+    },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const body = (await response.json()) as { totalItems: number };
+  expect(body.totalItems).toBe(0);
 }
 
 test('full-time and part-time weekly patterns classify complementary hours correctly', async ({
@@ -254,7 +341,7 @@ test('full-time and part-time weekly patterns classify complementary hours corre
   }
   const fullTimeClose = await closeMonth(request, admin, fullTime, week.period);
   expect(fullTimeClose.status, fullTimeClose.text).toBe(201);
-  expect(fullTimeClose.statement).toMatchObject({
+  const fullTimeCsv = verifySummaryAndCsv(fullTimeClose.statement!, fullTime, week.period, {
     employmentType: 'full_time',
     contractedMinutes: 2400,
     ordinaryMinutes: 2400,
@@ -262,6 +349,8 @@ test('full-time and part-time weekly patterns classify complementary hours corre
     overtimeMinutes: 0,
     totalMinutes: 2400,
   });
+  expect(fullTimeCsv).toContain(csvLine(week.dates[0], 480, 480, 480, 0, 0));
+  expect(fullTimeCsv).toContain(csvLine(week.dates[5], 0, 0, 0, 0, 0));
   expect(
     recordsForWeek(fullTimeClose.statement!, week).map((day) => ({
       planned: day.plannedMinutes,
@@ -315,14 +404,23 @@ test('full-time and part-time weekly patterns classify complementary hours corre
   }
   const partTimeClose = await closeMonth(request, admin, partTimeWithAgreement, week.period);
   expect(partTimeClose.status, partTimeClose.text).toBe(201);
-  expect(partTimeClose.statement).toMatchObject({
-    employmentType: 'part_time',
-    contractedMinutes: 1200,
-    ordinaryMinutes: 1140,
-    complementaryMinutes: 300,
-    overtimeMinutes: 0,
-    totalMinutes: 1440,
-  });
+  const partTimeCsv = verifySummaryAndCsv(
+    partTimeClose.statement!,
+    partTimeWithAgreement,
+    week.period,
+    {
+      employmentType: 'part_time',
+      contractedMinutes: 1200,
+      ordinaryMinutes: 1140,
+      complementaryMinutes: 300,
+      overtimeMinutes: 0,
+      totalMinutes: 1440,
+    },
+  );
+  expect(partTimeCsv).toContain(csvLine(week.dates[1], 240, 300, 240, 60, 0));
+  expect(partTimeCsv).toContain(csvLine(week.dates[2], 240, 180, 180, 0, 0));
+  expect(partTimeCsv).toContain(csvLine(week.dates[3], 240, 360, 240, 120, 0));
+  expect(partTimeCsv).toContain(csvLine(week.dates[5], 0, 120, 0, 120, 0));
   const partTimeWeek = recordsForWeek(partTimeClose.statement!, week);
   expect(partTimeWeek[1]).toMatchObject({
     plannedMinutes: 240,
@@ -380,6 +478,7 @@ test('full-time and part-time weekly patterns classify complementary hours corre
   const rejectedClose = await closeMonth(request, admin, partTimeWithoutAgreement, week.period);
   expect(rejectedClose.status).toBe(400);
   expect(rejectedClose.text).toContain('sin pacto de horas complementarias');
+  await expectNoStatement(request, admin, partTimeWithoutAgreement, week.period);
 
   const partTimeSaturday = await createEmployee(
     request,
@@ -396,7 +495,7 @@ test('full-time and part-time weekly patterns classify complementary hours corre
   }
   const saturdayClose = await closeMonth(request, admin, partTimeSaturday, week.period);
   expect(saturdayClose.status, saturdayClose.text).toBe(201);
-  expect(saturdayClose.statement).toMatchObject({
+  const saturdayCsv = verifySummaryAndCsv(saturdayClose.statement!, partTimeSaturday, week.period, {
     employmentType: 'part_time',
     contractedMinutes: 1200,
     ordinaryMinutes: 1200,
@@ -404,6 +503,9 @@ test('full-time and part-time weekly patterns classify complementary hours corre
     overtimeMinutes: 0,
     totalMinutes: 1200,
   });
+  expect(saturdayCsv).toContain(csvLine(week.dates[0], 0, 0, 0, 0, 0));
+  expect(saturdayCsv).toContain(csvLine(week.dates[5], 240, 240, 240, 0, 0));
+  expect(saturdayCsv).toContain(csvLine(week.dates[6], 0, 0, 0, 0, 0));
   const saturdayWeek = recordsForWeek(saturdayClose.statement!, week);
   expect(saturdayWeek[0]).toMatchObject({
     plannedMinutes: 0,
