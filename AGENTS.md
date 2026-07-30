@@ -7,7 +7,7 @@ Este archivo se aplica a todo el repositorio.
 OpenJornada es una aplicación multiempresa de gestión laboral:
 
 - Angular 22 y Tailwind CSS 4 generan una SPA standalone.
-- PocketBase 0.39.9 sirve API, autenticación, archivos y frontend compilado.
+- PocketBase 0.39.10 sirve API, autenticación, archivos y frontend compilado.
 - `backend/pb_migrations/` contiene el esquema y las reglas de acceso.
 - `backend/pb_hooks/` contiene validaciones y efectos de servidor.
 - Docker produce un único contenedor con datos persistentes en `/app/pb_data`.

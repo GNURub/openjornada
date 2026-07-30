@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        PB_VERSION: "0.39.9"
+        PB_VERSION: "0.39.10"
     env_file:
       - .env
     ports:

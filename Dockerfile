@@ -10,7 +10,7 @@ COPY web/ ./
 RUN pnpm run build
 
 FROM alpine:3.23
-ARG PB_VERSION=0.39.9
+ARG PB_VERSION=0.39.10
 ARG TARGETARCH
 RUN apk add --no-cache ca-certificates curl tzdata unzip \
     && case "${TARGETARCH}" in \

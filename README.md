@@ -4,7 +4,7 @@ OpenJornada es una plataforma de gestión laboral y RR. HH. para pequeñas y
 medianas empresas. Incluye registro horario, ausencias, gastos, documentos,
 onboarding y objetivos en una SPA responsive.
 
-La aplicación usa Angular 22, Tailwind CSS 4 y PocketBase 0.39.9. Frontend,
+La aplicación usa Angular 22, Tailwind CSS 4 y PocketBase 0.39.10. Frontend,
 API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 
 ## Funcionalidad
@@ -109,7 +109,7 @@ Cuando el frontend se ejecuta en los puertos `4200` o `4217`, se conecta
 automáticamente a PocketBase en `127.0.0.1:8090`.
 
 Para desarrollar PocketBase sin Docker hace falta descargar el binario
-0.39.9 en `backend/bin/pocketbase`. Ese directorio está ignorado por Git.
+0.39.10 en `backend/bin/pocketbase`. Ese directorio está ignorado por Git.
 
 ## Producción
 
