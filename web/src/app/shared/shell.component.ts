@@ -5,6 +5,7 @@ import { BrandingService } from '../core/branding.service';
 import { WorktimeService } from '../core/worktime.service';
 import { ActiveWorktimeWidgetComponent } from './active-worktime-widget.component';
 import { WorktimeReviewModalComponent } from './worktime-review-modal.component';
+import { PrivacyNoticeModalComponent } from './privacy-notice-modal.component';
 
 @Component({
   selector: 'app-shell',
@@ -14,6 +15,7 @@ import { WorktimeReviewModalComponent } from './worktime-review-modal.component'
     RouterLinkActive,
     ActiveWorktimeWidgetComponent,
     WorktimeReviewModalComponent,
+    PrivacyNoticeModalComponent,
   ],
   templateUrl: './shell.component.html',
 })

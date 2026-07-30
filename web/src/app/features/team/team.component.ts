@@ -10,6 +10,9 @@ interface NewMember {
   employeeCode: string;
   jobTitle: string;
   weeklyHours: number;
+  employmentType: UserRecord['employmentType'];
+  contractedWeeklyMinutes: number;
+  complementaryHoursAgreement: boolean;
   role: UserRole;
   password: string;
 }
@@ -136,7 +139,16 @@ export class TeamComponent {
 
   protected async updateMember(
     member: UserRecord,
-    changes: Partial<Pick<UserRecord, 'active' | 'role'>>,
+    changes: Partial<
+      Pick<
+        UserRecord,
+        | 'active'
+        | 'role'
+        | 'employmentType'
+        | 'contractedWeeklyMinutes'
+        | 'complementaryHoursAgreement'
+      >
+    >,
   ): Promise<void> {
     this.error.set('');
     this.success.set('');
@@ -202,6 +214,9 @@ export class TeamComponent {
       employeeCode: '',
       jobTitle: 'Esteticista',
       weeklyHours: 40,
+      employmentType: 'full_time',
+      contractedWeeklyMinutes: 2400,
+      complementaryHoursAgreement: false,
       role: 'employee',
       password: '',
     };

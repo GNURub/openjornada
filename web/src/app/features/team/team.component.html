@@ -102,6 +102,41 @@
           />
         </label>
         <label class="block">
+          <span class="field-label">Tipo de contrato</span>
+          <select
+            [(ngModel)]="newMember.employmentType"
+            name="employmentType"
+            required
+            class="field-input"
+          >
+            <option value="full_time">Tiempo completo</option>
+            <option value="part_time">Tiempo parcial</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="field-label">Minutos contratados por semana</span>
+          <input
+            [(ngModel)]="newMember.contractedWeeklyMinutes"
+            name="contractedWeeklyMinutes"
+            type="number"
+            min="1"
+            max="10080"
+            required
+            class="field-input"
+          />
+        </label>
+        @if (newMember.employmentType === 'part_time') {
+          <label class="flex items-center gap-3 rounded-2xl bg-stone-50 px-4 py-3">
+            <input
+              [(ngModel)]="newMember.complementaryHoursAgreement"
+              name="complementaryHoursAgreement"
+              type="checkbox"
+              class="size-5 accent-coral-500"
+            />
+            <span class="text-sm font-semibold">Existe pacto de horas complementarias</span>
+          </label>
+        }
+        <label class="block">
           <span class="field-label">Rol</span>
           <select [(ngModel)]="newMember.role" name="role" class="field-input">
             <option value="employee">Empleada</option>
@@ -171,6 +206,16 @@
               @if (member.jobTitle) {
                 <p class="mt-0.5 truncate text-xs text-stone-400">{{ member.jobTitle }}</p>
               }
+              <p class="mt-1 text-xs font-medium text-stone-400">
+                {{
+                  member.employmentType === 'part_time'
+                    ? 'Tiempo parcial'
+                    : member.employmentType === 'full_time'
+                      ? 'Tiempo completo'
+                      : 'Contrato pendiente de clasificar'
+                }}
+                · {{ member.contractedWeeklyMinutes || 0 }} min / semana
+              </p>
             </div>
             <div class="min-w-32">
               @switch (invitationState(member)) {
@@ -228,6 +273,21 @@
                 <p class="text-sm font-semibold">{{ roleLabel(member.role) }}</p>
               }
               <p class="mt-0.5 text-xs text-stone-400">{{ member.weeklyHours || 0 }} h / semana</p>
+              @if (
+                (auth.user()?.role === 'admin' || auth.user()?.role === 'manager') &&
+                member.role === 'employee'
+              ) {
+                <select
+                  aria-label="Tipo de contrato de {{ member.name }}"
+                  [ngModel]="member.employmentType"
+                  (ngModelChange)="updateMember(member, { employmentType: $event })"
+                  class="mt-2 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold"
+                >
+                  <option value="unknown">Sin clasificar</option>
+                  <option value="full_time">Tiempo completo</option>
+                  <option value="part_time">Tiempo parcial</option>
+                </select>
+              }
             </div>
             @if (
               member.id !== auth.user()?.id &&

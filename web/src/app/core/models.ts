@@ -12,7 +12,12 @@ export interface UserRecord extends RecordModel {
   active: boolean;
   employeeCode: string;
   weeklyHours: number;
+  employmentType: 'unknown' | 'full_time' | 'part_time';
+  contractedWeeklyMinutes: number;
+  complementaryHoursAgreement: boolean;
   jobTitle: string;
+  privacyNoticeAcknowledgedVersion: string;
+  privacyNoticeAcknowledgedAt: string;
   invitationStatus: '' | 'pending' | 'accepted';
   invitationSentAt: string;
   invitationExpiresAt: string;
@@ -39,6 +44,7 @@ export interface OrganizationRecord extends RecordModel {
   timezone: string;
   retentionYears: number;
   privacyContact: string;
+  privacyNoticeVersion: string;
   brandPrimaryColor: string;
   brandSecondaryColor: string;
   brandLogo: string;
@@ -47,6 +53,20 @@ export interface OrganizationRecord extends RecordModel {
   pwaIcon: string;
   manualTimeApprovalRequired: boolean;
   timeCorrectionApprovalRequired: boolean;
+}
+
+export interface PrivacyNotice {
+  version: string;
+  acknowledged: boolean;
+  acknowledgedAt: string;
+  responsible: string;
+  taxId: string;
+  privacyContact: string;
+  retentionYears: number;
+  purpose: string;
+  legalBasis: string;
+  recipients: string;
+  rights: string;
 }
 
 export interface WorkEventRecord extends RecordModel {

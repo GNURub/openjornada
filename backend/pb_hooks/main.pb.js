@@ -59,6 +59,7 @@ onBootstrap((e) => {
     organization.set("timezone", $os.getenv("PB_TIMEZONE") || "Europe/Madrid");
     organization.set("retentionYears", 4);
     organization.set("privacyContact", bootstrapEmail);
+    organization.set("privacyNoticeVersion", "2026-07-30");
     organization.set("brandPrimaryColor", "#ef4d32");
     organization.set("brandSecondaryColor", "#1c1917");
     organization.set(
@@ -116,7 +117,11 @@ onBootstrap((e) => {
     admin.set("active", true);
     admin.set("employeeCode", "ADMIN");
     admin.set("weeklyHours", 40);
-    admin.set("privacyNoticeAcceptedAt", new Date().toISOString());
+    admin.set("employmentType", "full_time");
+    admin.set("contractedWeeklyMinutes", 2400);
+    admin.set("complementaryHoursAgreement", false);
+    admin.set("privacyNoticeAcknowledgedVersion", "");
+    admin.set("privacyNoticeAcknowledgedAt", "");
     e.app.save(admin);
   }
 
@@ -139,7 +144,11 @@ onBootstrap((e) => {
       employee.set("employeeCode", "EST-001");
       employee.set("weeklyHours", 40);
       employee.set("jobTitle", "Esteticista");
-      employee.set("privacyNoticeAcceptedAt", new Date().toISOString());
+      employee.set("employmentType", "full_time");
+      employee.set("contractedWeeklyMinutes", 2400);
+      employee.set("complementaryHoursAgreement", false);
+      employee.set("privacyNoticeAcknowledgedVersion", "");
+      employee.set("privacyNoticeAcknowledgedAt", "");
       e.app.save(employee);
     }
   }
@@ -361,6 +370,21 @@ onRecordCreateRequest((e) => {
   e.record.set("invitationSentAt", "");
   e.record.set("invitationExpiresAt", "");
   e.record.set("invitationAcceptedAt", "");
+  e.record.set("privacyNoticeAcknowledgedVersion", "");
+  e.record.set("privacyNoticeAcknowledgedAt", "");
+  const employmentType = e.record.getString("employmentType") || "unknown";
+  e.record.set(
+    "employmentType",
+    employmentType === "full_time" || employmentType === "part_time"
+      ? employmentType
+      : "unknown",
+  );
+  if (!e.record.getFloat("contractedWeeklyMinutes")) {
+    e.record.set(
+      "contractedWeeklyMinutes",
+      Math.max(0, Math.round(e.record.getFloat("weeklyHours") * 60)),
+    );
+  }
   e.next();
 }, "users");
 
@@ -388,12 +412,29 @@ onRecordUpdateRequest((e) => {
     "invitationAcceptedAt",
     original.getString("invitationAcceptedAt"),
   );
+  e.record.set(
+    "privacyNoticeAcknowledgedVersion",
+    original.getString("privacyNoticeAcknowledgedVersion"),
+  );
+  e.record.set(
+    "privacyNoticeAcknowledgedAt",
+    original.getString("privacyNoticeAcknowledgedAt"),
+  );
 
   if (sameUser) {
     e.record.set("role", originalRole);
     e.record.set("active", original.getBool("active"));
     e.record.set("employeeCode", original.getString("employeeCode"));
     e.record.set("weeklyHours", original.getFloat("weeklyHours"));
+    e.record.set("employmentType", original.getString("employmentType"));
+    e.record.set(
+      "contractedWeeklyMinutes",
+      original.getFloat("contractedWeeklyMinutes"),
+    );
+    e.record.set(
+      "complementaryHoursAgreement",
+      original.getBool("complementaryHoursAgreement"),
+    );
     return e.next();
   }
 

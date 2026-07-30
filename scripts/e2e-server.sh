@@ -49,6 +49,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+sleep 1
+if ! kill -0 "$pb_pid" 2>/dev/null; then
+  wait "$pb_pid" 2>/dev/null || true
+  echo "PocketBase E2E no pudo arrancar; comprueba que el puerto 8090 esté libre." >&2
+  exit 1
+fi
+
 cd "$project_root/web"
 pnpm start --host 127.0.0.1 --port 4217 &
 web_pid=$!

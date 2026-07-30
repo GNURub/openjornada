@@ -31,6 +31,28 @@ async function selectEmployee(page: import('@playwright/test').Page) {
   await select.selectOption({ label: 'Marina Estética' });
 }
 
+async function enableDocumentPipShim(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    const controller = {
+      window: null as Window | null,
+      async requestWindow(options?: { width: number; height: number }) {
+        const pipWindow = window.open(
+          '',
+          'openjornada-worktime-pip',
+          `popup,width=${options?.width ?? 320},height=${options?.height ?? 180}`,
+        );
+        if (!pipWindow) throw new DOMException('Picture-in-Picture bloqueado');
+        controller.window = pipWindow;
+        return pipWindow;
+      },
+    };
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: controller,
+    });
+  });
+}
+
 async function apiSignIn(
   request: import('@playwright/test').APIRequestContext,
   email: string,
@@ -95,8 +117,19 @@ async function apiCreateEmployee(
   };
 }
 
-test('an employee can sign in and start the workday', async ({ page }) => {
-  await signIn(page, 'empleada@example.com', 'DemoPassword123!');
+test('an employee can sign in and start the workday', async ({
+  page,
+  request,
+}, testInfo) => {
+  const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
+  const employee = await apiCreateEmployee(
+    request,
+    admin.token,
+    admin.record.organization,
+    testInfo.project.name.replaceAll(/[^a-z]/g, ''),
+    'start',
+  );
+  await signIn(page, employee.email, employee.password);
 
   await expect(page.getByRole('heading', { name: /Buenos|Buenas/ })).toBeVisible();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
@@ -148,6 +181,42 @@ test('an employee can sign in and start the workday', async ({ page }) => {
 
   await page.getByRole('tab', { name: 'Trazabilidad' }).click();
   await expect(page.getByText(/\d+ eventos en el periodo/)).toBeVisible();
+});
+
+test('clock-in automatically opens and restores the Document Picture-in-Picture widget', async ({
+  page,
+  request,
+}, testInfo) => {
+  await enableDocumentPipShim(page);
+  const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
+  const employee = await apiCreateEmployee(
+    request,
+    admin.token,
+    admin.record.organization,
+    testInfo.project.name.replaceAll(/[^a-z]/g, ''),
+    'pip',
+  );
+  await signIn(page, employee.email, employee.password);
+
+  const automaticPip = page.getByTestId('automatic-worktime-pip');
+  await expect(automaticPip).toBeChecked();
+  await automaticPip.uncheck();
+  await page.reload();
+  await expect(page.getByTestId('automatic-worktime-pip')).not.toBeChecked();
+  await page.getByTestId('automatic-worktime-pip').check();
+
+  const pipPagePromise = page.context().waitForEvent('page');
+  await page.getByTestId('primary-clock-action').click();
+  const pipPage = await pipPagePromise;
+
+  await expect(pipPage.getByTestId('active-worktime-widget')).toBeVisible();
+  await expect(
+    pipPage.getByRole('button', {
+      name: 'Cerrar ventana flotante de jornada',
+    }),
+  ).toBeVisible();
+  await pipPage.close();
+  await expect(page.getByTestId('active-worktime-widget')).toBeVisible();
 });
 
 test('the login screen remains usable on a mobile viewport', async ({ page }) => {

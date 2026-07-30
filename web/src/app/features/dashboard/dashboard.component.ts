@@ -3,6 +3,7 @@ import { AuthService } from '../../core/auth.service';
 import { WorkEventKind } from '../../core/models';
 import { eventLabel } from '../../core/time-calculations';
 import { WorktimeService } from '../../core/worktime.service';
+import { WorktimePictureInPictureService } from '../../shared/worktime-picture-in-picture.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -11,6 +12,7 @@ import { WorktimeService } from '../../core/worktime.service';
 export class DashboardComponent {
   protected readonly auth = inject(AuthService);
   protected readonly worktime = inject(WorktimeService);
+  protected readonly pip = inject(WorktimePictureInPictureService);
   protected readonly now = signal(new Date());
   protected readonly eventLabel = eventLabel;
   protected readonly greeting = computed(() => {
@@ -66,6 +68,13 @@ export class DashboardComponent {
       this.worktime.openReview(kind);
       return;
     }
-    void this.worktime.record(kind);
+    const pipRequested = kind === 'clock_in' && this.pip.openForClockIn();
+    void this.worktime.record(kind).then((saved) => {
+      if (!saved && pipRequested) this.pip.close();
+    });
+  }
+
+  protected setAutomaticPictureInPicture(event: Event): void {
+    this.pip.setAutoOpen((event.target as HTMLInputElement).checked);
   }
 }

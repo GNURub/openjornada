@@ -92,6 +92,7 @@ export class SettingsComponent {
         timezone: organization.timezone,
         retentionYears: organization.retentionYears,
         privacyContact: organization.privacyContact.trim(),
+        privacyNoticeVersion: organization.privacyNoticeVersion.trim(),
         brandPrimaryColor: normalizeBrandColor(
           organization.brandPrimaryColor,
           DEFAULT_PRIMARY_COLOR,

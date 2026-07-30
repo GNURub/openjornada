@@ -51,6 +51,19 @@
             />
           </label>
           <label class="block">
+            <span class="field-label">Versión del aviso de privacidad</span>
+            <input
+              [(ngModel)]="company.privacyNoticeVersion"
+              name="privacyNoticeVersion"
+              required
+              maxlength="40"
+              class="field-input"
+            />
+            <span class="mt-2 block text-xs text-stone-400">
+              Cambiarla obliga a toda la plantilla a confirmar de nuevo la información.
+            </span>
+          </label>
+          <label class="block">
             <span class="field-label">Zona horaria</span>
             <select [(ngModel)]="company.timezone" name="timezone" class="field-input">
               <option value="Europe/Madrid">Península · Europe/Madrid</option>

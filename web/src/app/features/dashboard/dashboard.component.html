@@ -68,6 +68,20 @@
               Hacer una pausa
             </button>
           }
+          @if (worktime.status() === 'off' && pip.supported()) {
+            <label
+              class="col-span-2 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-xs font-semibold text-stone-300"
+            >
+              <input
+                type="checkbox"
+                data-testid="automatic-worktime-pip"
+                [checked]="pip.autoOpen()"
+                (change)="setAutomaticPictureInPicture($event)"
+                class="size-4 rounded border-white/30 bg-transparent text-coral-500 focus:ring-coral-400"
+              />
+              Abrir el control en ventana flotante al fichar
+            </label>
+          }
         </div>
         <p class="mt-5 text-xs leading-5 text-stone-500">
           La hora se registra en el servidor. Cada evento queda protegido por una huella de integridad.
