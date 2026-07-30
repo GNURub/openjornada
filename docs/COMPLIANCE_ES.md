@@ -13,14 +13,15 @@ El artículo 34.9 del Estatuto de los Trabajadores exige un registro diario con 
 | Inicio y final concretos               | Eventos `clock_in` y `clock_out`; los inicios usan hora de servidor y los finales pueden revisarse antes de confirmar, siempre dentro del intervalo activo y nunca en el futuro.                                                                                                                                    |
 | Pausas                                 | Eventos explícitos `break_start` y `break_end`. Cada tipo se configura como remunerado o no remunerado; sólo las no remuneradas se excluyen del tiempo efectivo.                                                                                                                                                    |
 | Fiabilidad e invariabilidad            | La API impide actualizar o borrar `work_events`; cada evento enlaza su hash con el anterior.                                                                                                                                                                                                                        |
-| Revisión al finalizar                  | Los ajustes de al menos un minuto quedan identificados en la nota del evento y en auditoría; una modificación posterior sigue el flujo formal de corrección.                                                                                                                                                        |
+| Revisión al finalizar                  | Para ajustes de al menos un minuto se exige motivo. El evento inmutable conserva hora capturada por el servidor, hora aplicada, diferencia en segundos, motivo y versión del cálculo de integridad; la auditoría replica esos metadatos. Una modificación posterior sigue el flujo formal de corrección.                                                                          |
 | Correcciones trazables                 | La persona solicita una corrección con un motivo de al menos ocho caracteres; puede sustituir o anular uno o todos los tramos. Administración o responsables la aprueban o rechazan. Al aprobarse se crean eventos correctores inmutables vinculados al original y al actor, sin sobrescribirlo.                    |
 | Jornadas olvidadas                     | La persona puede declarar por primera vez una fecha sin fichajes mediante tramos de trabajo y pausa, sin tratar el alta inicial como corrección. Según la política de la empresa, se aplica automáticamente o queda pendiente de aprobación. La solicitud, resolución y eventos generados se enlazan y auditan; los eventos no se editan ni borran. |
 | Validación temporal                    | PocketBase interpreta las horas en la zona horaria de la empresa, admite turnos que terminan al día siguiente y rechaza horas futuras, intervalos inválidos y solapamientos con trabajo o solicitudes pendientes.                                                                                                   |
-| Conservación de cuatro años            | No existe borrado de eventos en la API. La organización almacena `retentionYears >= 4`. La política de backup debe respetarlo.                                                                                                                                                                                      |
-| Acceso de la persona trabajadora       | La vista Control horario ofrece hoja diaria/mensual, detalle de eventos, solicitudes y descarga CSV propia por fechas.                                                                                                                                                                                              |
-| Representación legal                   | El rol `representative` puede consultar registros de su empresa y exportarlos.                                                                                                                                                                                                                                      |
-| Inspección                             | Administración puede seleccionar una persona, consultar un periodo y entregar un CSV junto con la cadena de integridad.                                                                                                                                                                                             |
+| Conservación de cuatro años            | No existe borrado de eventos en la API y `retentionYears >= 4`. Administración puede crear preservaciones legales por empresa, persona y periodo, liberarlas con auditoría y consultar cuántos registros serían candidatos. La vista previa declara `destructiveActionExecuted: false`; no hay purga automática.                                                              |
+| Acceso de la persona trabajadora       | La vista Control horario ofrece hoja diaria/mensual, detalle de eventos, solicitudes, CSV y paquete JSON verificable propios. Los resúmenes mensuales inmutables se entregan en la aplicación y permiten un acuse idempotente que no se presenta como firma electrónica.                                                                                                            |
+| Representación legal                   | El rol `representative` puede consultar registros y resúmenes de su empresa y exportar los paquetes de evidencia autorizados.                                                                                                                                                                                        |
+| Inspección                             | Administración puede seleccionar una persona y periodo, entregar CSV y JSON con todos los campos probatorios y comprobar hash de cada evento, predecesores, raíz y punta de la cadena.                                                                                                                              |
+| Jornada parcial y extraordinaria       | El perfil distingue tiempo completo/parcial, minutos semanales contratados y existencia de pacto de horas complementarias. El cierre mensual bloquea contratos sin clasificar, secuencias anómalas, solicitudes pendientes y excesos parciales sin pacto, y separa minutos ordinarios, complementarios y extraordinarios.                                                        |
 | Control de acceso                      | Reglas por organización y rol en PocketBase, reforzadas por hooks contra elevación de privilegios.                                                                                                                                                                                                                  |
 | Automatización MCP                     | Tokens individuales de administración o responsables, almacenados sólo como hash, con caducidad máxima de seis meses, revocación, límite de peticiones y reevaluación del rol en cada acceso. Las herramientas reutilizan las reglas y validaciones del servidor; su auditoría no conserva argumentos ni contenido. |
 | Descargas mediante MCP                 | Los adjuntos y documentos protegidos se sirven a través de enlaces firmados de cinco minutos. La descarga vuelve a comprobar vigencia del token, cuenta activa, rol, empresa y acceso al registro, y responde con `no-store`.                                                                                       |
@@ -30,7 +31,7 @@ El artículo 34.9 del Estatuto de los Trabajadores exige un registro diario con 
 | Identidad corporativa                  | Sólo administración puede modificarla. El icono PWA y los favicons se derivan automáticamente del logotipo. El logotipo y sus variantes se sirven públicamente por requisitos del navegador, por lo que deben limitarse a recursos de marca sin datos personales.                                                   |
 | Confirmación de documentos compartidos | Cada persona confirma su propia lectura mediante un registro independiente y trazable. La confirmación acredita una acción en la aplicación, no una firma electrónica avanzada o cualificada.                                                                                                                       |
 | Avisos de documentos y tareas          | El correo sólo informa de que hay un elemento disponible; no incluye título, categoría, descripción, adjunto ni enlace de descarga. El acceso exige autenticación.                                                                                                                                                  |
-| Información y ejercicio de derechos    | La empresa debe entregar la cláusula informativa y completar sus datos; el producto conserva la fecha de aceptación.                                                                                                                                                                                                |
+| Información y ejercicio de derechos    | El aviso muestra responsable/NIF, finalidad, base jurídica, destinatarios, conservación, derechos y contacto. Su versión y fecha de recepción quedan registradas; cambiar la versión obliga a mostrarlo de nuevo. Es confirmación de recepción, no consentimiento ni firma.                                                                                                         |
 
 Referencias oficiales:
 
@@ -43,7 +44,10 @@ Referencias oficiales:
 
 1. Determinar el convenio colectivo aplicable al centro de estética y revisar si establece pausas, resúmenes, acceso o forma documental adicionales.
 2. Organizar el registro mediante negociación colectiva, acuerdo de empresa o decisión empresarial previa consulta a la representación legal, según corresponda.
-3. Entregar una cláusula informativa RGPD a todo el personal. La base jurídica general del registro es el cumplimiento de una obligación legal, no el consentimiento.
+3. Completar el contacto y texto informativo, asignar una versión y entregarlo
+   a todo el personal. La base jurídica general es el cumplimiento de una
+   obligación legal, no el consentimiento; el acuse de la aplicación sólo
+   acredita recepción.
 4. Completar el Registro de Actividades de Tratamiento: responsable, finalidad, categorías, destinatarios, conservación, transferencias y medidas de seguridad.
 5. Definir quién tendrá los roles de administración, responsable y representación legal; revisarlos al menos cada trimestre.
 6. Configurar HTTPS, SMTP, una clave de cifrado única, contraseñas robustas y acceso restringido al panel PocketBase.
@@ -59,9 +63,13 @@ Referencias oficiales:
    Definir por separado si las correcciones o anulaciones de fichajes existentes
    requieren aprobación. La aplicación conserva los eventos originales y evita
    sobrescribir o borrar el registro histórico.
-10. Validar la exportación con la asesoría laboral y realizar una prueba de entrega ante una simulación de inspección.
-11. Revisar periódicamente las personas incluidas en carpetas compartidas y retirar accesos que ya no sean necesarios.
-12. Inventariar los clientes MCP autorizados, usar la caducidad mínima viable,
+10. Clasificar contratos, horas semanales y pactos de horas complementarias;
+    establecer quién cierra cada mes, cuándo se resuelven anomalías y cómo se
+    entrega el resumen a la plantilla.
+11. Validar CSV y JSON con la asesoría laboral y realizar una prueba de entrega
+    y verificación ante una simulación de inspección.
+12. Revisar periódicamente las personas incluidas en carpetas compartidas y retirar accesos que ya no sean necesarios.
+13. Inventariar los clientes MCP autorizados, usar la caducidad mínima viable,
     revisar tokens al menos cada trimestre y revocarlos al terminar la
     integración o cambiar de funciones la persona responsable.
 
@@ -73,6 +81,9 @@ Las funciones de ausencias, horarios, avisos e informes apoyan la gestión inter
 - Mantener backups suficientes para garantizar el mismo periodo sin prolongar indefinidamente datos no necesarios.
 - Suspender cualquier borrado relacionado con un litigio, una inspección o una obligación de bloqueo.
 - Eliminar o anonimizar al finalizar el plazo sólo conforme a la política aprobada por la empresa y sus obligaciones adicionales.
+- Registrar en **Ajustes → Preservaciones legales** cualquier bloqueo antes de
+  preparar una depuración. La aplicación actual sólo calcula una vista previa:
+  no elimina registros.
 
 ## Cláusula informativa mínima a adaptar
 

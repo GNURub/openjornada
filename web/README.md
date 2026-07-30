@@ -67,6 +67,20 @@ mensual. Sus totales proceden de
 `GET /api/openjornada/timesheet`, que calcula en PocketBase el tiempo trabajado,
 la planificación aplicable, el balance y las horas extra. La pestaña
 **Trazabilidad** conserva la consulta de eventos originales, correcciones y CSV.
+También descarga un paquete JSON generado por PocketBase que incluye todos los
+campos de evidencia y verifica los hashes, predecesores, raíz y punta de la
+cadena completa de la persona.
+
+Al terminar jornada o pausa, el modal muestra la duración y permite ajustar la
+hora. Si la diferencia material supera el umbral de revisión, exige un motivo;
+el servidor conserva por separado la hora de recepción, la hora aplicada, la
+diferencia, el motivo y una huella v2.
+
+La ruta `/resumenes` contiene cierres mensuales inmutables. Administración o
+responsables cierran un mes ya terminado después de resolver solicitudes y
+anomalías; PocketBase separa minutos ordinarios, complementarios y
+extraordinarios. Cada nueva versión enlaza la anterior, se notifica a la
+persona y el acuse de recepción es idempotente.
 
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde
@@ -96,6 +110,10 @@ La cuenta `admin` configura ambas políticas y los tipos de pausa en
 **Ajustes → Jornadas manuales, correcciones y pausas**. La interfaz sólo recoge los datos:
 fechas, solapamientos, permisos, pertenencia a la empresa y materialización de
 eventos se validan de nuevo en los endpoints de PocketBase.
+
+En **Ajustes → Preservaciones legales**, `admin` puede bloquear registros de
+toda la empresa o de una persona y periodo. La vista previa calcula datos
+anteriores a la retención y los protegidos, pero no ejecuta ninguna eliminación.
 
 En **Horarios → Asignar horario**, administración y responsables pueden buscar
 y seleccionar varias personas. La interfaz envía una única petición a

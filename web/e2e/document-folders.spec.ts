@@ -4,11 +4,7 @@ import { acknowledgePrivacyNotice } from './helpers/privacy';
 
 const apiBase = 'http://127.0.0.1:8090/api';
 
-async function signIn(
-  page: import('@playwright/test').Page,
-  email: string,
-  password: string,
-) {
+async function signIn(page: import('@playwright/test').Page, email: string, password: string) {
   await page.goto('/login');
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña').fill(password);
@@ -45,10 +41,9 @@ async function apiSignIn(
   record: { id: string; organization: string };
 }> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await request.post(
-      `${apiBase}/collections/users/auth-with-password`,
-      { data: { identity: email, password } },
-    );
+    const response = await request.post(`${apiBase}/collections/users/auth-with-password`, {
+      data: { identity: email, password },
+    });
     if (response.ok()) {
       return (await response.json()) as {
         token: string;
@@ -104,19 +99,16 @@ async function createFolder(
   visibility: 'company' | 'selected' | 'management',
   allowedUsers: string[] = [],
 ) {
-  const response = await request.post(
-    `${apiBase}/collections/document_folders/records`,
-    {
-      headers: { Authorization: admin.token },
-      data: {
-        organization: admin.record.organization,
-        name,
-        visibility,
-        allowedUsers,
-        createdBy: admin.record.id,
-      },
+  const response = await request.post(`${apiBase}/collections/document_folders/records`, {
+    headers: { Authorization: admin.token },
+    data: {
+      organization: admin.record.organization,
+      name,
+      visibility,
+      allowedUsers,
+      createdBy: admin.record.id,
     },
-  );
+  });
   const body = await response.text();
   expect(response.ok(), body).toBeTruthy();
   return JSON.parse(body) as { id: string };
@@ -126,21 +118,16 @@ async function visibleFolderIds(
   request: import('@playwright/test').APIRequestContext,
   token: string,
 ): Promise<string[]> {
-  const response = await request.get(
-    `${apiBase}/collections/document_folders/records`,
-    {
-      headers: { Authorization: token },
-      params: { perPage: 200, fields: 'id' },
-    },
-  );
+  const response = await request.get(`${apiBase}/collections/document_folders/records`, {
+    headers: { Authorization: token },
+    params: { perPage: 200, fields: 'id' },
+  });
   expect(response.ok()).toBeTruthy();
   const body = (await response.json()) as { items: { id: string }[] };
   return body.items.map((folder) => folder.id);
 }
 
-test('shared folders can be created, read and acknowledged', async ({
-  page,
-}, testInfo) => {
+test('shared folders can be created, read and acknowledged', async ({ page }, testInfo) => {
   const suffix = testInfo.project.name.replaceAll(/[^a-z]/g, '');
   const folderName = `Manuales compartidos ${suffix}`;
   const documentTitle = `Manual de bienvenida ${suffix}`;
@@ -168,40 +155,28 @@ test('shared folders can be created, read and acknowledged', async ({
   await titleInput.focus();
   await titleInput.blur();
   await expect(page.getByText('El título es obligatorio.')).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Guardar documento' }),
-  ).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Guardar documento' })).toBeDisabled();
   await titleInput.fill(documentTitle);
   await page.getByRole('button', { name: 'Guardar documento' }).click();
   await expect(page.getByText('Documento guardado')).toBeVisible();
 
-  const adminDocument = page
-    .locator('article')
-    .filter({ hasText: documentTitle });
+  const adminDocument = page.locator('article').filter({ hasText: documentTitle });
   await expect(adminDocument.getByText(/0\/\d+ lecturas/)).toBeVisible();
 
   await changeAccount(page, 'empleada@example.com', 'DemoPassword123!');
   await page.goto('/avisos');
-  await expect(
-    page.locator('li').filter({ hasText: documentTitle }),
-  ).toBeVisible();
+  await expect(page.locator('li').filter({ hasText: documentTitle })).toBeVisible();
   await page.goto('/documentos');
   await page.getByRole('button', { name: new RegExp(folderName) }).click();
-  const employeeDocument = page
-    .locator('article')
-    .filter({ hasText: documentTitle });
+  const employeeDocument = page.locator('article').filter({ hasText: documentTitle });
   await expect(employeeDocument).toBeVisible();
-  await employeeDocument
-    .getByRole('button', { name: 'Confirmar lectura' })
-    .click();
+  await employeeDocument.getByRole('button', { name: 'Confirmar lectura' }).click();
   await expect(page.getByText('Lectura confirmada.')).toBeVisible();
 
   await changeAccount(page, 'admin@example.com', 'TestPassword123!');
   await page.goto('/documentos');
   await page.getByRole('button', { name: new RegExp(folderName) }).click();
-  const reviewedDocument = page
-    .locator('article')
-    .filter({ hasText: documentTitle });
+  const reviewedDocument = page.locator('article').filter({ hasText: documentTitle });
   await expect(reviewedDocument.getByText(/1\/\d+ lecturas/)).toBeVisible();
   await page.getByRole('button', { name: 'Eliminar' }).click();
   await expect(
@@ -209,73 +184,31 @@ test('shared folders can be created, read and acknowledged', async ({
   ).toBeVisible();
 });
 
-test('folder permissions are enforced by PocketBase', async ({
-  request,
-}, testInfo) => {
+test('folder permissions are enforced by PocketBase', async ({ request }, testInfo) => {
   test.skip(
     testInfo.project.name !== 'desktop-chromium',
     'Una ejecución basta para validar las reglas de acceso.',
   );
   const suffix = `${Date.now()}`;
-  const admin = await apiSignIn(
-    request,
-    'admin@example.com',
-    'TestPassword123!',
-  );
-  const demo = await apiSignIn(
-    request,
-    'empleada@example.com',
-    'DemoPassword123!',
-  );
+  const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
+  const demo = await apiSignIn(request, 'empleada@example.com', 'DemoPassword123!');
   const managerUser = await createUser(request, admin, suffix, 'manager');
   const outsiderUser = await createUser(request, admin, suffix, 'employee');
-  const representativeUser = await createUser(
-    request,
-    admin,
-    suffix,
-    'representative',
-  );
-  const manager = await apiSignIn(
-    request,
-    managerUser.email,
-    managerUser.password,
-  );
-  const outsider = await apiSignIn(
-    request,
-    outsiderUser.email,
-    outsiderUser.password,
-  );
+  const representativeUser = await createUser(request, admin, suffix, 'representative');
+  const manager = await apiSignIn(request, managerUser.email, managerUser.password);
+  const outsider = await apiSignIn(request, outsiderUser.email, outsiderUser.password);
   const representative = await apiSignIn(
     request,
     representativeUser.email,
     representativeUser.password,
   );
 
-  const selected = await createFolder(
-    request,
-    admin,
-    `Seleccionada ${suffix}`,
-    'selected',
-    [demo.record.id],
-  );
-  const management = await createFolder(
-    request,
-    admin,
-    `Interna ${suffix}`,
-    'management',
-  );
-  const company = await createFolder(
-    request,
-    admin,
-    `Empresa ${suffix}`,
-    'company',
-  );
-  const empty = await createFolder(
-    request,
-    admin,
-    `Vacía ${suffix}`,
-    'management',
-  );
+  const selected = await createFolder(request, admin, `Seleccionada ${suffix}`, 'selected', [
+    demo.record.id,
+  ]);
+  const management = await createFolder(request, admin, `Interna ${suffix}`, 'management');
+  const company = await createFolder(request, admin, `Empresa ${suffix}`, 'company');
+  const empty = await createFolder(request, admin, `Vacía ${suffix}`, 'management');
 
   const blankTitleResponse = await request.post(
     `${apiBase}/collections/employee_documents/records`,
@@ -302,43 +235,32 @@ test('folder permissions are enforced by PocketBase', async ({
   expect(await visibleFolderIds(request, demo.token)).toEqual(
     expect.arrayContaining([selected.id, company.id]),
   );
-  expect(await visibleFolderIds(request, demo.token)).not.toContain(
-    management.id,
-  );
+  expect(await visibleFolderIds(request, demo.token)).not.toContain(management.id);
   expect(await visibleFolderIds(request, outsider.token)).toContain(company.id);
-  expect(await visibleFolderIds(request, outsider.token)).not.toContain(
-    selected.id,
-  );
-  expect(await visibleFolderIds(request, representative.token)).toContain(
-    company.id,
-  );
-  expect(await visibleFolderIds(request, representative.token)).not.toContain(
-    management.id,
-  );
+  expect(await visibleFolderIds(request, outsider.token)).not.toContain(selected.id);
+  expect(await visibleFolderIds(request, representative.token)).toContain(company.id);
+  expect(await visibleFolderIds(request, representative.token)).not.toContain(management.id);
   expect(await visibleFolderIds(request, manager.token)).toEqual(
     expect.arrayContaining([selected.id, management.id, company.id]),
   );
 
-  const documentResponse = await request.post(
-    `${apiBase}/collections/employee_documents/records`,
-    {
-      headers: { Authorization: admin.token },
-      multipart: {
-        organization: admin.record.organization,
-        folder: selected.id,
-        title: `Documento seleccionado ${suffix}`,
-        category: 'training',
-        visibility: 'folder',
-        acknowledgementRequired: 'true',
-        uploadedBy: admin.record.id,
-        file: {
-          name: `selected-${suffix}.pdf`,
-          mimeType: 'application/pdf',
-          buffer: Buffer.from('%PDF-1.4\n%%EOF'),
-        },
+  const documentResponse = await request.post(`${apiBase}/collections/employee_documents/records`, {
+    headers: { Authorization: admin.token },
+    multipart: {
+      organization: admin.record.organization,
+      folder: selected.id,
+      title: `Documento seleccionado ${suffix}`,
+      category: 'training',
+      visibility: 'folder',
+      acknowledgementRequired: 'true',
+      uploadedBy: admin.record.id,
+      file: {
+        name: `selected-${suffix}.pdf`,
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4\n%%EOF'),
       },
     },
-  );
+  });
   const documentBody = await documentResponse.text();
   expect(documentResponse.ok(), documentBody).toBeTruthy();
   const document = JSON.parse(documentBody) as { id: string };

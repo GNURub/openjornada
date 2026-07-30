@@ -119,10 +119,7 @@ async function apiCreateEmployee(
   };
 }
 
-test('an employee can sign in and start the workday', async ({
-  page,
-  request,
-}, testInfo) => {
+test('an employee can sign in and start the workday', async ({ page, request }, testInfo) => {
   const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
   const employee = await apiCreateEmployee(
     request,
@@ -451,7 +448,10 @@ test('the trace view directs corrections to the daily timesheet', async ({ page 
   await page.getByTestId('primary-clock-action').click();
   await expect(page.getByRole('main').getByText('Jornada en curso')).toBeVisible();
   await page.getByTestId('primary-clock-action').click();
-  await page.getByTestId('worktime-review-modal').getByRole('button', { name: 'Confirmar' }).click();
+  await page
+    .getByTestId('worktime-review-modal')
+    .getByRole('button', { name: 'Confirmar' })
+    .click();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
   await page.goto('/registros');
   await page.getByRole('tab', { name: 'Trazabilidad' }).click();

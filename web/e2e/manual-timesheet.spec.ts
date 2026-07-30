@@ -487,7 +487,6 @@ test('employee corrects completed time today and keeps a corrected pause linked'
   const correctedStart = requestedExactCase ? '08:31' : timeFromMinutes(now.minutes - 110);
   const correctedEnd = requestedExactCase ? '12:00' : timeFromMinutes(now.minutes - 45);
   const yesterday = previousDate(now.date);
-  const todayReason = 'Jornada de hoy completada para la prueba E2E';
   const todayCorrectionReason = 'Corrección de la jornada de hoy solicitada por la empleada';
   const pauseCorrectionReason = 'La pausa terminó realmente a las once y media';
 
@@ -505,7 +504,7 @@ test('employee corrects completed time today and keeps a corrected pause linked'
   ).toBeVisible();
   await popover.getByLabel('Inicio del tramo 1').fill(initialStart);
   await popover.getByLabel('Fin del tramo 1').fill(initialEnd);
-  await popover.getByLabel('Motivo de la incorporación').fill(todayReason);
+  await expect(popover.getByLabel('Motivo de la incorporación')).toHaveCount(0);
   await popover.getByRole('button', { name: 'Aplicar' }).click();
   await expect(page.getByText('La jornada se ha incorporado con trazabilidad.')).toBeVisible();
 
@@ -549,9 +548,7 @@ test('employee corrects completed time today and keeps a corrected pause linked'
   await popover.getByRole('button', { name: '+ Trabajo' }).click();
   await expect(popover.getByLabel('Inicio del tramo 3')).toHaveValue('11:31');
   await popover.getByLabel('Fin del tramo 3').fill('16:00');
-  await popover
-    .getByLabel('Motivo de la incorporación')
-    .fill('Jornada con pausa exacta solicitada para la prueba E2E');
+  await expect(popover.getByLabel('Motivo de la incorporación')).toHaveCount(0);
   await popover.getByRole('button', { name: 'Aplicar' }).click();
 
   const yesterdayDay = page.locator(`[data-timesheet-date="${yesterday}"]`);

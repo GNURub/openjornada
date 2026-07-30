@@ -12,10 +12,13 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Autenticación, recuperación de contraseña e invitaciones por correo de un solo
   uso, con 72 horas de validez, creación de contraseña y acceso automático.
 - Roles `admin`, `manager`, `employee` y `representative`, aislados por empresa.
-- Fichajes y pausas con revisión de la hora final, validación de servidor,
-  idempotencia, cadena SHA-256 y auditoría.
+- Fichajes y pausas con revisión de la hora final; si se ajusta un minuto o
+  más se exige motivo y se conservan hora de servidor, hora aplicada,
+  diferencia, cadena SHA-256 y auditoría.
 - Hoja diaria y mensual con trabajado, planificado, balance y horas extra; la
   plantilla puede completar jornadas pasadas mediante tramos de trabajo y pausas.
+- Resúmenes mensuales inmutables por persona, diferenciando jornada ordinaria,
+  complementaria y extraordinaria, con versiones, entrega y acuse de recepción.
 - Política por empresa para aplicar esas altas automáticamente o someterlas a
   aprobación, con tipos de pausa remunerados o no remunerados.
 - Correcciones de jornada con aprobación y trazabilidad inmutable.
@@ -26,7 +29,10 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
   destinatario.
 - Tareas de onboarding, formación y administración.
 - Objetivos por ciclos y seguimiento porcentual.
-- Horarios, comunicados, informes y exportaciones CSV.
+- Horarios, comunicados, informes, exportación CSV y paquetes JSON que verifican
+  criptográficamente la cadena completa de fichajes.
+- Aviso de privacidad versionado y preservaciones legales que excluyen registros
+  de cualquier futura depuración; la vista previa de retención no borra datos.
 - Servidor MCP remoto para que administración y responsables operen sobre
   equipo, jornada, ausencias, gastos, documentos, tareas, objetivos y avisos
   mediante tokens revocables de hasta seis meses.
@@ -294,6 +300,13 @@ línea de comandos.
 PocketBase guarda la base de datos y los archivos en `/app/pb_data`, respaldado
 por el volumen `pocketbase_data`. No copies sólo el archivo SQLite: conserva el
 directorio completo y prueba periódicamente la restauración.
+
+La conservación configurada nunca puede ser inferior a cuatro años. En
+**Ajustes → Preservaciones legales**, administración puede bloquear por empresa,
+persona y periodo los registros relacionados con una inspección, reclamación o
+litigio. La aplicación sólo muestra una vista previa de candidatos: no ejecuta
+borrados automáticos. Cualquier futura política de purga debe aprobarse,
+probarse sobre una copia y respetar preservaciones y backups.
 
 Antes de actualizar:
 

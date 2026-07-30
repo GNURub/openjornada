@@ -7,8 +7,6 @@ export async function acknowledgePrivacyNotice(page: Page): Promise<void> {
     .then(() => true)
     .catch(() => false);
   if (!visible) return;
-  await modal
-    .getByRole('button', { name: 'He recibido la información' })
-    .click();
+  await modal.getByRole('button', { name: 'He recibido la información' }).click();
   await expect(modal).toBeHidden();
 }

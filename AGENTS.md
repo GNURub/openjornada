@@ -64,6 +64,12 @@ Ejecuta E2E cuando cambien flujos, permisos, hooks, rutas o formularios.
 - Toda colección con datos empresariales debe filtrar por `organization`.
 - Valida relaciones para impedir referencias cruzadas entre empresas.
 - Trata fichajes y auditorías como datos inmutables.
+- Conserva por separado la hora capturada por el servidor, cualquier hora
+  ajustada y su motivo; incluye esos datos en la integridad y la auditoría.
+- Trata los resúmenes mensuales como versiones inmutables y no presentes un
+  acuse de recepción como firma electrónica.
+- No implementes purgas sin comprobar antes la retención mínima, las
+  preservaciones legales activas y una copia restaurable.
 - Congela los campos no editables durante cambios de estado.
 - Crea una migración nueva para cualquier cambio posterior a una migración publicada.
 - El bootstrap debe ser idempotente.

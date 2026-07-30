@@ -421,6 +421,19 @@ docker compose -f docker-compose.production.yml start app
 
 Cifra y copia el archivo fuera del servidor. Conserva varias generaciones.
 
+La retención de fichajes se configura con un mínimo de cuatro años. Antes de
+cualquier depuración futura:
+
+1. registra en **Ajustes → Preservaciones legales** todas las inspecciones,
+   reclamaciones, litigios y obligaciones de bloqueo;
+2. revisa la vista previa de registros antiguos y protegidos;
+3. toma y verifica una copia cifrada;
+4. documenta la autorización y prueba el procedimiento fuera de producción.
+
+La versión actual no ejecuta purgas automáticas: la vista previa devuelve
+`destructiveActionExecuted: false`. No borres filas directamente de SQLite,
+porque romperías referencias, resúmenes y cadenas de integridad.
+
 ## Restauración
 
 Prueba primero en otro servidor. La restauración reemplaza todos los datos del
@@ -464,5 +477,7 @@ producción.
 - Proxy sin logs de credenciales o queries firmadas y sin caché en `/mcp` y
   `/api/openjornada/mcp-files`.
 - Backups externos cifrados y restauración probada.
+- Retención mínima de cuatro años revisada y preservaciones legales activas
+  antes de cualquier tratamiento de datos antiguos.
 - Monitorización y alertas activas.
 - Revisión de [COMPLIANCE_ES.md](COMPLIANCE_ES.md) completada.
