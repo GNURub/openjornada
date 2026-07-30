@@ -71,9 +71,9 @@ la planificación aplicable, el balance y las horas extra. La pestaña
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde
 qué hora hasta qué hora y marcar **Empieza el día siguiente (+1d)**. Se pueden
-encadenar varios tramos sin abandonar el popover. El motivo sigue siendo
-obligatorio, las pausas necesitan un tipo activo y la solicitud puede quedar
-aprobada automáticamente o pendiente según
+encadenar varios tramos sin abandonar el popover. La primera incorporación en
+un día sin historial no pide motivo; las pausas necesitan un tipo activo y la
+solicitud puede quedar aprobada automáticamente o pendiente según
 `organization.manualTimeApprovalRequired`; mientras está pendiente el empleado
 puede cancelarla y `admin`/`manager` pueden aprobarla o rechazarla. En la fecha
 actual PocketBase rechaza cualquier tramo que aún no haya terminado.
@@ -88,7 +88,9 @@ se aplica automáticamente o queda pendiente. Los fichajes anteriores nunca se
 borran: PocketBase crea anulaciones lógicas trazables y materializa la secuencia
 corregida. También se puede eliminar uno o todos los tramos; el editor explica
 por qué está bloqueado el envío, exige un motivo de al menos ocho caracteres y
-rechaza duraciones nulas, superiores a dieciséis horas o solapadas.
+rechaza duraciones nulas, superiores a dieciséis horas o solapadas. Si una
+corrección anuló todos los tramos, cualquier alta posterior en esa fecha sigue
+el flujo de corrección y vuelve a exigir el motivo.
 
 La cuenta `admin` configura ambas políticas y los tipos de pausa en
 **Ajustes → Jornadas manuales, correcciones y pausas**. La interfaz sólo recoge los datos:

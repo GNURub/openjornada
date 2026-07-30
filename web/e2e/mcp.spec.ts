@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { acknowledgePrivacyNotice } from './helpers/privacy';
 
 const mcpUrl = 'http://127.0.0.1:8090/mcp';
 const apiBase = 'http://127.0.0.1:8090/api';
@@ -9,6 +10,7 @@ async function signIn(page: import('@playwright/test').Page): Promise<void> {
   await page.getByLabel('Contraseña').fill('TestPassword123!');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
+  await acknowledgePrivacyNotice(page);
 }
 
 async function mcpRequest(

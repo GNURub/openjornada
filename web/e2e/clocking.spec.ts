@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Buffer } from 'node:buffer';
+import { acknowledgePrivacyNotice } from './helpers/privacy';
 
 async function signIn(page: import('@playwright/test').Page, email: string, password: string) {
   await page.goto('/login');
@@ -9,6 +10,7 @@ async function signIn(page: import('@playwright/test').Page, email: string, pass
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     try {
       await expect(page).toHaveURL(/\/$/, { timeout: 2_500 });
+      await acknowledgePrivacyNotice(page);
       return;
     } catch {
       if (attempt === 2) throw new Error(`No se pudo iniciar sesión como ${email}`);

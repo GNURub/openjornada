@@ -69,6 +69,30 @@ export interface PrivacyNotice {
   rights: string;
 }
 
+export interface LegalHoldRecord extends RecordModel {
+  organization: string;
+  employee: string;
+  reason: string;
+  fromDate: string;
+  toDate: string;
+  active: boolean;
+  createdBy: string;
+  releasedBy: string;
+  releasedAt: string;
+  created: string;
+  expand?: { employee?: UserRecord };
+}
+
+export interface RetentionPreview {
+  retentionYears: number;
+  cutoff: string;
+  activeLegalHolds: number;
+  recordsPastRetention: number;
+  protectedByLegalHold: number;
+  eligibleForFuturePurge: number;
+  destructiveActionExecuted: boolean;
+}
+
 export interface MonthlyTimeStatement extends RecordModel {
   organization: string;
   employee: string;

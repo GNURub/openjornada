@@ -45,7 +45,8 @@ día, la duración, los solapamientos con
 eventos o solicitudes pendientes y la pertenencia de cada tipo de pausa a la
 organización. El alta se realiza desde un popover contextual en cada día, con
 tramos de trabajo o pausa, horas de inicio y fin y soporte para turnos
-nocturnos. No hay un límite de antigüedad funcional; la empresa debe definir su
+nocturnos. La primera incorporación sobre un día sin historial no solicita
+motivo. No hay un límite de antigüedad funcional; la empresa debe definir su
 procedimiento interno y revisar su convenio.
 
 Una jornada actual finalizada o pasada con fichajes puede corregirse directamente desde su fila:
@@ -56,6 +57,8 @@ aplica la corrección mediante eventos inmutables de anulación y reemplazo. Los
 límites de tramos contiguos se mantienen enlazados en el editor. Es posible
 eliminar uno o todos los tramos; el formulario muestra el motivo exacto de
 cualquier bloqueo y exige una justificación de al menos ocho caracteres.
+Volver a añadir horas a un día que anteriormente tuvo fichajes, aunque una
+corrección los hubiese anulado todos, continúa siendo una corrección.
 
 La identidad corporativa sólo puede modificarla una cuenta `admin` de la misma
 organización. Al seleccionar el logotipo, la aplicación genera el icono

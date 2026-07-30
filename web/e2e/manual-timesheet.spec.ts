@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { acknowledgePrivacyNotice } from './helpers/privacy';
 
 const apiBase = 'http://127.0.0.1:8090/api';
 const employeeEmail = 'empleada@example.com';
@@ -51,6 +52,7 @@ async function signIn(
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     try {
       await expect(page).toHaveURL(/\/$/, { timeout: 2_500 });
+      await acknowledgePrivacyNotice(page);
       return;
     } catch {
       if (attempt === 2) throw new Error(`No se pudo iniciar sesión como ${email}`);

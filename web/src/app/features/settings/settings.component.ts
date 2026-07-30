@@ -9,7 +9,13 @@ import {
   DEFAULT_SECONDARY_COLOR,
   normalizeBrandColor,
 } from '../../core/branding.service';
-import { BreakTypeRecord, OrganizationRecord } from '../../core/models';
+import {
+  BreakTypeRecord,
+  LegalHoldRecord,
+  OrganizationRecord,
+  RetentionPreview,
+  UserRecord,
+} from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
 
 const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -25,6 +31,9 @@ export class SettingsComponent {
   protected readonly branding = inject(BrandingService);
   protected readonly organization = signal<OrganizationRecord | null>(null);
   protected readonly breakTypes = signal<BreakTypeRecord[]>([]);
+  protected readonly legalHolds = signal<LegalHoldRecord[]>([]);
+  protected readonly members = signal<UserRecord[]>([]);
+  protected readonly retentionPreview = signal<RetentionPreview | null>(null);
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);
   protected readonly error = signal('');
@@ -33,8 +42,13 @@ export class SettingsComponent {
   protected readonly iconPreview = signal('/icons/icon-512x512.png');
   protected readonly logoError = signal('');
   protected readonly savingBreakType = signal('');
+  protected readonly savingLegalHold = signal('');
   protected newBreakTypeName = '';
   protected newBreakTypePaid = false;
+  protected legalHoldEmployee = '';
+  protected legalHoldFrom = '';
+  protected legalHoldTo = '';
+  protected legalHoldReason = '';
   private logoFile: File | null = null;
   private iconFile: File | null = null;
   private removeLogo = false;
@@ -191,6 +205,81 @@ export class SettingsComponent {
     }
   }
 
+  protected async createLegalHold(): Promise<void> {
+    if (this.legalHoldReason.trim().length < 8 || this.savingLegalHold()) {
+      return;
+    }
+    this.savingLegalHold.set('new');
+    this.error.set('');
+    this.success.set('');
+    try {
+      const created = await this.pb.send<LegalHoldRecord>('/api/openjornada/legal-holds', {
+        method: 'POST',
+        body: {
+          employee: this.legalHoldEmployee,
+          from: this.legalHoldFrom,
+          to: this.legalHoldTo,
+          reason: this.legalHoldReason.trim(),
+        },
+      });
+      this.legalHolds.update((items) => [created, ...items]);
+      this.legalHoldEmployee = '';
+      this.legalHoldFrom = '';
+      this.legalHoldTo = '';
+      this.legalHoldReason = '';
+      this.success.set('Preservación legal activada y auditada.');
+      await this.loadRetentionPreview();
+    } catch (error) {
+      this.error.set(this.responseMessage(error, 'No se pudo activar la preservación.'));
+    } finally {
+      this.savingLegalHold.set('');
+    }
+  }
+
+  protected async releaseLegalHold(item: LegalHoldRecord): Promise<void> {
+    if (this.savingLegalHold()) return;
+    this.savingLegalHold.set(item.id);
+    this.error.set('');
+    try {
+      const updated = await this.pb.send<LegalHoldRecord>(
+        `/api/openjornada/legal-holds/${item.id}/release`,
+        { method: 'POST' },
+      );
+      this.legalHolds.update((items) =>
+        items.map((current) => (current.id === updated.id ? updated : current)),
+      );
+      this.success.set('Preservación liberada con trazabilidad.');
+      await this.loadRetentionPreview();
+    } catch (error) {
+      this.error.set(this.responseMessage(error, 'No se pudo liberar la preservación.'));
+    } finally {
+      this.savingLegalHold.set('');
+    }
+  }
+
+  protected async loadRetentionPreview(): Promise<void> {
+    try {
+      this.retentionPreview.set(
+        await this.pb.send<RetentionPreview>('/api/openjornada/retention-preview', {
+          method: 'GET',
+        }),
+      );
+    } catch {
+      this.retentionPreview.set(null);
+    }
+  }
+
+  protected memberName(id: string): string {
+    if (!id) return 'Toda la empresa';
+    return this.members().find((member) => member.id === id)?.name ?? id;
+  }
+
+  protected shortDate(value: string): string {
+    return value
+      ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium' }).format(new Date(value))
+      : 'Sin límite';
+  }
+
   private async load(): Promise<void> {
     const organizationId = this.auth.user()?.organization;
     if (!organizationId) {
@@ -214,10 +303,21 @@ export class SettingsComponent {
       record.manualTimeApprovalRequired = Boolean(record.manualTimeApprovalRequired);
       record.timeCorrectionApprovalRequired = record.timeCorrectionApprovalRequired !== false;
       this.organization.set(record);
-      const breakTypes = await this.pb.collection('break_types').getFullList({
-        sort: 'name',
-      });
+      const [breakTypes, legalHolds, members] = await Promise.all([
+        this.pb.collection('break_types').getFullList({ sort: 'name' }),
+        this.pb.collection('legal_holds').getFullList({
+          sort: '-active,-created',
+          expand: 'employee',
+        }),
+        this.pb.collection('users').getFullList({
+          sort: 'name',
+          fields: 'id,name,employeeCode',
+        }),
+      ]);
       this.breakTypes.set(breakTypes as BreakTypeRecord[]);
+      this.legalHolds.set(legalHolds as LegalHoldRecord[]);
+      this.members.set(members as UserRecord[]);
+      await this.loadRetentionPreview();
       this.logoPreview.set(
         record.brandLogo ? this.pb.files.getURL(record, record.brandLogo) : DEFAULT_LOGO_URL,
       );

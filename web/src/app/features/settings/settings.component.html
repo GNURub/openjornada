@@ -395,5 +395,131 @@
         {{ saving() ? 'Guardando…' : 'Guardar cambios' }}
       </button>
     </form>
+
+    <section class="mt-8 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+      <div class="max-w-3xl">
+        <p class="text-sm font-bold uppercase tracking-[0.16em] text-coral-600">Conservación</p>
+        <h2 class="mt-2 font-display text-2xl font-bold">Preservaciones legales</h2>
+        <p class="mt-2 text-sm leading-6 text-stone-500">
+          Bloquean cualquier futura depuración de fichajes mientras exista una inspección,
+          reclamación, litigio u otra obligación de conservación.
+        </p>
+      </div>
+
+      @if (retentionPreview(); as preview) {
+        <div class="mt-6 grid gap-3 sm:grid-cols-3">
+          <div class="rounded-2xl bg-stone-50 p-4">
+            <p class="text-xs font-bold uppercase tracking-wider text-stone-400">
+              Anteriores al límite
+            </p>
+            <p class="mt-2 font-display text-2xl font-bold">
+              {{ preview.recordsPastRetention }}
+            </p>
+          </div>
+          <div class="rounded-2xl bg-amber-50 p-4">
+            <p class="text-xs font-bold uppercase tracking-wider text-amber-700">Protegidos</p>
+            <p class="mt-2 font-display text-2xl font-bold text-amber-900">
+              {{ preview.protectedByLegalHold }}
+            </p>
+          </div>
+          <div class="rounded-2xl bg-coral-50 p-4">
+            <p class="text-xs font-bold uppercase tracking-wider text-coral-600">
+              Candidatos futuros
+            </p>
+            <p class="mt-2 font-display text-2xl font-bold text-coral-800">
+              {{ preview.eligibleForFuturePurge }}
+            </p>
+          </div>
+        </div>
+        <p class="mt-3 text-xs leading-5 text-stone-500">
+          Vista previa con una retención de {{ preview.retentionYears }} años. No se ha eliminado
+          ningún dato.
+        </p>
+      }
+
+      <form
+        (ngSubmit)="createLegalHold()"
+        class="mt-7 grid gap-4 rounded-3xl bg-stone-50 p-5 sm:grid-cols-2"
+      >
+        <label class="block sm:col-span-2">
+          <span class="field-label">Ámbito</span>
+          <select [(ngModel)]="legalHoldEmployee" name="legalHoldEmployee" class="field-input">
+            <option value="">Toda la empresa</option>
+            @for (member of members(); track member.id) {
+              <option [value]="member.id">{{ member.name }} · {{ member.employeeCode }}</option>
+            }
+          </select>
+        </label>
+        <label class="block">
+          <span class="field-label">Desde · opcional</span>
+          <input [(ngModel)]="legalHoldFrom" name="legalHoldFrom" type="date" class="field-input" />
+        </label>
+        <label class="block">
+          <span class="field-label">Hasta · opcional</span>
+          <input [(ngModel)]="legalHoldTo" name="legalHoldTo" type="date" class="field-input" />
+        </label>
+        <label class="block sm:col-span-2">
+          <span class="field-label">Motivo</span>
+          <textarea
+            [(ngModel)]="legalHoldReason"
+            name="legalHoldReason"
+            rows="3"
+            minlength="8"
+            maxlength="500"
+            required
+            class="field-input resize-none"
+            placeholder="Ej.: requerimiento de Inspección de Trabajo"
+          ></textarea>
+        </label>
+        <button
+          type="submit"
+          [disabled]="savingLegalHold() || legalHoldReason.trim().length < 8"
+          class="btn-primary sm:col-span-2 sm:justify-self-start"
+        >
+          {{ savingLegalHold() === 'new' ? 'Activando…' : 'Activar preservación' }}
+        </button>
+      </form>
+
+      <div class="mt-6 space-y-3">
+        @for (hold of legalHolds(); track hold.id) {
+          <article class="rounded-2xl border border-stone-200 p-5">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="font-bold">
+                  {{ memberName(hold.employee) }}
+                  <span
+                    class="ml-2 rounded-full px-2 py-1 text-xs"
+                    [class.bg-emerald-100]="hold.active"
+                    [class.text-emerald-700]="hold.active"
+                    [class.bg-stone-100]="!hold.active"
+                    [class.text-stone-500]="!hold.active"
+                  >
+                    {{ hold.active ? 'Activa' : 'Liberada' }}
+                  </span>
+                </p>
+                <p class="mt-2 text-sm text-stone-600">{{ hold.reason }}</p>
+                <p class="mt-2 text-xs text-stone-400">
+                  {{ shortDate(hold.fromDate) }} — {{ shortDate(hold.toDate) }}
+                </p>
+              </div>
+              @if (hold.active) {
+                <button
+                  type="button"
+                  [disabled]="!!savingLegalHold()"
+                  (click)="releaseLegalHold(hold)"
+                  class="btn-secondary shrink-0"
+                >
+                  {{ savingLegalHold() === hold.id ? 'Liberando…' : 'Liberar' }}
+                </button>
+              }
+            </div>
+          </article>
+        } @empty {
+          <p class="rounded-2xl bg-stone-50 p-5 text-sm text-stone-500">
+            No hay preservaciones registradas.
+          </p>
+        }
+      </div>
+    </section>
   }
 </div>
