@@ -87,8 +87,8 @@ extraordinarios y totales, la huella de integridad y el desglose de cada día.
 La ruta `/informes` permite descargar un **Excel de inspección**. El rango
 predeterminado son los últimos cuatro años y puede ajustarse en la interfaz
 hasta un máximo de cuatro años por archivo. Incluye una hoja resumen y una hoja
-por cada cuenta con rol `employee` y contrato clasificado, aunque esté inactiva.
-Cada hoja conserva planificación, tiempo trabajado, balance, horas
+por cada cuenta con rol `employee`, aunque esté inactiva o su contrato aún no
+esté clasificado. Cada hoja conserva planificación, tiempo trabajado, balance, horas
 complementarias o extraordinarias según contrato, entradas, salidas, pausas,
 festivos, ausencias, incidencias y huellas de integridad.
 

@@ -152,13 +152,12 @@ export class ReportsComponent {
     try {
       const employees = (await this.pb.collection('users').getFullList({
         sort: 'name',
-        filter:
-          "role = 'employee' && (employmentType = 'full_time' || employmentType = 'part_time')",
+        filter: "role = 'employee'",
         fields:
           'id,name,email,organization,role,active,employeeCode,weeklyHours,employmentType,contractedWeeklyMinutes,complementaryHoursAgreement,jobTitle',
       })) as UserRecord[];
       if (!employees.length) {
-        throw new Error('No hay personas con contrato clasificado para incluir.');
+        throw new Error('No hay personas empleadas para incluir.');
       }
 
       const ranges = splitInspectionRange(this.inspectionFrom, this.inspectionTo);

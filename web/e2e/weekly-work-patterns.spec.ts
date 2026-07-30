@@ -671,7 +671,7 @@ test('full-time and part-time weekly patterns classify overtime and complementar
       page: 1,
       perPage: 500,
       sort: 'name',
-      filter: "role = 'employee' && (employmentType = 'full_time' || employmentType = 'part_time')",
+      filter: "role = 'employee'",
     },
   });
   expect(companyEmployeesResponse.ok(), await companyEmployeesResponse.text()).toBeTruthy();
