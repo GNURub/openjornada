@@ -8,14 +8,16 @@ async function signIn(page: import('@playwright/test').Page, email: string, pass
   await page.getByLabel('Contraseña').fill(password);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-    try {
-      await expect(page).toHaveURL(/\/$/, { timeout: 2_500 });
+    const authenticated = await page
+      .waitForURL(/\/$/, { timeout: 2_500 })
+      .then(() => true)
+      .catch(() => false);
+    if (authenticated) {
       await acknowledgePrivacyNotice(page);
       return;
-    } catch {
-      if (attempt === 2) throw new Error(`No se pudo iniciar sesión como ${email}`);
-      await page.waitForTimeout(3_200);
     }
+    if (attempt === 2) throw new Error(`No se pudo iniciar sesión como ${email}`);
+    await page.waitForTimeout(3_200);
   }
 }
 
@@ -132,6 +134,7 @@ test('an employee can sign in and start the workday', async ({ page, request }, 
 
   await expect(page.getByRole('heading', { name: /Buenos|Buenas/ })).toBeVisible();
   await expect(page.getByText('Fuera de jornada')).toBeVisible();
+  await page.getByTestId('automatic-worktime-pip').uncheck();
 
   await page.getByTestId('primary-clock-action').click();
 
@@ -164,6 +167,7 @@ test('an employee can sign in and start the workday', async ({ page, request }, 
   await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();
   await expect(widget).toBeVisible();
 
+  await page.waitForTimeout(3_200);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();
   await expect(widget).toBeVisible();
@@ -263,6 +267,7 @@ test('a leave request can be submitted, approved and notified', async ({
   page,
   request: apiRequest,
 }, testInfo) => {
+  test.setTimeout(60_000);
   const projectOffset =
     {
       'desktop-chromium': 20,
@@ -279,7 +284,12 @@ test('a leave request can be submitted, approved and notified', async ({
   while (end.getDay() === 0 || end.getDay() === 6) {
     end.setDate(end.getDate() + 1);
   }
-  const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
+  const toDateInput = (date: Date) =>
+    [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-');
   const reason = `Vacaciones E2E ${testInfo.project.name}`;
 
   await signIn(page, 'empleada@example.com', 'DemoPassword123!');

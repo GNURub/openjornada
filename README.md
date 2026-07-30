@@ -4,6 +4,9 @@ OpenJornada es una plataforma de gestión laboral y RR. HH. para pequeñas y
 medianas empresas. Incluye registro horario, ausencias, gastos, documentos,
 onboarding y objetivos en una SPA responsive.
 
+Consulta el [historial de cambios](CHANGELOG.md) para conocer el contenido de
+cada versión publicada.
+
 La aplicación usa Angular 22, Tailwind CSS 4 y PocketBase 0.39.10. Frontend,
 API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 

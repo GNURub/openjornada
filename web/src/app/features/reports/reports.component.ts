@@ -10,6 +10,7 @@ import {
 } from '../../core/inspection-workbook';
 import { UserRecord, WorkEventRecord } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
+import { pocketBaseDateTime } from '../../core/pocketbase-date';
 import { TimesheetService } from '../../core/timesheet.service';
 import {
   applyCorrections,
@@ -74,8 +75,8 @@ export class ReportsComponent {
         }),
         this.pb.collection('work_events').getFullList({
           filter: this.pb.filter('occurredAt >= {:start} && occurredAt <= {:end}', {
-            start: start.toISOString(),
-            end: end.toISOString(),
+            start: pocketBaseDateTime(start),
+            end: pocketBaseDateTime(end),
           }),
           sort: 'occurredAt',
         }),

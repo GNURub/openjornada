@@ -10,7 +10,7 @@ import {
 import { acknowledgePrivacyNotice } from './helpers/privacy';
 
 const apiBase = process.env['OPENJORNADA_E2E_API_URL'] ?? 'http://127.0.0.1:8090/api';
-const appBase = process.env['OPENJORNADA_E2E_APP_URL'] ?? 'http://127.0.0.1:8090';
+const appBase = process.env['OPENJORNADA_E2E_APP_URL'] ?? 'http://127.0.0.1:4217';
 const adminEmail = process.env['OPENJORNADA_E2E_ADMIN_EMAIL'] ?? 'admin@example.com';
 const adminPassword = process.env['OPENJORNADA_E2E_ADMIN_PASSWORD'] ?? 'TestPassword123!';
 const employeePassword = 'WeeklyPatternPassword123!';

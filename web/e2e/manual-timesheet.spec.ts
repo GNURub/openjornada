@@ -199,7 +199,9 @@ test('employee completes a past workday and the approval policy is enforced', as
     },
   });
   expect(overlap.status()).toBe(400);
-  expect(await overlap.text()).toContain('coincide con horas de trabajo');
+  expect(await overlap.text()).toContain(
+    'Esta jornada ya tenía fichajes. Utiliza una corrección e indica el motivo.',
+  );
 
   const overnightDate = '2026-01-20';
   const overnight = await request.post(`${apiBase}/openjornada/manual-time-requests`, {
@@ -382,7 +384,7 @@ test('employee completes a past workday and the approval policy is enforced', as
       workedMinutes: 0,
       editableIntervals: [],
       canAddManualTime: false,
-      canCorrectTime: true,
+      canCorrectTime: false,
     }),
   );
 

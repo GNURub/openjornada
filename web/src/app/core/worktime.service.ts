@@ -2,6 +2,7 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { AuthService } from './auth.service';
 import { WorkEventKind, WorkEventRecord } from './models';
 import { PocketBaseService } from './pocketbase.service';
+import { pocketBaseDateTime } from './pocketbase-date';
 import {
   calculateWorkedMs,
   deriveStatus,
@@ -39,7 +40,7 @@ export class WorktimeService {
       const records = await this.pb.collection('work_events').getFullList({
         filter: this.pb.filter('employee = {:employee} && occurredAt >= {:start}', {
           employee: user.id,
-          start: start.toISOString(),
+          start: pocketBaseDateTime(start),
         }),
         sort: '-occurredAt',
       });

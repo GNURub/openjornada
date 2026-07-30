@@ -8,6 +8,7 @@ import {
   WorkEventRecord,
 } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
+import { pocketBaseDateTime } from '../../core/pocketbase-date';
 import { eventLabel } from '../../core/time-calculations';
 import { TimesheetComponent } from './timesheet.component';
 
@@ -57,8 +58,8 @@ export class RecordsComponent {
           'employee = {:employee} && occurredAt >= {:from} && occurredAt <= {:to}',
           {
             employee: this.employee,
-            from: new Date(`${this.from}T00:00:00`).toISOString(),
-            to: end.toISOString(),
+            from: pocketBaseDateTime(new Date(`${this.from}T00:00:00`)),
+            to: pocketBaseDateTime(end),
           },
         ),
         sort: '-occurredAt',

@@ -197,12 +197,13 @@ test('an invitation expires in 72 hours, sets the password and signs the employe
     await page.getByRole('button', { name: 'Crear contraseña y entrar' }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByText('Empleada invitada').first()).toBeVisible();
+    await acknowledgePrivacyNotice(page);
 
     const token = link!.split('/').at(-1);
     const reused = await request.get(`${apiBase}/openjornada/invitations/${token}`);
     expect(reused.status()).toBe(400);
 
-    await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+    await page.getByRole('complementary').getByRole('button', { name: 'Cerrar sesión' }).click();
     await signIn(page, 'admin@example.com', 'TestPassword123!');
     await page.goto('/equipo');
     const acceptedRow = page.locator(`[data-member-email="${email}"]`);
