@@ -314,7 +314,7 @@ async function expectNoStatement(
   expect(body.totalItems).toBe(0);
 }
 
-test('full-time and part-time weekly patterns classify complementary hours correctly', async ({
+test('full-time and part-time weekly patterns classify overtime and complementary hours correctly', async ({
   request,
 }, testInfo) => {
   test.skip(
@@ -365,6 +365,54 @@ test('full-time and part-time weekly patterns classify complementary hours corre
     { planned: 0, worked: 0 },
     { planned: 0, worked: 0 },
   ]);
+
+  const fullTimeOvertime = await createEmployee(
+    request,
+    admin,
+    suffix,
+    'completa-extra',
+    'full_time',
+    2400,
+    false,
+  );
+  await assignSchedule(request, admin, fullTimeOvertime, week, [1, 2, 3, 4, 5], '09:00', '17:00');
+  const fullTimeOvertimeDays = [
+    ['09:00', '17:00'],
+    ['09:00', '18:00'],
+    ['09:00', '16:00'],
+    ['09:00', '19:00'],
+    ['09:00', '17:00'],
+    ['09:00', '11:00'],
+  ] as const;
+  for (let index = 0; index < fullTimeOvertimeDays.length; index += 1) {
+    await addWorkedDay(
+      request,
+      admin,
+      fullTimeOvertime,
+      week.dates[index],
+      fullTimeOvertimeDays[index][0],
+      fullTimeOvertimeDays[index][1],
+    );
+  }
+  const fullTimeOvertimeClose = await closeMonth(request, admin, fullTimeOvertime, week.period);
+  expect(fullTimeOvertimeClose.status, fullTimeOvertimeClose.text).toBe(201);
+  const fullTimeOvertimeCsv = verifySummaryAndCsv(
+    fullTimeOvertimeClose.statement!,
+    fullTimeOvertime,
+    week.period,
+    {
+      employmentType: 'full_time',
+      contractedMinutes: 2400,
+      ordinaryMinutes: 2340,
+      complementaryMinutes: 0,
+      overtimeMinutes: 300,
+      totalMinutes: 2640,
+    },
+  );
+  expect(fullTimeOvertimeCsv).toContain(csvLine(week.dates[1], 480, 540, 480, 0, 60));
+  expect(fullTimeOvertimeCsv).toContain(csvLine(week.dates[2], 480, 420, 420, 0, 0));
+  expect(fullTimeOvertimeCsv).toContain(csvLine(week.dates[3], 480, 600, 480, 0, 120));
+  expect(fullTimeOvertimeCsv).toContain(csvLine(week.dates[5], 0, 120, 0, 0, 120));
 
   const partTimeWithAgreement = await createEmployee(
     request,
