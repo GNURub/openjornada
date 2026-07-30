@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 const apiBase = process.env['OPENJORNADA_E2E_API_URL'] ?? 'http://127.0.0.1:8090/api';
+const appBase = process.env['OPENJORNADA_E2E_APP_URL'] ?? 'http://127.0.0.1:4217';
 const adminEmail = process.env['OPENJORNADA_E2E_ADMIN_EMAIL'] ?? 'admin@example.com';
 const adminPassword = process.env['OPENJORNADA_E2E_ADMIN_PASSWORD'] ?? 'TestPassword123!';
 
@@ -44,7 +45,10 @@ function previousMonth(): {
   };
 }
 
-test('critical time-record compliance controls work end to end', async ({ request }, testInfo) => {
+test('critical time-record compliance controls work end to end', async ({
+  request,
+  page,
+}, testInfo) => {
   test.skip(
     testInfo.project.name !== 'desktop-chromium',
     'Una ejecución basta para validar los controles de cumplimiento.',
@@ -55,11 +59,12 @@ test('critical time-record compliance controls work end to end', async ({ reques
   const suffix = `${Date.now()}`;
   const email = `cumplimiento-${suffix}@example.com`;
   const password = 'CompliancePassword123!';
+  const employeeName = `Prueba Cumplimiento ${suffix}`;
   const employeeResponse = await request.post(`${apiBase}/collections/users/records`, {
     headers: adminHeaders,
     data: {
       organization: admin.record.organization,
-      name: 'Prueba Cumplimiento',
+      name: employeeName,
       email,
       password,
       passwordConfirm: password,
@@ -79,6 +84,65 @@ test('critical time-record compliance controls work end to end', async ({ reques
   };
   const employeeAuth = await signIn(request, email, password);
   const employeeHeaders = { Authorization: employeeAuth.token };
+
+  const leaveTypesResponse = await request.get(`${apiBase}/collections/leave_types/records`, {
+    headers: adminHeaders,
+    params: { page: 1, perPage: 10, filter: "code = 'vacation'" },
+  });
+  expect(leaveTypesResponse.ok(), await leaveTypesResponse.text()).toBeTruthy();
+  const leaveTypes = (await leaveTypesResponse.json()) as {
+    items: Array<{ id: string }>;
+  };
+  const vacationType = leaveTypes.items[0];
+  expect(vacationType).toBeDefined();
+  const currentYear = new Date().getUTCFullYear();
+  const balancesResponse = await request.get(`${apiBase}/collections/leave_balances/records`, {
+    headers: adminHeaders,
+    params: {
+      page: 1,
+      perPage: 10,
+      filter: `employee = '${employee.id}' && leaveType = '${vacationType.id}' && year = ${currentYear}`,
+    },
+  });
+  expect(balancesResponse.ok(), await balancesResponse.text()).toBeTruthy();
+  const balanceItems = (await balancesResponse.json()) as {
+    items: Array<{
+      id: string;
+      employee: string;
+      year: number;
+      allowance: number;
+    }>;
+  };
+  const vacationBalance = balanceItems.items[0];
+  expect(vacationBalance).toBeDefined();
+
+  const forbiddenAllowance = await request.patch(
+    `${apiBase}/collections/leave_balances/records/${vacationBalance.id}`,
+    { headers: employeeHeaders, data: { allowance: 30 } },
+  );
+  expect([403, 404]).toContain(forbiddenAllowance.status());
+  const adminAllowance = await request.patch(
+    `${apiBase}/collections/leave_balances/records/${vacationBalance.id}`,
+    {
+      headers: adminHeaders,
+      data: {
+        allowance: 22.5,
+        employee: admin.record.id,
+        year: 2200,
+      },
+    },
+  );
+  expect(adminAllowance.ok(), await adminAllowance.text()).toBeTruthy();
+  expect(await adminAllowance.json()).toMatchObject({
+    employee: employee.id,
+    year: currentYear,
+    allowance: 22.5,
+  });
+  const invalidAllowance = await request.patch(
+    `${apiBase}/collections/leave_balances/records/${vacationBalance.id}`,
+    { headers: adminHeaders, data: { allowance: 22.25 } },
+  );
+  expect(invalidAllowance.status()).toBe(400);
 
   const noticeBefore = await request.get(`${apiBase}/openjornada/privacy-notice`, {
     headers: employeeHeaders,
@@ -189,4 +253,43 @@ test('critical time-record compliance controls work end to end', async ({ reques
   });
   expect(release.ok(), await release.text()).toBeTruthy();
   expect((await release.json()).active).toBe(false);
+
+  const acknowledgeAdmin = await request.post(`${apiBase}/openjornada/privacy-notice/acknowledge`, {
+    headers: adminHeaders,
+  });
+  expect(acknowledgeAdmin.ok(), await acknowledgeAdmin.text()).toBeTruthy();
+  await page.addInitScript(({ token, record }) => {
+    localStorage.setItem('pocketbase_auth', JSON.stringify({ token, record }));
+  }, admin);
+  await page.goto(`${appBase}/ausencias`);
+  await page.getByRole('button', { name: 'Políticas y saldos' }).click();
+  const allowanceInput = page.getByLabel(
+    `Cupo anual de ${employeeName} para Vacaciones en ${currentYear}`,
+  );
+  await expect(allowanceInput).toHaveValue('22.5');
+  await allowanceInput.fill('23.5');
+  const balanceCard = page.locator('article').filter({ has: allowanceInput });
+  await balanceCard.getByRole('button', { name: 'Guardar cupo' }).click();
+  await expect(
+    page.getByText(`Cupo anual de ${employeeName} actualizado a 23.5 días.`),
+  ).toBeVisible();
+  const updatedBalance = await request.get(
+    `${apiBase}/collections/leave_balances/records/${vacationBalance.id}`,
+    { headers: adminHeaders },
+  );
+  expect(updatedBalance.ok(), await updatedBalance.text()).toBeTruthy();
+  expect((await updatedBalance.json()).allowance).toBe(23.5);
+  const auditResponse = await request.get(`${apiBase}/collections/audit_logs/records`, {
+    headers: adminHeaders,
+    params: {
+      page: 1,
+      perPage: 10,
+      filter: `action = 'leave_balance.updated' && entityId = '${vacationBalance.id}'`,
+    },
+  });
+  expect(auditResponse.ok(), await auditResponse.text()).toBeTruthy();
+  const audits = (await auditResponse.json()) as {
+    items: Array<{ metadata: { after: { allowance: number } } }>;
+  };
+  expect(audits.items.some((audit) => audit.metadata.after.allowance === 23.5)).toBe(true);
 });

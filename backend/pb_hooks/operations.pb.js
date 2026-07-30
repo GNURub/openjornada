@@ -65,6 +65,63 @@ onRecordUpdateRequest((e) => {
 
 onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next();
+  if (!e.auth || e.auth.getString("role") !== "admin") {
+    throw new ForbiddenError(
+      "Sólo administración puede crear saldos de ausencias.",
+    );
+  }
+  const organization = e.auth.getString("organization");
+  e.record.set("organization", organization);
+  e.record.set("updatedBy", e.auth.id);
+  require(`${__hooks}/leave_balance_helpers.js`).validateReferences(
+    e.app,
+    e.record,
+    organization,
+  );
+  e.next();
+}, "leave_balances");
+
+onRecordUpdateRequest((e) => {
+  if (e.hasSuperuserAuth()) return e.next();
+  if (!e.auth || e.auth.getString("role") !== "admin") {
+    throw new ForbiddenError(
+      "Sólo administración puede modificar saldos de ausencias.",
+    );
+  }
+  const original = e.record.original();
+  const organization = original.getString("organization");
+  if (organization !== e.auth.getString("organization")) {
+    throw new ForbiddenError(
+      "No puedes modificar saldos de ausencias de otra empresa.",
+    );
+  }
+  e.record.set("organization", original.getString("organization"));
+  e.record.set("employee", original.getString("employee"));
+  e.record.set("leaveType", original.getString("leaveType"));
+  e.record.set("year", original.getFloat("year"));
+  e.record.set("updatedBy", e.auth.id);
+  require(`${__hooks}/leave_balance_helpers.js`).validateReferences(
+    e.app,
+    e.record,
+    organization,
+  );
+  e.next();
+}, "leave_balances");
+
+onRecordAfterUpdateSuccess((e) => {
+  const actor = e.record.getString("updatedBy");
+  if (!actor) return e.next();
+  require(`${__hooks}/leave_balance_helpers.js`).auditUpdate(
+    e.app,
+    e.record,
+    e.record.original(),
+    actor,
+  );
+  e.next();
+}, "leave_balances");
+
+onRecordCreateRequest((e) => {
+  if (e.hasSuperuserAuth()) return e.next();
   if (!e.auth) throw new UnauthorizedError("Debes iniciar sesión.");
   const requestedDaysFor = (organization, startValue, endValue, dayPart) => {
     const first = new Date(startValue);

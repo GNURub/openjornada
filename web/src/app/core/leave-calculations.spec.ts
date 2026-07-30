@@ -3,12 +3,11 @@ import {
   countBusinessDays,
   countRequestedDays,
   findLeaveConflicts,
+  normalizeLeaveAllowance,
 } from './leave-calculations';
 import type { LeaveRequestRecord } from './models';
 
-function leaveRequest(
-  overrides: Partial<LeaveRequestRecord> = {},
-): LeaveRequestRecord {
+function leaveRequest(overrides: Partial<LeaveRequestRecord> = {}): LeaveRequestRecord {
   return {
     id: 'target',
     created: '2026-07-01T10:00:00.000Z',
@@ -50,20 +49,26 @@ describe('leave calculations', () => {
   });
 
   it('excludes configured public holidays', () => {
-    expect(
-      countBusinessDays('2026-12-21', '2026-12-25', ['2026-12-25']),
-    ).toBe(4);
+    expect(countBusinessDays('2026-12-21', '2026-12-25', ['2026-12-25'])).toBe(4);
   });
 
   it('supports half-day requests', () => {
-    expect(countRequestedDays('2026-07-29', '2026-07-29', 'morning')).toBe(
-      0.5,
-    );
+    expect(countRequestedDays('2026-07-29', '2026-07-29', 'morning')).toBe(0.5);
   });
 
   it('calculates the available balance with carry-over and adjustments', () => {
     expect(availableLeaveDays(22, 3, -1, 8.5)).toBe(15.5);
     expect(availableLeaveDays(2, 0, 0, 5)).toBe(0);
+  });
+
+  it('accepts annual allowances in whole or half days', () => {
+    expect(normalizeLeaveAllowance(22)).toBe(22);
+    expect(normalizeLeaveAllowance('22.5')).toBe(22.5);
+    expect(normalizeLeaveAllowance('22,5')).toBe(22.5);
+    expect(normalizeLeaveAllowance('')).toBeNull();
+    expect(normalizeLeaveAllowance(-0.5)).toBeNull();
+    expect(normalizeLeaveAllowance(22.25)).toBeNull();
+    expect(normalizeLeaveAllowance(366.5)).toBeNull();
   });
 
   it('classifies approved and pending conflicts from other employees', () => {
@@ -114,9 +119,7 @@ describe('leave calculations', () => {
       status: 'cancelled',
     });
 
-    expect(
-      findLeaveConflicts(target, [sameEmployee, rejected, cancelled]),
-    ).toEqual([]);
+    expect(findLeaveConflicts(target, [sameEmployee, rejected, cancelled])).toEqual([]);
   });
 
   it('counts overlapping calendar dates even on weekends', () => {
@@ -177,9 +180,7 @@ describe('leave calculations', () => {
     });
 
     expect(
-      findLeaveConflicts(target, [afternoon, morning, full]).map(
-        (conflict) => conflict.request.id,
-      ),
+      findLeaveConflicts(target, [afternoon, morning, full]).map((conflict) => conflict.request.id),
     ).toEqual(['morning', 'full']);
   });
 

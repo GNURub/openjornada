@@ -92,6 +92,12 @@ esté clasificado. Cada hoja conserva planificación, tiempo trabajado, balance,
 complementarias o extraordinarias según contrato, entradas, salidas, pausas,
 festivos, ausencias, incidencias y huellas de integridad.
 
+En `/ausencias`, administración dispone de **Políticas y saldos → Cupo anual
+por persona**. Puede fijar un número distinto para cada persona, tipo y año,
+en días completos o medios días. El cupo contractual se conserva separado del
+arrastre y de los ajustes excepcionales; el servidor bloquea cambios de empresa,
+persona, tipo o año y audita cada modificación.
+
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde
 qué hora hasta qué hora y marcar **Empieza el día siguiente (+1d)**. Se pueden

@@ -162,9 +162,40 @@
         <form (ngSubmit)="createBlackout()" class="mt-5 space-y-3"><input [(ngModel)]="blackoutName" name="blackoutName" required class="field-input" placeholder="Campaña de Navidad" /><select [(ngModel)]="blackoutLeaveType" name="blackoutLeaveType" class="field-input"><option value="">Todos los tipos</option>@for (type of leaveTypes(); track type.id) { <option [value]="type.id">{{ type.name }}</option> }</select><input [(ngModel)]="blackoutStart" name="blackoutStart" type="date" required class="field-input" /><input [(ngModel)]="blackoutEnd" name="blackoutEnd" type="date" required class="field-input" /><button class="btn-primary w-full">Bloquear fechas</button></form>
       </section>
       <section class="rounded-[2rem] border border-stone-200 bg-white p-6">
-        <h2 class="font-display text-xl font-bold">Festivos y ajustes</h2>
+        <h2 class="font-display text-xl font-bold">Festivos y cupos individuales</h2>
         <form (ngSubmit)="createHoliday()" class="mt-5 space-y-3"><input [(ngModel)]="holidayName" name="holidayName" required class="field-input" placeholder="Nombre del festivo" /><input [(ngModel)]="holidayDate" name="holidayDate" type="date" required class="field-input" /><button class="btn-primary w-full">Añadir festivo</button></form>
-        <div class="mt-6 max-h-80 space-y-2 overflow-auto">@for (balance of balances(); track balance.id) { <div class="rounded-xl bg-stone-50 p-3"><p class="text-sm font-semibold">{{ balance.expand?.employee?.name }} · {{ balance.expand?.leaveType?.name }}</p><div class="mt-2 flex items-center justify-between"><span class="text-sm">{{ balanceAvailable(balance) }} días</span><div class="flex gap-1"><button type="button" (click)="adjustBalance(balance,-1)" class="grid size-8 place-items-center rounded-lg bg-white">−</button><button type="button" (click)="adjustBalance(balance,1)" class="grid size-8 place-items-center rounded-lg bg-white">+</button></div></div></div> }</div>
+        <div class="mt-7 border-t border-stone-100 pt-6">
+          <div class="flex items-end justify-between gap-3">
+            <div><p class="font-display text-lg font-bold">Cupo anual por persona</p><p class="mt-1 text-xs leading-5 text-stone-500">Fija los días contractuales. El arrastre y los ajustes se conservan por separado.</p></div>
+            <label class="w-24 shrink-0"><span class="field-label">Año</span><input [(ngModel)]="balanceYear" name="balanceYear" type="number" min="2020" max="2200" class="field-input" /></label>
+          </div>
+          <div class="mt-4 max-h-[30rem] space-y-3 overflow-auto pr-1">
+            @for (balance of editableBalances(); track balance.id) {
+              <article class="rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                <p class="text-sm font-bold">{{ balance.expand?.employee?.name }}</p>
+                <p class="mt-0.5 text-xs text-stone-400">{{ balance.expand?.leaveType?.name }} · {{ balance.year }}</p>
+                <label class="mt-3 block">
+                  <span class="field-label">Cupo anual</span>
+                  <div class="flex gap-2">
+                    <input #allowanceInput type="number" min="0" max="366" step="0.5" [value]="balance.allowance" [attr.aria-label]="'Cupo anual de ' + (balance.expand?.employee?.name || 'persona') + ' para ' + (balance.expand?.leaveType?.name || 'ausencia') + ' en ' + balance.year" class="field-input min-w-0" />
+                    <button type="button" (click)="saveAllowance(balance, allowanceInput.value)" [disabled]="savingAllowance() !== ''" class="btn-secondary shrink-0 px-3">{{ savingAllowance() === balance.id ? 'Guardando…' : 'Guardar cupo' }}</button>
+                  </div>
+                </label>
+                <div class="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                  <div class="rounded-xl bg-white px-2 py-2"><span class="block text-stone-400">Arrastre</span><strong>{{ balance.carriedOver }}</strong></div>
+                  <div class="rounded-xl bg-white px-2 py-2"><span class="block text-stone-400">Ajuste</span><strong>{{ balance.adjustment }}</strong></div>
+                  <div class="rounded-xl bg-white px-2 py-2"><span class="block text-stone-400">Disponible</span><strong>{{ balanceAvailable(balance) }}</strong></div>
+                </div>
+                <div class="mt-3 flex items-center justify-between">
+                  <span class="text-xs text-stone-400">Ajuste excepcional</span>
+                  <div class="flex gap-1"><button type="button" (click)="adjustBalance(balance,-1)" class="grid size-8 place-items-center rounded-lg bg-white" [attr.aria-label]="'Restar un día de ajuste a ' + (balance.expand?.employee?.name || 'persona')">−</button><button type="button" (click)="adjustBalance(balance,1)" class="grid size-8 place-items-center rounded-lg bg-white" [attr.aria-label]="'Añadir un día de ajuste a ' + (balance.expand?.employee?.name || 'persona')">+</button></div>
+                </div>
+              </article>
+            } @empty {
+              <p class="rounded-xl bg-stone-50 p-4 text-sm text-stone-500">No hay saldos configurados para este año.</p>
+            }
+          </div>
+        </div>
       </section>
     </div>
   }

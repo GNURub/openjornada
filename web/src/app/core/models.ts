@@ -339,6 +339,7 @@ export interface LeaveBalanceRecord extends RecordModel {
   allowance: number;
   carriedOver: number;
   adjustment: number;
+  updatedBy: string;
   expand?: { employee?: UserRecord; leaveType?: LeaveTypeRecord };
 }
 

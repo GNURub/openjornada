@@ -5,6 +5,7 @@ import {
   availableLeaveDays,
   countRequestedDays,
   findLeaveConflicts,
+  normalizeLeaveAllowance,
   type LeaveConflict,
   type LeaveConflictStatus,
 } from '../../core/leave-calculations';
@@ -55,9 +56,8 @@ export class LeaveComponent {
   protected readonly saving = signal(false);
   protected readonly formOpen = signal(false);
   protected readonly assigning = signal(false);
-  protected readonly view = signal<'requests' | 'calendar' | 'settings'>(
-    'requests',
-  );
+  protected readonly savingAllowance = signal('');
+  protected readonly view = signal<'requests' | 'calendar' | 'settings'>('requests');
   protected readonly calendarMonth = signal(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
@@ -67,9 +67,7 @@ export class LeaveComponent {
     const role = this.auth.user()?.role;
     return role === 'admin' || role === 'manager';
   });
-  protected readonly isAdmin = computed(
-    () => this.auth.user()?.role === 'admin',
-  );
+  protected readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   protected readonly pendingCount = computed(
     () => this.requests().filter((request) => request.status === 'pending').length,
   );
@@ -110,6 +108,23 @@ export class LeaveComponent {
   protected blackoutLeaveType = '';
   protected holidayName = '';
   protected holidayDate = '';
+  protected balanceYear = new Date().getFullYear();
+
+  protected editableBalances(): LeaveBalanceRecord[] {
+    return this.balances()
+      .filter((balance) => balance.year === Number(this.balanceYear))
+      .sort(
+        (left, right) =>
+          (left.expand?.employee?.name ?? '').localeCompare(
+            right.expand?.employee?.name ?? '',
+            'es',
+          ) ||
+          (left.expand?.leaveType?.name ?? '').localeCompare(
+            right.expand?.leaveType?.name ?? '',
+            'es',
+          ),
+      );
+  }
 
   constructor() {
     void this.load();
@@ -121,33 +136,32 @@ export class LeaveComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      const [types, requests, balances, blackouts, holidays, members] =
-        await Promise.all([
-          this.pb.collection('leave_types').getFullList({
-            sort: 'name',
-            filter: 'active = true',
-          }),
-          this.pb.collection('leave_requests').getFullList({
-            sort: '-created',
-            expand: 'employee,leaveType',
-          }),
-          this.pb.collection('leave_balances').getFullList({
-            sort: 'year',
-            expand: 'employee,leaveType',
-          }),
-          this.pb.collection('leave_blackout_periods').getFullList({
-            sort: 'startDate',
-            expand: 'leaveType',
-          }),
-          this.pb.collection('public_holidays').getFullList({ sort: 'date' }),
-          this.canManage()
-            ? this.pb.collection('users').getFullList({
-                sort: 'name',
-                filter: 'active = true',
-                fields: 'id,name,employeeCode,role',
-              })
-            : Promise.resolve([]),
-        ]);
+      const [types, requests, balances, blackouts, holidays, members] = await Promise.all([
+        this.pb.collection('leave_types').getFullList({
+          sort: 'name',
+          filter: 'active = true',
+        }),
+        this.pb.collection('leave_requests').getFullList({
+          sort: '-created',
+          expand: 'employee,leaveType',
+        }),
+        this.pb.collection('leave_balances').getFullList({
+          sort: 'year',
+          expand: 'employee,leaveType',
+        }),
+        this.pb.collection('leave_blackout_periods').getFullList({
+          sort: 'startDate',
+          expand: 'leaveType',
+        }),
+        this.pb.collection('public_holidays').getFullList({ sort: 'date' }),
+        this.canManage()
+          ? this.pb.collection('users').getFullList({
+              sort: 'name',
+              filter: 'active = true',
+              fields: 'id,name,employeeCode,role',
+            })
+          : Promise.resolve([]),
+      ]);
       this.leaveTypes.set(types as LeaveTypeRecord[]);
       this.requests.set(requests as LeaveRequestRecord[]);
       this.balances.set(balances as LeaveBalanceRecord[]);
@@ -155,8 +169,7 @@ export class LeaveComponent {
       this.holidays.set(holidays as PublicHolidayRecord[]);
       this.members.set(members as UserRecord[]);
       this.leaveType ||=
-        (types as LeaveTypeRecord[]).find((type) => type.code === 'vacation')
-          ?.id ??
+        (types as LeaveTypeRecord[]).find((type) => type.code === 'vacation')?.id ??
         (types[0] as LeaveTypeRecord | undefined)?.id ??
         '';
       this.employee ||= this.canManage()
@@ -199,10 +212,7 @@ export class LeaveComponent {
       data.set('employee', this.employee);
       data.set('type', type.code);
       data.set('leaveType', type.id);
-      data.set(
-        'startDate',
-        new Date(`${this.startDate}T00:00:00`).toISOString(),
-      );
+      data.set('startDate', new Date(`${this.startDate}T00:00:00`).toISOString());
       data.set('endDate', new Date(`${this.endDate}T23:59:59`).toISOString());
       data.set('dayPart', this.dayPart);
       data.set('requestedDays', String(this.requestedDays()));
@@ -228,8 +238,7 @@ export class LeaveComponent {
   }
 
   protected onAttachment(event: Event): void {
-    this.attachment =
-      (event.target as HTMLInputElement).files?.[0] ?? null;
+    this.attachment = (event.target as HTMLInputElement).files?.[0] ?? null;
   }
 
   protected selectedType(): LeaveTypeRecord | undefined {
@@ -260,9 +269,7 @@ export class LeaveComponent {
             ? 'Solicitud aprobada.'
             : 'Solicitud rechazada por la persona responsable.',
       });
-      this.success.set(
-        status === 'approved' ? 'Ausencia aprobada.' : 'Solicitud rechazada.',
-      );
+      this.success.set(status === 'approved' ? 'Ausencia aprobada.' : 'Solicitud rechazada.');
       await this.load();
     } catch (error) {
       this.error.set(this.apiMessage(error, 'No se pudo resolver la solicitud.'));
@@ -357,10 +364,7 @@ export class LeaveComponent {
     }
   }
 
-  protected async adjustBalance(
-    balance: LeaveBalanceRecord,
-    amount: number,
-  ): Promise<void> {
+  protected async adjustBalance(balance: LeaveBalanceRecord, amount: number): Promise<void> {
     try {
       await this.pb.collection('leave_balances').update(balance.id, {
         adjustment: balance.adjustment + amount,
@@ -369,6 +373,40 @@ export class LeaveComponent {
       await this.load();
     } catch {
       this.error.set('No se pudo ajustar el saldo.');
+    }
+  }
+
+  protected async saveAllowance(
+    balance: LeaveBalanceRecord,
+    rawAllowance: number | string,
+  ): Promise<void> {
+    const allowance = normalizeLeaveAllowance(rawAllowance);
+    if (allowance === null) {
+      this.error.set(
+        'El cupo anual debe estar entre 0 y 366 días, en días completos o medios días.',
+      );
+      return;
+    }
+    if (allowance === balance.allowance || this.savingAllowance()) return;
+
+    this.savingAllowance.set(balance.id);
+    this.error.set('');
+    this.success.set('');
+    try {
+      const updated = (await this.pb
+        .collection('leave_balances')
+        .update(balance.id, { allowance })) as LeaveBalanceRecord;
+      updated.expand = balance.expand;
+      this.balances.update((items) =>
+        items.map((item) => (item.id === balance.id ? updated : item)),
+      );
+      this.success.set(
+        `Cupo anual de ${balance.expand?.employee?.name ?? 'la persona'} actualizado a ${allowance} días.`,
+      );
+    } catch {
+      this.error.set('No se pudo actualizar el cupo anual.');
+    } finally {
+      this.savingAllowance.set('');
     }
   }
 
@@ -382,20 +420,13 @@ export class LeaveComponent {
           new Date(request.startDate).getFullYear() === balance.year,
       )
       .reduce((total, request) => total + request.requestedDays, 0);
-    return availableLeaveDays(
-      balance.allowance,
-      balance.carriedOver,
-      balance.adjustment,
-      used,
-    );
+    return availableLeaveDays(balance.allowance, balance.carriedOver, balance.adjustment, used);
   }
 
   protected typeFor(request: LeaveRequestRecord): LeaveTypeRecord | undefined {
     return (
       request.expand?.leaveType ??
-      this.leaveTypes().find(
-        (type) => type.id === request.leaveType || type.code === request.type,
-      )
+      this.leaveTypes().find((type) => type.id === request.leaveType || type.code === request.type)
     );
   }
 
@@ -403,10 +434,7 @@ export class LeaveComponent {
     return this.requestConflicts().get(request.id) ?? EMPTY_CONFLICT_GROUPS;
   }
 
-  protected conflictTitle(
-    status: LeaveConflictStatus,
-    count: number,
-  ): string {
+  protected conflictTitle(status: LeaveConflictStatus, count: number): string {
     if (status === 'approved') {
       return count === 1
         ? '1 ausencia aprobada coincidente'
@@ -454,9 +482,7 @@ export class LeaveComponent {
 
   protected moveMonth(offset: number): void {
     const current = this.calendarMonth();
-    this.calendarMonth.set(
-      new Date(current.getFullYear(), current.getMonth() + offset, 1),
-    );
+    this.calendarMonth.set(new Date(current.getFullYear(), current.getMonth() + offset, 1));
   }
 
   protected calendarCells(): CalendarCell[] {
@@ -480,9 +506,7 @@ export class LeaveComponent {
             key >= request.startDate.slice(0, 10) &&
             key <= request.endDate.slice(0, 10),
         ),
-        holiday: this.holidays().find(
-          (holiday) => holiday.date.slice(0, 10) === key,
-        ),
+        holiday: this.holidays().find((holiday) => holiday.date.slice(0, 10) === key),
       };
     });
   }

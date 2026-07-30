@@ -16,20 +16,12 @@ export function countBusinessDays(
 ): number {
   const start = new Date(`${startValue.slice(0, 10)}T12:00:00`);
   const end = new Date(`${endValue.slice(0, 10)}T12:00:00`);
-  if (
-    Number.isNaN(start.getTime()) ||
-    Number.isNaN(end.getTime()) ||
-    start > end
-  ) {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     return 0;
   }
   const holidaySet = new Set(holidays.map((date) => date.slice(0, 10)));
   let total = 0;
-  for (
-    const current = new Date(start);
-    current <= end;
-    current.setDate(current.getDate() + 1)
-  ) {
+  for (const current = new Date(start); current <= end; current.setDate(current.getDate() + 1)) {
     const weekday = current.getDay();
     const key = [
       current.getFullYear(),
@@ -60,6 +52,20 @@ export function availableLeaveDays(
   return Math.max(0, allowance + carriedOver + adjustment - approvedDays);
 }
 
+export function normalizeLeaveAllowance(value: number | string): number | null {
+  if (typeof value === 'string' && !value.trim()) return null;
+  const allowance = typeof value === 'number' ? value : Number(value.replace(',', '.'));
+  if (
+    !Number.isFinite(allowance) ||
+    allowance < 0 ||
+    allowance > 366 ||
+    !Number.isInteger(allowance * 2)
+  ) {
+    return null;
+  }
+  return allowance;
+}
+
 export function findLeaveConflicts(
   target: LeaveRequestRecord,
   requests: readonly LeaveRequestRecord[],
@@ -70,7 +76,9 @@ export function findLeaveConflicts(
 
   return requests
     .filter(
-      (request): request is LeaveRequestRecord & {
+      (
+        request,
+      ): request is LeaveRequestRecord & {
         status: LeaveConflictStatus;
       } =>
         request.id !== target.id &&
@@ -82,13 +90,9 @@ export function findLeaveConflicts(
       const requestEnd = dateKey(request.endDate);
       if (!requestStart || !requestEnd || requestStart > requestEnd) return [];
 
-      const overlapStart =
-        targetStart > requestStart ? targetStart : requestStart;
+      const overlapStart = targetStart > requestStart ? targetStart : requestStart;
       const overlapEnd = targetEnd < requestEnd ? targetEnd : requestEnd;
-      if (
-        overlapStart > overlapEnd ||
-        !dayPartsOverlap(target, request)
-      ) {
+      if (overlapStart > overlapEnd || !dayPartsOverlap(target, request)) {
         return [];
       }
 
@@ -113,13 +117,8 @@ function dateKey(value: string): string {
   return value.slice(0, 10);
 }
 
-function dayPartsOverlap(
-  left: LeaveRequestRecord,
-  right: LeaveRequestRecord,
-): boolean {
-  const leftPart =
-    dateKey(left.startDate) === dateKey(left.endDate) ? left.dayPart : 'full';
-  const rightPart =
-    dateKey(right.startDate) === dateKey(right.endDate) ? right.dayPart : 'full';
+function dayPartsOverlap(left: LeaveRequestRecord, right: LeaveRequestRecord): boolean {
+  const leftPart = dateKey(left.startDate) === dateKey(left.endDate) ? left.dayPart : 'full';
+  const rightPart = dateKey(right.startDate) === dateKey(right.endDate) ? right.dayPart : 'full';
   return leftPart === 'full' || rightPart === 'full' || leftPart === rightPart;
 }

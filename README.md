@@ -22,8 +22,9 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Política por empresa para aplicar esas altas automáticamente o someterlas a
   aprobación, con tipos de pausa remunerados o no remunerados.
 - Correcciones de jornada con aprobación y trazabilidad inmutable.
-- Ausencias con tipos, saldos, festivos, medias jornadas, bloqueos, justificantes,
-  calendario, asignación y aprobación.
+- Ausencias con tipos, cupos anuales distintos por persona, saldos, arrastres,
+  ajustes, festivos, medias jornadas, bloqueos, justificantes, calendario,
+  asignación y aprobación.
 - Gastos con categorías, recibos protegidos, revisión, aprobación y pago.
 - Documentos privados o corporativos con confirmación de lectura y aviso al
   destinatario.
