@@ -1,59 +1,47 @@
-# Web
+# Frontend de OpenJornada
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.0.9.
+SPA standalone construida con Angular 22, Tailwind CSS 4 y el SDK de PocketBase.
+La documentación general está en [../README.md](../README.md).
 
-## Development server
+## Desarrollo
 
-To start a local development server, run:
-
-```bash
-ng serve
-```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+PocketBase debe responder en `http://127.0.0.1:8090`:
 
 ```bash
-ng generate component component-name
+cd ..
+docker compose up -d --build app
+
+cd web
+npm ci
+npm start
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+Abre <http://localhost:4200>. Los cambios se recargan automáticamente.
+
+## Comandos
 
 ```bash
-ng generate --help
+npm run build      # compilación optimizada
+npm run test:ci    # pruebas unitarias con Vitest
+npm run e2e        # Playwright en escritorio, tableta y móvil
+npm audit --omit=dev
 ```
 
-## Building
-
-To build the project run:
+Las pruebas E2E arrancan PocketBase y Angular con una base temporal. Requieren
+`../backend/bin/pocketbase` y Chromium instalado mediante:
 
 ```bash
-ng build
+npx playwright install chromium
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## Organización
 
-## Running unit tests
-
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
+```text
+src/app/core/       servicios, modelos, guards y cálculos
+src/app/features/   módulos funcionales cargados de forma diferida
+src/app/shared/     shell y navegación
+e2e/                recorridos Playwright
 ```
 
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+La API se resuelve contra `127.0.0.1:8090` en desarrollo y contra el mismo origen
+que sirve la SPA en producción.

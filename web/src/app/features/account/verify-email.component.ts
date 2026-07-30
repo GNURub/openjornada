@@ -15,7 +15,7 @@ import { PocketBaseService } from '../../core/pocketbase.service';
           <p class="mt-3 text-stone-500">Sólo tardará un momento.</p>
         } @else if (verified()) {
           <h1 class="mt-7 font-display text-3xl font-bold">Correo verificado</h1>
-          <p class="mt-3 leading-7 text-stone-500">Tu cuenta ya está preparada para acceder a Aura.</p>
+          <p class="mt-3 leading-7 text-stone-500">Tu cuenta ya está preparada para acceder a OpenJornada.</p>
           <a routerLink="/login" class="btn-primary mt-8 w-full">Entrar</a>
         } @else {
           <h1 class="mt-7 font-display text-3xl font-bold">El enlace no es válido</h1>

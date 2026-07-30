@@ -1,125 +1,218 @@
-# Aura Jornada
+# OpenJornada
 
-Sistema de registro horario para una empresa de estética. La aplicación combina una SPA responsive en Angular 22 y Tailwind CSS 4 con PocketBase 0.39.9. Se despliega como un único contenedor y funciona en escritorio, tablet y móvil.
+OpenJornada es una plataforma de gestión laboral y RR. HH. para pequeñas y
+medianas empresas. Incluye registro horario, ausencias, gastos, documentos,
+onboarding y objetivos en una SPA responsive.
 
-## Funcionalidad incluida
+La aplicación usa Angular 22, Tailwind CSS 4 y PocketBase 0.39.9. Frontend,
+API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 
-- Acceso con correo y contraseña, recuperación de contraseña y verificación por correo.
+## Funcionalidad
+
+- Autenticación, recuperación de contraseña y verificación por correo.
 - Roles `admin`, `manager`, `employee` y `representative`, aislados por empresa.
-- Alta, activación/desactivación y cambio de rol de personas con controles de elevación de privilegios en servidor.
-- Entrada, salida e inicio/fin de pausa con hora asignada por el servidor.
-- Secuencia de fichaje validada en backend.
-- Eventos inmutables con identificador idempotente, cadena SHA-256 y registro de auditoría.
-- Solicitudes de corrección con motivo, aprobación o rechazo y evento corrector inmutable enlazado al original.
-- Consulta histórica y exportación CSV para la persona trabajadora, responsables y representación legal.
-- Gestión avanzada de ausencias: tipos configurables, saldos por persona y año, días laborables/festivos, medias jornadas, periodos bloqueados, calendario, asignación por responsables, aprobación y avisos.
-- Gastos con categorías, justificante protegido, borrador, envío, solicitud de cambios, aprobación, rechazo y marcado como pagado.
-- Documentos protegidos por persona o empresa, visibilidad por rol, descarga autenticada y confirmación de lectura.
-- Tareas de onboarding, formación y administración, con responsable, vencimiento, estados y avisos.
-- Objetivos por ciclos, visibilidad configurable, progreso y cierre.
-- Horarios por persona con días, horas, pausa, periodo de vigencia y archivo histórico.
-- Avisos internos y comunicados por audiencia, con envío adicional por SMTP cuando está configurado.
-- Informes mensuales por persona y empresa, detección de secuencias abiertas y exportación CSV.
-- Ajustes de empresa protegidos para administración: zona horaria, conservación y contacto de privacidad.
-- Configuración SMTP, limitación de peticiones, minimización de logs y cifrado de secretos.
-- Migraciones reproducibles, pruebas unitarias con Vitest y E2E con Playwright en escritorio, tableta y móvil.
+- Fichajes y pausas con hora de servidor, idempotencia, cadena SHA-256 y auditoría.
+- Correcciones de jornada con aprobación y trazabilidad inmutable.
+- Ausencias con tipos, saldos, festivos, medias jornadas, bloqueos, justificantes,
+  calendario, asignación y aprobación.
+- Gastos con categorías, recibos protegidos, revisión, aprobación y pago.
+- Documentos privados o corporativos con confirmación de lectura.
+- Tareas de onboarding, formación y administración.
+- Objetivos por ciclos y seguimiento porcentual.
+- Horarios, comunicados, informes y exportaciones CSV.
+- SMTP opcional, límites de peticiones y cifrado de secretos de PocketBase.
 
-## Puesta en marcha con Docker
+La cobertura funcional detallada está en
+[docs/FACTORIAL_FEATURES.md](docs/FACTORIAL_FEATURES.md).
 
-Requisitos: Docker 26+ y Docker Compose.
+## Inicio rápido en modo demo
+
+Requisitos:
+
+- Docker 26 o posterior.
+- Docker Compose 2.26 o posterior.
 
 ```bash
 cp .env.example .env
 openssl rand -hex 16
 ```
 
-Edita `.env`, pega la salida de `openssl` en `PB_ENCRYPTION_KEY` y sustituye todas las credenciales de ejemplo. La clave debe tener exactamente 32 caracteres.
+Edita `.env`:
+
+```dotenv
+PB_PUBLIC_URL=http://localhost:8090
+PB_ENCRYPTION_KEY=pega-aqui-los-32-caracteres-generados
+PB_BOOTSTRAP_ADMIN_PASSWORD=elige-una-contrasena-segura
+PB_DEMO_ENABLED=true
+```
+
+Arranca la aplicación:
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-La aplicación estará en `http://localhost:8090`. En el primer arranque, las variables `PB_BOOTSTRAP_ADMIN_*` crean la empresa y su primera cuenta administradora de forma idempotente.
+Abre <http://localhost:8090>. La cuenta administradora usa
+`PB_BOOTSTRAP_ADMIN_EMAIL` y `PB_BOOTSTRAP_ADMIN_PASSWORD`. La cuenta de demo
+usa `PB_DEMO_EMAIL` y `PB_DEMO_PASSWORD`.
 
-Para producción:
+Comandos habituales:
 
-1. Publica el puerto 8090 únicamente detrás de un proxy HTTPS (Caddy, Traefik, nginx o el proxy de tu proveedor).
-2. Configura `PB_PUBLIC_URL` con la URL HTTPS definitiva.
-3. Completa los datos SMTP. Sin SMTP no funcionarán los correos de verificación y recuperación.
-4. Mantén `PB_DEMO_ENABLED=false`.
-5. Guarda el volumen `pocketbase_data` en almacenamiento persistente y configura copias cifradas externas.
-6. Restringe el acceso a `/_/` en el proxy o con una lista de IP permitidas para superusuarios.
+```bash
+docker compose logs -f app
+docker compose restart app
+docker compose down
+```
+
+`docker compose down` conserva la base de datos. No uses
+`docker compose down -v` salvo que quieras borrar definitivamente todos los
+datos locales.
 
 ## Desarrollo local
 
+La opción recomendada mantiene PocketBase en Docker y ejecuta Angular con
+recarga automática.
+
+Terminal 1:
+
 ```bash
-# terminal 1 (sólo la primera vez o después de añadir migraciones)
-backend/bin/pocketbase migrate up \
-  --migrationsDir backend/pb_migrations \
-  --hooksDir backend/pb_hooks
+cp .env.example .env
+# Configura PB_ENCRYPTION_KEY y las credenciales antes de continuar.
+docker compose up -d --build app
+```
 
-# terminal 1 (servidor)
-PB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
-PB_BOOTSTRAP_ADMIN_PASSWORD='change-this-password' \
-backend/bin/pocketbase serve \
-  --http=127.0.0.1:8090 \
-  --migrationsDir backend/pb_migrations \
-  --hooksDir backend/pb_hooks
+Terminal 2:
 
-# terminal 2
+```bash
 cd web
 npm ci
 npm start
 ```
 
-La descarga local de `backend/bin/pocketbase` se excluye de Git. El contenedor descarga la versión fijada automáticamente.
+- Frontend de desarrollo: <http://localhost:4200>
+- PocketBase y frontend compilado: <http://localhost:8090>
+- Salud de la API: <http://localhost:8090/api/health>
 
-## Verificación
+Cuando el frontend se ejecuta en los puertos `4200` o `4217`, se conecta
+automáticamente a PocketBase en `127.0.0.1:8090`.
+
+Para desarrollar PocketBase sin Docker hace falta descargar el binario
+0.39.9 en `backend/bin/pocketbase`. Ese directorio está ignorado por Git.
+
+## Producción
+
+La guía completa está en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). El despliegue
+mínimo usa el archivo dedicado de producción:
+
+```bash
+cp .env.example .env
+# Completa la URL HTTPS, secretos, cuenta inicial y SMTP.
+docker compose -f docker-compose.production.yml up -d --build
+curl -fsS http://127.0.0.1:8090/api/health
+```
+
+En producción:
+
+1. Mantén `PB_DEMO_ENABLED=false`.
+2. Usa una `PB_ENCRYPTION_KEY` única de 32 caracteres y guárdala fuera del servidor.
+3. Publica PocketBase mediante un proxy HTTPS; el compose de producción sólo
+   escucha en `127.0.0.1:8090`.
+4. Restringe el panel `/_/` a administradores o a una red privada.
+5. Configura SMTP para verificación y recuperación de cuentas.
+6. Conserva el volumen `pocketbase_data` y programa copias cifradas.
+7. Revisa [docs/COMPLIANCE_ES.md](docs/COMPLIANCE_ES.md) antes de tratar datos reales.
+
+## Variables de entorno
+
+| Variable | Obligatoria | Uso |
+| --- | --- | --- |
+| `PB_APP_NAME` | Sí | Nombre mostrado en PocketBase y correos. |
+| `PB_PUBLIC_URL` | Sí | URL pública completa; HTTPS en producción. |
+| `PB_ENCRYPTION_KEY` | Sí | Clave de exactamente 32 caracteres. No debe rotarse sin un plan de migración. |
+| `PB_ORGANIZATION_NAME` | Sí | Empresa creada durante el bootstrap inicial. |
+| `PB_ORGANIZATION_TAX_ID` | Sí | Identificador único usado para un bootstrap idempotente. |
+| `PB_TIMEZONE` | Sí | Zona IANA, por ejemplo `Europe/Madrid`. |
+| `PB_BOOTSTRAP_ADMIN_EMAIL` | Sí | Correo de la primera cuenta administradora. |
+| `PB_BOOTSTRAP_ADMIN_PASSWORD` | Sí | Contraseña inicial robusta. |
+| `PB_BOOTSTRAP_ADMIN_NAME` | No | Nombre visible de la cuenta administradora. |
+| `PB_MAIL_SENDER_NAME` | No | Remitente visible de los correos. |
+| `PB_MAIL_SENDER_ADDRESS` | No | Dirección remitente. |
+| `PB_SMTP_*` | Producción | Host, puerto, credenciales y TLS del servidor de correo. |
+| `PB_DEMO_ENABLED` | No | Crea una empleada de ejemplo cuando vale `true`. |
+| `PB_DEMO_EMAIL` | Demo | Correo de la empleada de ejemplo. |
+| `PB_DEMO_PASSWORD` | Demo | Contraseña de la empleada de ejemplo. |
+
+Las variables de bootstrap crean registros si no existen; no sobrescriben
+contraseñas ni datos ya guardados.
+
+## Pruebas y calidad
 
 ```bash
 cd web
+npm ci
 npm run build
 npm run test:ci
 npm run e2e
 npm audit --omit=dev
 
 cd ..
-docker build -t aura-jornada .
+docker build -t openjornada .
+docker compose -f docker-compose.production.yml config --quiet
 ```
 
-Playwright crea una base PocketBase temporal, una cuenta administradora y una empleada de prueba; no toca datos de desarrollo ni producción.
-
-## Copias de seguridad y restauración
-
-El dato persistente es el volumen `/app/pb_data`. Realiza copias diarias cifradas, conserva varias generaciones y prueba la restauración periódicamente. Antes de una actualización:
+Playwright crea una base temporal y no toca los datos de desarrollo o producción.
+Para E2E local necesita `backend/bin/pocketbase` y los navegadores de Playwright:
 
 ```bash
-docker compose stop app
-docker run --rm \
-  -v factorial_pocketbase_data:/source:ro \
-  -v "$PWD/backups:/backup" \
-  alpine tar -czf /backup/pb_data-$(date +%F).tar.gz -C /source .
-docker compose start app
+cd web
+npx playwright install chromium
 ```
 
-No automatices el borrado de `work_events` antes de cuatro años. Consulta [Cumplimiento en España](docs/COMPLIANCE_ES.md) antes de activar el servicio.
+## Datos, copias y actualizaciones
+
+PocketBase guarda la base de datos y los archivos en `/app/pb_data`, respaldado
+por el volumen `pocketbase_data`. No copies sólo el archivo SQLite: conserva el
+directorio completo y prueba periódicamente la restauración.
+
+Antes de actualizar:
+
+1. Crea y verifica una copia cifrada.
+2. Lee los cambios de PocketBase y de las dependencias.
+3. Ejecuta todas las pruebas.
+4. Prueba la actualización y la restauración fuera de producción.
+5. Despliega con `docker compose ... up -d --build`.
+
+PocketBase aún no ha alcanzado la versión 1.0; no actualices su versión fijada sin
+revisar migraciones, hooks y compatibilidad del SDK.
 
 ## Estructura
 
 ```text
 backend/
-  pb_migrations/   esquema, reglas de acceso y plantillas de correo
-  pb_hooks/        validación, integridad, auditoría, SMTP y bootstrap
-web/
-  src/app/core/    autenticación, modelos y dominio de jornada
-  src/app/features acceso, jornada, registros, equipo, ausencias, horarios, avisos, informes y ajustes
-  e2e/             recorridos Playwright
+  pb_migrations/   esquema y reglas de acceso
+  pb_hooks/        bootstrap, validación, auditoría y notificaciones
 docs/
-  COMPLIANCE_ES.md controles legales y pasos organizativos
-  FACTORIAL_FEATURES.md alcance funcional comparado con Factorial
+  COMPLIANCE_ES.md
+  DEPLOYMENT.md
+  FACTORIAL_FEATURES.md
+scripts/
+  e2e-server.sh
+web/
+  e2e/             recorridos Playwright
+  src/app/core/    autenticación y dominio compartido
+  src/app/features módulos funcionales
+AGENTS.md           guía de trabajo para agentes y contribuidores
 ```
 
-PocketBase sigue antes de su versión 1.0; antes de actualizarlo hay que revisar su changelog, ejecutar todas las pruebas y restaurar una copia en un entorno separado.
+## Seguridad y contribución
 
-La cobertura funcional inspirada en Factorial y sus límites están documentados en [docs/FACTORIAL_FEATURES.md](docs/FACTORIAL_FEATURES.md). La aplicación conserva el diseño visual propio de Aura; no reproduce la marca ni los recursos gráficos de Factorial.
+- No subas `.env`, bases de datos, binarios, informes de pruebas ni secretos.
+- Las reglas de PocketBase y los hooks son la frontera de autorización; ocultar
+  elementos en Angular no sustituye una regla de servidor.
+- Las migraciones ya publicadas son inmutables. Añade otra migración para cambiar
+  el esquema.
+- Lee [AGENTS.md](AGENTS.md) antes de modificar el proyecto.
+
+Este repositorio todavía no incluye un archivo `LICENSE`. Antes de distribuirlo
+como software libre debe elegirse y añadirse explícitamente una licencia.

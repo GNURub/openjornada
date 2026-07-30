@@ -8,7 +8,7 @@ Este documento describe las salvaguardas incorporadas y las decisiones que la em
 
 El artículo 34.9 del Estatuto de los Trabajadores exige un registro diario con el horario concreto de inicio y finalización, conservación durante cuatro años y disponibilidad para personas trabajadoras, representación legal e Inspección de Trabajo.
 
-| Obligación o riesgo | Control de Aura |
+| Obligación o riesgo | Control de OpenJornada |
 | --- | --- |
 | Inicio y final concretos | Eventos `clock_in` y `clock_out` con fecha y hora asignadas por PocketBase. |
 | Pausas | Eventos explícitos `break_start` y `break_end`; el cálculo de tiempo efectivo las excluye. |

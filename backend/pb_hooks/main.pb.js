@@ -1,7 +1,7 @@
 onBootstrap((e) => {
   e.next()
 
-  const appName = $os.getenv("PB_APP_NAME") || "Aura Jornada"
+  const appName = $os.getenv("PB_APP_NAME") || "OpenJornada"
   const appURL = $os.getenv("PB_PUBLIC_URL") || "http://127.0.0.1:8090"
   const settings = e.app.settings()
   settings.meta.appName = appName

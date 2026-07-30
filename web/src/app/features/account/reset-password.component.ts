@@ -10,8 +10,8 @@ import { PocketBaseService } from '../../core/pocketbase.service';
     <main class="grid min-h-dvh place-items-center bg-[#f7f4ef] px-5 py-10">
       <section class="w-full max-w-md rounded-[2rem] border border-stone-200 bg-white p-7 shadow-xl shadow-stone-200/60 sm:p-9">
         <a routerLink="/login" class="mb-9 flex items-center gap-3">
-          <span class="grid size-10 place-items-center rounded-2xl bg-coral-500 font-black text-white">A</span>
-          <span class="font-display text-xl font-bold">Aura</span>
+          <span class="grid size-10 place-items-center rounded-2xl bg-coral-500 font-black text-white">O</span>
+          <span class="font-display text-xl font-bold">OpenJornada</span>
         </a>
         @if (success()) {
           <div class="grid size-14 place-items-center rounded-full bg-emerald-100 text-emerald-700">

@@ -1,6 +1,6 @@
 # Cobertura funcional inspirada en Factorial
 
-Esta aplicación implementa una suite local de RR. HH. inspirada en los flujos públicos documentados por Factorial, manteniendo el diseño visual de Aura y sin copiar su marca.
+Esta aplicación implementa una suite local de RR. HH. inspirada en los flujos públicos documentados por Factorial, manteniendo el diseño visual de OpenJornada y sin copiar su marca.
 
 ## Funcionalidad implementada
 
