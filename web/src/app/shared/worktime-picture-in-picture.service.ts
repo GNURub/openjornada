@@ -232,6 +232,7 @@ export class WorktimePictureInPictureService {
         margin: 0 !important;
         border-radius: 0 !important;
         box-shadow: none !important;
+        transform: none !important;
       }
     `;
     target.head.append(overrides);

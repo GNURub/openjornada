@@ -3,10 +3,42 @@
     #activeWorktimeWidget
     data-testid="active-worktime-widget"
     aria-label="Control de jornada activa"
+    [style.transform]="widgetTransform()"
     class="fixed inset-x-4 bottom-24 z-40 rounded-3xl border border-stone-700 bg-stone-950 p-4 text-white shadow-2xl shadow-stone-950/25 lg:inset-x-auto lg:bottom-6 lg:right-6 lg:w-96"
   >
     <div class="flex items-center justify-between gap-4">
       <div class="flex min-w-0 items-center gap-3">
+        <button
+          type="button"
+          data-testid="worktime-widget-drag-handle"
+          aria-label="Mover control de jornada"
+          title="Arrastrar para mover · Doble clic o Inicio para restablecer"
+          draggable="false"
+          [disabled]="worktime.submitting() || pip.active()"
+          (pointerdown)="startDrag($event)"
+          (pointermove)="moveDrag($event)"
+          (pointerup)="endDrag($event)"
+          (pointercancel)="endDrag($event)"
+          (keydown)="moveWithKeyboard($event)"
+          (dblclick)="resetPosition()"
+          class="-ml-1 flex size-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-lg text-stone-500 transition hover:bg-white/10 hover:text-stone-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral-400 active:cursor-grabbing disabled:cursor-wait disabled:opacity-60"
+          [class.bg-stone-800]="dragging()"
+          [class.text-white]="dragging()"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-4"
+            fill="currentColor"
+          >
+            <circle cx="8" cy="7" r="1.5" />
+            <circle cx="16" cy="7" r="1.5" />
+            <circle cx="8" cy="12" r="1.5" />
+            <circle cx="16" cy="12" r="1.5" />
+            <circle cx="8" cy="17" r="1.5" />
+            <circle cx="16" cy="17" r="1.5" />
+          </svg>
+        </button>
         <span
           class="size-3 shrink-0 rounded-full"
           [class.bg-emerald-400]="worktime.status() === 'working'"

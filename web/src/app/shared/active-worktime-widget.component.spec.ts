@@ -178,6 +178,96 @@ describe('ActiveWorktimeWidgetComponent', () => {
     expect(openReview).toHaveBeenNthCalledWith(2, 'break_end');
   });
 
+  it('moves the widget with the keyboard and resets its temporary position', () => {
+    status.set('working');
+    fixture.detectChanges();
+    const widget = fixture.nativeElement.querySelector(
+      '[data-testid="active-worktime-widget"]',
+    ) as HTMLElement;
+    vi.spyOn(widget, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 100,
+      right: 484,
+      bottom: 300,
+      width: 384,
+      height: 200,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    const handle = fixture.nativeElement.querySelector(
+      '[data-testid="worktime-widget-drag-handle"]',
+    ) as HTMLButtonElement;
+
+    handle.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ArrowLeft',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    fixture.detectChanges();
+    expect(widget.style.transform).toBe('translate3d(-16px, 0px, 0)');
+
+    handle.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Home',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    fixture.detectChanges();
+    expect(widget.style.transform).toBe('');
+  });
+
+  it('moves the widget with pointer dragging', () => {
+    status.set('working');
+    fixture.detectChanges();
+    const widget = fixture.nativeElement.querySelector(
+      '[data-testid="active-worktime-widget"]',
+    ) as HTMLElement;
+    vi.spyOn(widget, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 100,
+      right: 484,
+      bottom: 300,
+      width: 384,
+      height: 200,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    const handle = fixture.nativeElement.querySelector(
+      '[data-testid="worktime-widget-drag-handle"]',
+    ) as HTMLButtonElement;
+    handle.setPointerCapture = vi.fn();
+    handle.hasPointerCapture = vi.fn(() => true);
+    handle.releasePointerCapture = vi.fn();
+    const pointer = (
+      type: string,
+      clientX: number,
+      clientY: number,
+    ): Event => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        button: { value: 0 },
+        pointerId: { value: 7 },
+        clientX: { value: clientX },
+        clientY: { value: clientY },
+      });
+      return event;
+    };
+
+    handle.dispatchEvent(pointer('pointerdown', 120, 120));
+    handle.dispatchEvent(pointer('pointermove', 160, 150));
+    fixture.detectChanges();
+
+    expect(widget.style.transform).toBe('translate3d(40px, 30px, 0)');
+
+    handle.dispatchEvent(pointer('pointerup', 160, 150));
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(7);
+  });
+
   it('disables actions while saving and exposes service errors', () => {
     status.set('working');
     submitting.set(true);

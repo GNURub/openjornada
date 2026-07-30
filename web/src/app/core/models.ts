@@ -69,6 +69,47 @@ export interface PrivacyNotice {
   rights: string;
 }
 
+export interface MonthlyTimeStatement extends RecordModel {
+  organization: string;
+  employee: string;
+  period: string;
+  version: number;
+  employmentType: 'full_time' | 'part_time';
+  contractedMinutes: number;
+  ordinaryMinutes: number;
+  complementaryMinutes: number;
+  overtimeMinutes: number;
+  totalMinutes: number;
+  dailyRecords: Array<{
+    date: string;
+    plannedMinutes: number;
+    workedMinutes: number;
+    ordinaryMinutes: number;
+    complementaryMinutes: number;
+    overtimeMinutes: number;
+    events: Array<{
+      id: string;
+      kind: Exclude<WorkEventKind, 'correction'>;
+      occurredAt: string;
+      integrityHash: string;
+    }>;
+  }>;
+  generatedBy: string;
+  generatedAt: string;
+  deliveredAt: string;
+  previousStatement: string;
+  previousHash: string;
+  integrityHash: string;
+  expand?: { employee?: UserRecord; generatedBy?: UserRecord };
+}
+
+export interface MonthlyStatementAcknowledgement extends RecordModel {
+  organization: string;
+  statement: string;
+  user: string;
+  acknowledgedAt: string;
+}
+
 export interface WorkEventRecord extends RecordModel {
   created: string;
   updated: string;

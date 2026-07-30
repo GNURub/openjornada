@@ -142,6 +142,24 @@ test('an employee can sign in and start the workday', async ({
   const widget = page.getByTestId('active-worktime-widget');
   await expect(widget).toBeVisible();
   await expect(widget.getByText('Tiempo efectivo hoy')).toBeVisible();
+  const widgetBeforeDrag = await widget.boundingBox();
+  const dragHandle = await widget.getByTestId('worktime-widget-drag-handle').boundingBox();
+  expect(widgetBeforeDrag).toBeTruthy();
+  expect(dragHandle).toBeTruthy();
+  await page.mouse.move(
+    dragHandle!.x + dragHandle!.width / 2,
+    dragHandle!.y + dragHandle!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    dragHandle!.x + dragHandle!.width / 2,
+    dragHandle!.y + dragHandle!.height / 2 - 80,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  const widgetAfterDrag = await widget.boundingBox();
+  expect(widgetAfterDrag).toBeTruthy();
+  expect(widgetAfterDrag!.y).toBeLessThan(widgetBeforeDrag!.y - 40);
 
   await page.getByRole('link', { name: 'Control horario', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: 'Mi control horario' })).toBeVisible();

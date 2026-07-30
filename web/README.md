@@ -123,14 +123,15 @@ ofrece el shell estático cuando no hay conexión.
 Cuando hay una jornada activa o pausada, el shell autenticado muestra un widget
 flotante en móvil, tablet y escritorio. El widget conserva el estado al navegar,
 muestra el tiempo efectivo acumulado con segundos y permite pausar, reanudar o
-finalizar sin volver a **Mi jornada**. En navegadores de escritorio compatibles
-con Document Picture-in-Picture aparece un control para trasladar el widget a
-una ventana del sistema siempre visible. La apertura requiere un clic de la
-persona, funciona en un contexto seguro (`https://` o desarrollo local) y el
-widget vuelve a la aplicación al cerrar la ventana. La opción **Abrir el
-control en ventana flotante al fichar** está activada inicialmente, queda
-guardada en el navegador y abre PiP dentro del mismo clic usado para empezar
-la jornada.
+finalizar sin volver a **Mi jornada**. Un asa permite moverlo temporalmente con
+ratón, pantalla táctil, lápiz o teclado; las flechas desplazan su posición y
+`Inicio` la restablece. En navegadores de escritorio compatibles con Document
+Picture-in-Picture aparece un control para trasladar el widget a una ventana
+del sistema siempre visible. La apertura requiere un clic de la persona,
+funciona en un contexto seguro (`https://` o desarrollo local) y el widget
+vuelve a la aplicación al cerrar la ventana. La opción **Abrir el control en
+ventana flotante al fichar** está activada inicialmente, queda guardada en el
+navegador y abre PiP dentro del mismo clic usado para empezar la jornada.
 
 La cuenta `admin` puede personalizar en **Ajustes → Configuración de empresa**
 el color principal, el color secundario, el logotipo, el nombre completo y

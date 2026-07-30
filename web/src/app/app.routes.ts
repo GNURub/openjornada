@@ -57,6 +57,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'resumenes',
+        loadComponent: () =>
+          import('./features/records/monthly-statements.component').then(
+            (component) => component.MonthlyStatementsComponent,
+          ),
+      },
+      {
         path: 'ausencias',
         loadComponent: () =>
           import('./features/leave/leave.component').then((component) => component.LeaveComponent),
