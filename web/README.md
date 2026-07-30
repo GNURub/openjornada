@@ -84,6 +84,14 @@ persona y el acuse de recepción es idempotente. Su CSV replica la persona,
 periodo, versión, minutos planificados, ordinarios, complementarios,
 extraordinarios y totales, la huella de integridad y el desglose de cada día.
 
+La ruta `/informes` permite descargar un **Excel de inspección**. El rango
+predeterminado son los últimos cuatro años y puede ajustarse en la interfaz
+hasta un máximo de cuatro años por archivo. Incluye una hoja resumen y una hoja
+por cada cuenta con rol `employee` y contrato clasificado, aunque esté inactiva.
+Cada hoja conserva planificación, tiempo trabajado, balance, horas
+complementarias o extraordinarias según contrato, entradas, salidas, pausas,
+festivos, ausencias, incidencias y huellas de integridad.
+
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde
 qué hora hasta qué hora y marcar **Empieza el día siguiente (+1d)**. Se pueden

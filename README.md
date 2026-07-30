@@ -29,8 +29,9 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
   destinatario.
 - Tareas de onboarding, formación y administración.
 - Objetivos por ciclos y seguimiento porcentual.
-- Horarios, comunicados, informes, exportación CSV y paquetes JSON que verifican
-  criptográficamente la cadena completa de fichajes.
+- Horarios, comunicados, informes, exportación CSV, libro Excel de inspección
+  configurable —una hoja por empleado y cuatro años por defecto— y paquetes
+  JSON que verifican criptográficamente la cadena completa de fichajes.
 - Aviso de privacidad versionado y preservaciones legales que excluyen registros
   de cualquier futura depuración; la vista previa de retención no borra datos.
 - Servidor MCP remoto para que administración y responsables operen sobre

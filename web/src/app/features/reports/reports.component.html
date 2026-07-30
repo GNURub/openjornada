@@ -3,25 +3,56 @@
     <div>
       <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Control de jornada</p>
       <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Informe mensual</h1>
-      <p class="mt-2 text-stone-500">Resumen por persona con correcciones aplicadas y registros originales preservados.</p>
+      <p class="mt-2 text-stone-500">
+        Resumen por persona con correcciones aplicadas y registros originales preservados.
+      </p>
     </div>
     <div class="flex gap-3">
-      <input [(ngModel)]="month" (ngModelChange)="load()" aria-label="Mes del informe" type="month" class="field-input !w-auto" />
-      <button type="button" (click)="exportCsv()" [disabled]="summaries().length === 0" class="btn-secondary gap-2">
-        <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
+      <input
+        [(ngModel)]="month"
+        (ngModelChange)="load()"
+        aria-label="Mes del informe"
+        type="month"
+        class="field-input !w-auto"
+      />
+      <button
+        type="button"
+        (click)="exportCsv()"
+        [disabled]="summaries().length === 0"
+        class="btn-secondary gap-2"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" />
+        </svg>
         <span class="hidden sm:inline">Exportar</span>
       </button>
     </div>
   </div>
 
   @if (error()) {
-    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p>
+    <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+      {{ error() }}
+    </p>
+  }
+  @if (success()) {
+    <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">
+      {{ success() }}
+    </p>
   }
 
   <section class="mt-8 grid gap-4 sm:grid-cols-3">
     <article class="rounded-[2rem] bg-stone-950 p-6 text-white">
       <p class="text-sm font-semibold text-stone-400">Tiempo efectivo</p>
-      <p class="mt-3 font-display text-4xl font-bold tabular-nums">{{ formatDuration(totalDuration()) }}</p>
+      <p class="mt-3 font-display text-4xl font-bold tabular-nums">
+        {{ formatDuration(totalDuration()) }}
+      </p>
     </article>
     <article class="rounded-[2rem] border border-stone-200 bg-white p-6">
       <p class="text-sm font-semibold text-stone-400">Eventos registrados</p>
@@ -29,28 +60,107 @@
     </article>
     <article class="rounded-[2rem] border border-stone-200 bg-white p-6">
       <p class="text-sm font-semibold text-stone-400">Secuencias abiertas</p>
-      <p class="mt-3 font-display text-4xl font-bold tabular-nums" [class.text-amber-600]="anomalies() > 0">{{ anomalies() }}</p>
+      <p
+        class="mt-3 font-display text-4xl font-bold tabular-nums"
+        [class.text-amber-600]="anomalies() > 0"
+      >
+        {{ anomalies() }}
+      </p>
     </article>
+  </section>
+
+  <section class="mt-6 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+    <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <div class="max-w-2xl">
+        <p class="text-sm font-bold uppercase tracking-[0.16em] text-coral-600">
+          Inspección de trabajo
+        </p>
+        <h2 class="mt-2 font-display text-2xl font-bold">Excel por empleado</h2>
+        <p class="mt-2 text-sm leading-6 text-stone-500">
+          Incluye una hoja resumen y una hoja diaria por cada persona activa o inactiva con contrato
+          clasificado. El periodo predeterminado son los últimos cuatro años.
+        </p>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <label>
+          <span class="field-label">Desde</span>
+          <input
+            [(ngModel)]="inspectionFrom"
+            name="inspectionFrom"
+            type="date"
+            [disabled]="exportingInspection()"
+            class="field-input"
+          />
+        </label>
+        <label>
+          <span class="field-label">Hasta</span>
+          <input
+            [(ngModel)]="inspectionTo"
+            name="inspectionTo"
+            type="date"
+            [disabled]="exportingInspection()"
+            class="field-input"
+          />
+        </label>
+        <div class="flex items-end">
+          <button
+            type="button"
+            (click)="exportInspectionWorkbook()"
+            [disabled]="exportingInspection()"
+            class="btn-primary w-full whitespace-nowrap"
+          >
+            {{ exportingInspection() ? 'Preparando…' : 'Descargar Excel' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    @if (inspectionProgress()) {
+      <p role="status" class="mt-4 text-sm font-medium text-stone-500">
+        {{ inspectionProgress() }}
+      </p>
+    }
   </section>
 
   <section class="mt-6 overflow-hidden rounded-[2rem] border border-stone-200 bg-white shadow-sm">
     @if (loading()) {
-      <div class="space-y-3 p-8"><div class="h-16 animate-pulse rounded-xl bg-stone-100"></div><div class="h-16 animate-pulse rounded-xl bg-stone-100"></div></div>
+      <div class="space-y-3 p-8">
+        <div class="h-16 animate-pulse rounded-xl bg-stone-100"></div>
+        <div class="h-16 animate-pulse rounded-xl bg-stone-100"></div>
+      </div>
     } @else {
       <div class="hidden overflow-x-auto sm:block">
         <table class="w-full text-left">
           <thead class="bg-stone-50 text-xs font-bold uppercase tracking-wider text-stone-400">
-            <tr><th class="px-8 py-4">Persona</th><th class="px-4 py-4">Días</th><th class="px-4 py-4">Tiempo efectivo</th><th class="px-4 py-4">Eventos</th><th class="px-8 py-4 text-right">Estado</th></tr>
+            <tr>
+              <th class="px-8 py-4">Persona</th>
+              <th class="px-4 py-4">Días</th>
+              <th class="px-4 py-4">Tiempo efectivo</th>
+              <th class="px-4 py-4">Eventos</th>
+              <th class="px-8 py-4 text-right">Estado</th>
+            </tr>
           </thead>
           <tbody class="divide-y divide-stone-100">
             @for (summary of summaries(); track summary.user.id) {
               <tr>
-                <td class="px-8 py-4"><p class="font-semibold">{{ summary.user.name }}</p><p class="mt-0.5 text-xs text-stone-400">{{ summary.user.employeeCode }} · {{ summary.user.jobTitle }}</p></td>
+                <td class="px-8 py-4">
+                  <p class="font-semibold">{{ summary.user.name }}</p>
+                  <p class="mt-0.5 text-xs text-stone-400">
+                    {{ summary.user.employeeCode }} · {{ summary.user.jobTitle }}
+                  </p>
+                </td>
                 <td class="px-4 py-4 text-sm">{{ summary.workedDays }}</td>
-                <td class="px-4 py-4 font-display text-lg font-bold tabular-nums">{{ formatDuration(summary.durationMs) }}</td>
+                <td class="px-4 py-4 font-display text-lg font-bold tabular-nums">
+                  {{ formatDuration(summary.durationMs) }}
+                </td>
                 <td class="px-4 py-4 text-sm">{{ summary.events.length }}</td>
                 <td class="px-8 py-4 text-right">
-                  <span class="rounded-full px-3 py-1 text-xs font-bold" [class.bg-amber-100]="summary.openSequence" [class.text-amber-700]="summary.openSequence" [class.bg-emerald-50]="!summary.openSequence" [class.text-emerald-700]="!summary.openSequence">
+                  <span
+                    class="rounded-full px-3 py-1 text-xs font-bold"
+                    [class.bg-amber-100]="summary.openSequence"
+                    [class.text-amber-700]="summary.openSequence"
+                    [class.bg-emerald-50]="!summary.openSequence"
+                    [class.text-emerald-700]="!summary.openSequence"
+                  >
                     {{ summary.openSequence ? 'Revisar' : 'Completo' }}
                   </span>
                 </td>
@@ -62,7 +172,15 @@
       <ul class="divide-y divide-stone-100 sm:hidden">
         @for (summary of summaries(); track summary.user.id) {
           <li class="px-5 py-4">
-            <div class="flex items-center justify-between gap-4"><div><p class="font-semibold">{{ summary.user.name }}</p><p class="mt-1 text-xs text-stone-400">{{ summary.workedDays }} días · {{ summary.events.length }} eventos</p></div><p class="font-display text-lg font-bold">{{ formatDuration(summary.durationMs) }}</p></div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="font-semibold">{{ summary.user.name }}</p>
+                <p class="mt-1 text-xs text-stone-400">
+                  {{ summary.workedDays }} días · {{ summary.events.length }} eventos
+                </p>
+              </div>
+              <p class="font-display text-lg font-bold">{{ formatDuration(summary.durationMs) }}</p>
+            </div>
           </li>
         }
       </ul>

@@ -1,11 +1,16 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import type { MonthlyTimeStatement } from '../src/app/core/models';
+import readExcelFile from 'read-excel-file/node';
+import writeExcelFile from 'write-excel-file/node';
+import { buildInspectionWorkbook } from '../src/app/core/inspection-workbook';
+import type { MonthlyTimeStatement, TimesheetResponse, UserRecord } from '../src/app/core/models';
 import {
   buildMonthlyStatementCsv,
   monthlyStatementCsvFilename,
 } from '../src/app/core/monthly-statement-csv';
+import { acknowledgePrivacyNotice } from './helpers/privacy';
 
 const apiBase = process.env['OPENJORNADA_E2E_API_URL'] ?? 'http://127.0.0.1:8090/api';
+const appBase = process.env['OPENJORNADA_E2E_APP_URL'] ?? 'http://127.0.0.1:8090';
 const adminEmail = process.env['OPENJORNADA_E2E_ADMIN_EMAIL'] ?? 'admin@example.com';
 const adminPassword = process.env['OPENJORNADA_E2E_ADMIN_PASSWORD'] ?? 'TestPassword123!';
 const employeePassword = 'WeeklyPatternPassword123!';
@@ -20,6 +25,7 @@ type EmployeeProfile = {
   email: string;
   name: string;
   token: string;
+  record: UserRecord;
 };
 
 type DailyRecord = MonthlyTimeStatement['dailyRecords'][number];
@@ -101,9 +107,9 @@ async function createEmployee(
   });
   const body = await response.text();
   expect(response.ok(), body).toBeTruthy();
-  const employee = JSON.parse(body) as { id: string };
+  const employee = JSON.parse(body) as UserRecord;
   const auth = await signIn(request, email, employeePassword);
-  return { id: employee.id, email, name, token: auth.token };
+  return { id: employee.id, email, name, token: auth.token, record: employee };
 }
 
 async function assignSchedule(
@@ -314,7 +320,23 @@ async function expectNoStatement(
   expect(body.totalItems).toBe(0);
 }
 
+async function loadInspectionTimesheet(
+  request: APIRequestContext,
+  admin: Authentication,
+  employee: EmployeeProfile,
+  from: string,
+  to: string,
+): Promise<TimesheetResponse> {
+  const response = await request.get(`${apiBase}/openjornada/timesheet`, {
+    headers: { Authorization: admin.token },
+    params: { employee: employee.id, from, to },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  return (await response.json()) as TimesheetResponse;
+}
+
 test('full-time and part-time weekly patterns classify overtime and complementary hours correctly', async ({
+  page,
   request,
 }, testInfo) => {
   test.skip(
@@ -569,4 +591,120 @@ test('full-time and part-time weekly patterns classify overtime and complementar
     plannedMinutes: 0,
     workedMinutes: 0,
   });
+
+  const inspectionEmployees = [
+    fullTime,
+    fullTimeOvertime,
+    partTimeWithAgreement,
+    partTimeWithoutAgreement,
+    partTimeSaturday,
+  ];
+  const inspectionData = await Promise.all(
+    inspectionEmployees.map(async (employee) => ({
+      employee: employee.record,
+      timesheets: [
+        await loadInspectionTimesheet(request, admin, employee, week.monday, week.sunday),
+      ],
+    })),
+  );
+  const inspectionWorkbook = buildInspectionWorkbook(
+    inspectionData,
+    week.monday,
+    week.sunday,
+    new Date(`${week.sunday}T18:00:00Z`),
+  );
+  const inspectionBuffer = await writeExcelFile(inspectionWorkbook, {
+    fontFamily: 'Arial',
+    fontSize: 10,
+  }).toBuffer();
+  const reopenedInspection = await readExcelFile(inspectionBuffer);
+
+  expect(reopenedInspection).toHaveLength(inspectionEmployees.length + 1);
+  expect(reopenedInspection[0].sheet).toBe('Resumen');
+  for (const employee of inspectionEmployees) {
+    expect(
+      reopenedInspection.some(
+        (sheet) =>
+          sheet.sheet !== 'Resumen' &&
+          sheet.data.some((row) => row[0] === 'Código' && row[1] === employee.record.employeeCode),
+      ),
+    ).toBe(true);
+  }
+
+  const overtimeInspection = reopenedInspection.find((sheet) =>
+    sheet.data.some(
+      (row) => row[0] === 'Código' && row[1] === fullTimeOvertime.record.employeeCode,
+    ),
+  );
+  const complementaryInspection = reopenedInspection.find((sheet) =>
+    sheet.data.some(
+      (row) => row[0] === 'Código' && row[1] === partTimeWithAgreement.record.employeeCode,
+    ),
+  );
+  const saturdayInspection = reopenedInspection.find((sheet) =>
+    sheet.data.some(
+      (row) => row[0] === 'Código' && row[1] === partTimeSaturday.record.employeeCode,
+    ),
+  );
+  expect(overtimeInspection).toBeDefined();
+  expect(complementaryInspection).toBeDefined();
+  expect(saturdayInspection).toBeDefined();
+  expect(
+    overtimeInspection!.data
+      .find((row) => row[0] instanceof Date && row[0].toISOString().slice(0, 10) === week.dates[1])
+      ?.slice(2, 7),
+  ).toEqual([480, 540, 60, 0, 60]);
+  expect(
+    complementaryInspection!.data
+      .find((row) => row[0] instanceof Date && row[0].toISOString().slice(0, 10) === week.dates[1])
+      ?.slice(2, 7),
+  ).toEqual([240, 300, 60, 60, 0]);
+  expect(
+    saturdayInspection!.data
+      .find((row) => row[0] instanceof Date && row[0].toISOString().slice(0, 10) === week.dates[5])
+      ?.slice(2, 7),
+  ).toEqual([240, 240, 0, 0, 0]);
+
+  const companyEmployeesResponse = await request.get(`${apiBase}/collections/users/records`, {
+    headers: { Authorization: admin.token },
+    params: {
+      page: 1,
+      perPage: 500,
+      sort: 'name',
+      filter: "role = 'employee' && (employmentType = 'full_time' || employmentType = 'part_time')",
+    },
+  });
+  expect(companyEmployeesResponse.ok(), await companyEmployeesResponse.text()).toBeTruthy();
+  const companyEmployees = (await companyEmployeesResponse.json()) as { items: UserRecord[] };
+
+  await page.addInitScript(({ token, record }) => {
+    localStorage.setItem('pocketbase_auth', JSON.stringify({ token, record }));
+  }, admin);
+  await page.goto(`${appBase}/informes`);
+  await expect(page.getByRole('heading', { name: 'Excel por empleado' })).toBeVisible();
+  await acknowledgePrivacyNotice(page);
+  await page.getByLabel('Desde').fill(week.monday);
+  await page.getByLabel('Hasta').fill(week.sunday);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Descargar Excel' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(
+    `inspeccion-jornada-${week.monday}-${week.sunday}.xlsx`,
+  );
+  const downloadedPath = await download.path();
+  expect(downloadedPath).not.toBeNull();
+  const downloadedWorkbook = await readExcelFile(downloadedPath!);
+  expect(downloadedWorkbook).toHaveLength(companyEmployees.items.length + 1);
+  for (const employee of companyEmployees.items) {
+    expect(
+      downloadedWorkbook.some((sheet) =>
+        sheet.data.some((row) => row[0] === 'Código' && row[1] === employee.employeeCode),
+      ),
+    ).toBe(true);
+  }
+  await expect(
+    page.getByText(
+      `Excel de inspección generado con ${companyEmployees.items.length} hojas de personal y una hoja resumen.`,
+    ),
+  ).toBeVisible();
 });

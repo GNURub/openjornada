@@ -1185,7 +1185,10 @@ routerAdd(
         ) {
           continue;
         }
-        const weekdays = Array.from(schedule.get("weekdays") || []);
+        let weekdays = [];
+        try {
+          weekdays = JSON.parse(schedule.getString("weekdays") || "[]");
+        } catch (_) {}
         const weekday = cursor.time().in(new Timezone(timezone)).weekday();
         if (weekdays.indexOf(Number(weekday)) >= 0) {
           selectedSchedule = schedule;
