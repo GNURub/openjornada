@@ -72,6 +72,11 @@ También descarga un paquete JSON generado por PocketBase que incluye todos los
 campos de evidencia y verifica los hashes, predecesores, raíz y punta de la
 cadena completa de la persona.
 
+El panel principal obtiene también de ese endpoint la planificación del día.
+El objetivo y la barra de progreso se adaptan a sus minutos reales; cuando no
+hay un tramo aplicable muestran **Sin planificación** en vez de presuponer ocho
+horas.
+
 Al terminar jornada o pausa, el modal muestra la duración y permite ajustar la
 hora. Si la diferencia material supera el umbral de revisión, exige un motivo;
 el servidor conserva por separado la hora de recepción, la hora aplicada, la
@@ -171,6 +176,8 @@ Para una distribución variable se crea un tramo con fecha de inicio y fin por
 cada semana —o más de uno cuando distintos días tengan duraciones diferentes—.
 Esas fechas son la planificación que después utiliza el cierre mensual; no se
 debe convertir a posteriori el tiempo fichado en tiempo planificado.
+Las tarjetas distinguen visualmente horarios próximos, activos, finalizados y
+archivados, de modo que una ficha activa pero ya vencida no parece vigente.
 
 ## Invitaciones de acceso
 

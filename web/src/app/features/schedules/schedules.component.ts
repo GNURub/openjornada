@@ -3,6 +3,10 @@ import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth.service';
 import { UserRecord, WorkScheduleRecord } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
+import {
+  workScheduleStatus,
+  type WorkScheduleStatus,
+} from '../../core/schedule-status';
 
 @Component({
   selector: 'app-schedules',
@@ -216,6 +220,22 @@ export class SchedulesComponent {
       month: 'short',
       year: 'numeric',
     }).format(new Date(value));
+  }
+
+  protected scheduleStatus(
+    schedule: WorkScheduleRecord,
+  ): WorkScheduleStatus {
+    return workScheduleStatus(schedule);
+  }
+
+  protected scheduleStatusLabel(schedule: WorkScheduleRecord): string {
+    const labels = {
+      active: 'Activo',
+      upcoming: 'Próximo',
+      finished: 'Finalizado',
+      archived: 'Archivado',
+    } as const;
+    return labels[this.scheduleStatus(schedule)];
   }
 
   private async initialize(): Promise<void> {

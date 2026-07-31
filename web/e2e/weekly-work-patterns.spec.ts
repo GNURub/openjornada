@@ -884,4 +884,34 @@ test('a flexible part-time schedule keeps every archived week in the monthly clo
   expect(
     statements.items[0].dailyRecords.reduce((total, day) => total + day.plannedMinutes, 0),
   ).toBe(expectedPlannedMinutes);
+
+  const reactivatePastSchedule = await request.patch(
+    `${apiBase}/collections/work_schedules/records/${schedules.items[0]!.id}`,
+    {
+      headers: { Authorization: admin.token },
+      data: { active: true },
+    },
+  );
+  expect(
+    reactivatePastSchedule.ok(),
+    await reactivatePastSchedule.text(),
+  ).toBeTruthy();
+
+  const employeeContext = await page.context().browser()!.newContext();
+  await employeeContext.addInitScript(({ token, record }) => {
+    localStorage.setItem('pocketbase_auth', JSON.stringify({ token, record }));
+  }, employee);
+  const employeePage = await employeeContext.newPage();
+  await employeePage.goto(`${appBase}/horarios`);
+  await acknowledgePrivacyNotice(employeePage);
+  await expect(employeePage.locator('article')).toHaveCount(patterns.length);
+  await expect(employeePage.getByText('Finalizado', { exact: true })).toHaveCount(1);
+  await expect(employeePage.getByText('Archivado', { exact: true })).toHaveCount(
+    patterns.length - 1,
+  );
+
+  await employeePage.goto(appBase);
+  await expect(employeePage.getByText('Objetivo diario')).toBeVisible();
+  await expect(employeePage.getByText('Sin planificación', { exact: true })).toBeVisible();
+  await employeeContext.close();
 });

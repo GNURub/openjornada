@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 import { createServer, type Server, type Socket } from 'node:net';
 import { acknowledgePrivacyNotice } from './helpers/privacy';
 
@@ -23,6 +23,25 @@ async function signIn(
       await page.waitForTimeout(3_200);
     }
   }
+}
+
+async function authenticate(
+  request: APIRequestContext,
+  identity: string,
+  password: string,
+): Promise<{ token: string }> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await request.post(`${apiBase}/collections/users/auth-with-password`, {
+      data: { identity, password },
+    });
+    if (response.ok()) return (await response.json()) as { token: string };
+    const body = await response.text();
+    if (attempt === 3 || response.status() !== 429) {
+      throw new Error(`No se pudo autenticar ${identity}: ${response.status()} ${body}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+  }
+  throw new Error(`No se pudo autenticar ${identity}`);
 }
 
 async function startSmtpServer(): Promise<{
@@ -166,11 +185,9 @@ test('an invitation expires in 72 hours, sets the password and signs the employe
     )?.[0];
     expect(link).toBeTruthy();
 
-    const adminAuth = await request.post(`${apiBase}/collections/users/auth-with-password`, {
-      data: { identity: 'admin@example.com', password: 'TestPassword123!' },
-    });
-    expect(adminAuth.ok(), await adminAuth.text()).toBeTruthy();
-    const adminToken = ((await adminAuth.json()) as { token: string }).token;
+    const adminToken = (
+      await authenticate(request, 'admin@example.com', 'TestPassword123!')
+    ).token;
     const memberResponse = await request.get(
       `${apiBase}/collections/users/records/${invitationResult.userId}`,
       {

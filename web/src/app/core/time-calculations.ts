@@ -85,6 +85,15 @@ export function calculateWorkedMs(
   return total;
 }
 
+export function calculateDailyProgress(
+  workedMilliseconds: number,
+  plannedMinutes: number,
+): number {
+  if (plannedMinutes <= 0) return 0;
+  const workedMinutes = workedMilliseconds / 60_000;
+  return Math.min(100, Math.max(0, (workedMinutes / plannedMinutes) * 100));
+}
+
 export function formatDuration(milliseconds: number): string {
   const minutes = Math.floor(milliseconds / 60_000);
   const hours = Math.floor(minutes / 60);

@@ -6,7 +6,7 @@ async function signIn(page: import('@playwright/test').Page, email: string, pass
   await page.goto('/login');
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña').fill(password);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     const authenticated = await page
       .waitForURL(/\/$/, { timeout: 2_500 })
@@ -16,7 +16,7 @@ async function signIn(page: import('@playwright/test').Page, email: string, pass
       await acknowledgePrivacyNotice(page);
       return;
     }
-    if (attempt === 2) throw new Error(`No se pudo iniciar sesión como ${email}`);
+    if (attempt === 3) throw new Error(`No se pudo iniciar sesión como ${email}`);
     await page.waitForTimeout(3_200);
   }
 }

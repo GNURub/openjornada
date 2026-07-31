@@ -1,5 +1,6 @@
 import { WorkEventRecord } from './models';
 import {
+  calculateDailyProgress,
   calculateWorkedMs,
   deriveStatus,
   eventLabel,
@@ -45,6 +46,15 @@ describe('time calculations', () => {
       new Date('2026-07-29T18:00:00Z'),
     );
     expect(result).toBe(8 * 60 * 60 * 1_000);
+  });
+
+  it('calculates daily progress from the applicable planned minutes', () => {
+    expect(calculateDailyProgress(2 * 60 * 60 * 1_000, 240)).toBe(50);
+    expect(calculateDailyProgress(6 * 60 * 60 * 1_000, 240)).toBe(100);
+  });
+
+  it('does not invent progress when the day has no plan', () => {
+    expect(calculateDailyProgress(2 * 60 * 60 * 1_000, 0)).toBe(0);
   });
 
   it('stops an open daily timer while the employee is paused', () => {
