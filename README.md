@@ -22,6 +22,8 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
   plantilla puede completar jornadas pasadas mediante tramos de trabajo y pausas.
 - Resúmenes mensuales inmutables por persona, diferenciando jornada ordinaria,
   complementaria y extraordinaria, con versiones, entrega y acuse de recepción.
+  Los horarios pueden planificarse por semanas con distribuciones distintas y
+  conservan su efecto histórico después de archivarse.
 - Política por empresa para aplicar esas altas automáticamente o someterlas a
   aprobación, con tipos de pausa remunerados o no remunerados.
 - Correcciones de jornada con aprobación y trazabilidad inmutable.

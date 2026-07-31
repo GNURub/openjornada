@@ -2,7 +2,12 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import readExcelFile from 'read-excel-file/node';
 import writeExcelFile from 'write-excel-file/node';
 import { buildInspectionWorkbook } from '../src/app/core/inspection-workbook';
-import type { MonthlyTimeStatement, TimesheetResponse, UserRecord } from '../src/app/core/models';
+import type {
+  LeaveRequestRecord,
+  MonthlyTimeStatement,
+  TimesheetResponse,
+  UserRecord,
+} from '../src/app/core/models';
 import {
   buildMonthlyStatementCsv,
   monthlyStatementCsvFilename,
@@ -707,4 +712,176 @@ test('full-time and part-time weekly patterns classify overtime and complementar
       `Excel de inspección generado con ${companyEmployees.items.length} hojas de personal y una hoja resumen.`,
     ),
   ).toBeVisible();
+});
+
+test('a flexible part-time schedule keeps every archived week in the monthly close', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'desktop-chromium',
+    'El cálculo histórico sólo necesita una ejecución de navegador.',
+  );
+
+  const admin = await signIn(request, adminEmail, adminPassword);
+  const suffix = `${Date.now()}`;
+  const baseWeek = testWeek();
+  const employee = await createEmployee(
+    request,
+    admin,
+    suffix,
+    'flexible',
+    'part_time',
+    1200,
+    false,
+  );
+  const employeeName = `A · Jornada flexible ${suffix}`;
+  const rename = await request.patch(`${apiBase}/collections/users/records/${employee.id}`, {
+    headers: { Authorization: admin.token },
+    data: { name: employeeName },
+  });
+  expect(rename.ok(), await rename.text()).toBeTruthy();
+  employee.name = employeeName;
+  employee.record.name = employeeName;
+
+  const patterns = [
+    { weekdays: [1, 2, 3, 4], start: '09:00', end: '14:00', dailyMinutes: 300 },
+    { weekdays: [2, 3, 4, 5], start: '10:00', end: '15:00', dailyMinutes: 300 },
+    { weekdays: [1, 3, 5], start: '09:00', end: '15:40', dailyMinutes: 400 },
+    { weekdays: [2, 4, 6], start: '08:20', end: '15:00', dailyMinutes: 400 },
+  ];
+  let expectedPlannedMinutes = 0;
+
+  for (let index = 0; index < patterns.length; index += 1) {
+    const monday = addDays(baseWeek.monday, index * 7);
+    const dates = Array.from({ length: 7 }, (_, day) => addDays(monday, day));
+    const week = {
+      period: baseWeek.period,
+      monday,
+      sunday: dates[6],
+      dates,
+    };
+    const pattern = patterns[index];
+    await assignSchedule(
+      request,
+      admin,
+      employee,
+      week,
+      pattern.weekdays,
+      pattern.start,
+      pattern.end,
+    );
+    expectedPlannedMinutes += dates.filter(
+      (date) =>
+        date.startsWith(`${baseWeek.period}-`) &&
+        pattern.weekdays.includes(new Date(`${date}T12:00:00Z`).getUTCDay()),
+    ).length * pattern.dailyMinutes;
+  }
+
+  const scheduleList = await request.get(`${apiBase}/collections/work_schedules/records`, {
+    headers: { Authorization: admin.token },
+    params: { perPage: 100, filter: `employee = '${employee.id}'` },
+  });
+  expect(scheduleList.ok(), await scheduleList.text()).toBeTruthy();
+  const schedules = (await scheduleList.json()) as { items: Array<{ id: string }> };
+  expect(schedules.items).toHaveLength(patterns.length);
+  for (const schedule of schedules.items) {
+    const archived = await request.patch(
+      `${apiBase}/collections/work_schedules/records/${schedule.id}`,
+      {
+        headers: { Authorization: admin.token },
+        data: { active: false },
+      },
+    );
+    expect(archived.ok(), await archived.text()).toBeTruthy();
+  }
+
+  const leaveTypesResponse = await request.get(`${apiBase}/collections/leave_types/records`, {
+    headers: { Authorization: admin.token },
+    params: {
+      perPage: 1,
+      filter: `organization = '${admin.record.organization}' && code = 'vacation'`,
+    },
+  });
+  expect(leaveTypesResponse.ok(), await leaveTypesResponse.text()).toBeTruthy();
+  const leaveTypes = (await leaveTypesResponse.json()) as { items: Array<{ id: string }> };
+  expect(leaveTypes.items).toHaveLength(1);
+  const leaveTypeId = leaveTypes.items[0]!.id;
+  const balance = await request.get(`${apiBase}/collections/leave_balances/records`, {
+    headers: { Authorization: admin.token },
+    params: {
+      perPage: 1,
+      filter: `employee = '${employee.id}' && leaveType = '${leaveTypeId}' && year = ${Number(baseWeek.period.slice(0, 4))}`,
+    },
+  });
+  expect(balance.ok(), await balance.text()).toBeTruthy();
+  expect(((await balance.json()) as { totalItems: number }).totalItems).toBe(1);
+  const archivedWorkday = baseWeek.monday;
+  const leave = await request.post(`${apiBase}/collections/leave_requests/records`, {
+    headers: { Authorization: employee.token },
+    data: {
+      organization: admin.record.organization,
+      employee: employee.id,
+      type: 'vacation',
+      leaveType: leaveTypeId,
+      startDate: `${archivedWorkday} 00:00:00.000Z`,
+      endDate: `${archivedWorkday} 23:59:59.999Z`,
+      dayPart: 'full',
+      requestedDays: 99,
+      reason: 'Comprobación de planificación semanal archivada',
+      status: 'pending',
+    },
+  });
+  expect(leave.ok(), await leave.text()).toBeTruthy();
+  const pendingLeave = (await leave.json()) as LeaveRequestRecord;
+  expect(pendingLeave).toMatchObject({ status: 'pending', requestedDays: 1 });
+  const cancelLeave = await request.patch(
+    `${apiBase}/collections/leave_requests/records/${pendingLeave.id}`,
+    {
+      headers: { Authorization: employee.token },
+      data: { status: 'cancelled' },
+    },
+  );
+  expect(cancelLeave.ok(), await cancelLeave.text()).toBeTruthy();
+
+  await page.addInitScript(({ token, record }) => {
+    localStorage.setItem('pocketbase_auth', JSON.stringify({ token, record }));
+  }, admin);
+  await page.goto(`${appBase}/resumenes`);
+  await acknowledgePrivacyNotice(page);
+  await expect(page.getByRole('heading', { name: 'Resúmenes mensuales' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Persona' })).toHaveValue(employee.id);
+  await page.getByLabel('Mes terminado').fill(baseWeek.period);
+  await page.getByRole('button', { name: 'Cerrar y entregar' }).click();
+  await expect(
+    page.getByText('Periodo cerrado y resumen puesto a disposición de la persona.'),
+  ).toBeVisible();
+
+  const statementResponse = await request.get(
+    `${apiBase}/collections/monthly_time_statements/records`,
+    {
+      headers: { Authorization: admin.token },
+      params: {
+        page: 1,
+        perPage: 1,
+        sort: '-version',
+        filter: `employee = '${employee.id}' && period = '${baseWeek.period}'`,
+      },
+    },
+  );
+  expect(statementResponse.ok(), await statementResponse.text()).toBeTruthy();
+  const statements = (await statementResponse.json()) as { items: MonthlyTimeStatement[] };
+  expect(statements.items).toHaveLength(1);
+  expect(statements.items[0]).toMatchObject({
+    employee: employee.id,
+    employmentType: 'part_time',
+    contractedMinutes: expectedPlannedMinutes,
+    totalMinutes: 0,
+    ordinaryMinutes: 0,
+    complementaryMinutes: 0,
+    overtimeMinutes: 0,
+  });
+  expect(
+    statements.items[0].dailyRecords.reduce((total, day) => total + day.plannedMinutes, 0),
+  ).toBe(expectedPlannedMinutes);
 });

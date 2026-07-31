@@ -6,6 +6,11 @@
       <p class="mt-2 text-stone-500">
         {{ canManage() ? 'Asigna jornadas habituales y conserva su vigencia histórica.' : 'Consulta el horario que te ha asignado la empresa.' }}
       </p>
+      @if (canManage()) {
+        <p class="mt-1 text-xs text-stone-400">
+          Para jornadas variables, crea una planificación con fechas para cada semana. Los periodos cerrados siguen contando aunque archives su ficha.
+        </p>
+      }
     </div>
     @if (canManage()) {
       <button type="button" (click)="openForm()" class="btn-primary w-full sm:w-auto">

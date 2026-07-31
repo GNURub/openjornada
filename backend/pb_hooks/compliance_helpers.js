@@ -123,8 +123,8 @@ function monthlyStatementData(app, organization, employee, period) {
   const anomalies = helper.sequenceAnomalyDates(events, timezone)
   const schedules = app.findRecordsByFilter(
     "work_schedules",
-    "employee = {:employee} && active = true",
-    "-validFrom",
+    "employee = {:employee}",
+    "-validFrom,-created",
     500,
     0,
     { employee: employee.id },
@@ -198,13 +198,7 @@ function monthlyStatementData(app, organization, employee, period) {
     let schedule = null
     for (const candidate of schedules) {
       if (
-        !helper.recordDateInRange(
-          candidate,
-          date,
-          timezone,
-          "validFrom",
-          "validUntil",
-        )
+        !helper.scheduleAppliesOnDate(candidate, date, timezone)
       ) {
         continue
       }

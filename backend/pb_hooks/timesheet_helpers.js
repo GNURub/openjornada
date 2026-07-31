@@ -986,6 +986,24 @@ function recordDateInRange(record, date, timezone, startField, endField) {
   return start <= date && end >= date
 }
 
+function scheduleAppliesOnDate(schedule, date, timezone) {
+  if (
+    !recordDateInRange(
+      schedule,
+      date,
+      timezone,
+      "validFrom",
+      "validUntil",
+    )
+  ) {
+    return false
+  }
+  // A bounded schedule is historical evidence even after it is archived in the
+  // UI. An archived open-ended schedule has no reliable end date and therefore
+  // must not keep affecting future calculations.
+  return schedule.getBool("active") || Boolean(schedule.getString("validUntil"))
+}
+
 module.exports = {
   createAudit,
   editableDayState,
@@ -1000,6 +1018,7 @@ module.exports = {
   notifyPending,
   notifyResolution,
   recordDateInRange,
+  scheduleAppliesOnDate,
   scheduleMinutes,
   sequenceAnomalyDates,
   storedIntervals,

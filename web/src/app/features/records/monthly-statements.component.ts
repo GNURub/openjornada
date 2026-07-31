@@ -34,7 +34,7 @@ export class MonthlyStatementsComponent {
   });
   protected readonly formatMinutes = formatMinutes;
   protected period = shiftMonth(new Date().toISOString().slice(0, 7), -1);
-  protected employee = this.auth.user()?.id ?? '';
+  protected employee = '';
 
   constructor() {
     void this.load();
@@ -65,7 +65,12 @@ export class MonthlyStatementsComponent {
       this.acknowledgements.set(acknowledgements as MonthlyStatementAcknowledgement[]);
       this.members.set(members as UserRecord[]);
       if (this.canClose()) {
-        this.employee ||= (members[0] as UserRecord | undefined)?.id ?? '';
+        const available = members as UserRecord[];
+        if (!available.some((member) => member.id === this.employee)) {
+          this.employee = available[0]?.id ?? '';
+        }
+      } else {
+        this.employee = this.auth.user()?.id ?? '';
       }
     } catch {
       this.error.set('No se pudieron cargar los resúmenes mensuales.');

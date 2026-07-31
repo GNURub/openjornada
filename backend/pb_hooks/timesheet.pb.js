@@ -1058,8 +1058,8 @@ routerAdd(
     );
     const schedules = e.app.findRecordsByFilter(
       "work_schedules",
-      "employee = {:employee} && active = true",
-      "-validFrom",
+      "employee = {:employee}",
+      "-validFrom,-created",
       500,
       0,
       { employee: employeeId },
@@ -1175,13 +1175,7 @@ routerAdd(
       let selectedSchedule = null;
       for (const schedule of schedules) {
         if (
-          !helper.recordDateInRange(
-            schedule,
-            date,
-            timezone,
-            "validFrom",
-            "validUntil",
-          )
+          !helper.scheduleAppliesOnDate(schedule, date, timezone)
         ) {
           continue;
         }

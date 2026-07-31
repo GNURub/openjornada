@@ -135,6 +135,10 @@ onRecordCreateRequest((e) => {
   ) => {
     const first = new Date(startValue);
     const last = new Date(endValue);
+    const scheduleHelper = require(`${__hooks}/timesheet_helpers.js`);
+    const timezone =
+      e.app.findRecordById("organizations", organization).getString("timezone") ||
+      "Europe/Madrid";
     const holidayRecords = e.app.findRecordsByFilter(
       "public_holidays",
       "organization = {:organization} && date >= {:start} && date <= {:end}",
@@ -149,8 +153,8 @@ onRecordCreateRequest((e) => {
     }
     const schedules = e.app.findRecordsByFilter(
       "work_schedules",
-      "employee = {:employee} && active = true",
-      "-validFrom",
+      "employee = {:employee}",
+      "-validFrom,-created",
       500,
       0,
       { employee: employeeId },
@@ -173,21 +177,25 @@ onRecordCreateRequest((e) => {
       }
       let selectedSchedule = null;
       for (const schedule of schedules) {
-        const validFrom = schedule.getString("validFrom").slice(0, 10);
-        const validUntil = schedule.getString("validUntil").slice(0, 10);
-        if (validFrom <= key && (!validUntil || validUntil >= key)) {
+        if (!scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone)) {
+          continue;
+        }
+        let weekdays = [];
+        try {
+          weekdays = JSON.parse(schedule.getString("weekdays") || "[]");
+        } catch (_) {}
+        if (weekdays.indexOf(Number(weekday)) >= 0) {
           selectedSchedule = schedule;
           break;
         }
       }
-      let isWorkingDay = weekday !== 0 && weekday !== 6;
-      if (selectedSchedule) {
-        let weekdays = [];
-        try {
-          weekdays = JSON.parse(selectedSchedule.getString("weekdays") || "[]");
-        } catch (_) {}
-        isWorkingDay = weekdays.indexOf(Number(weekday)) >= 0;
-      }
+      const isWorkingDay = selectedSchedule
+        ? true
+        : schedules.some((schedule) =>
+            scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone),
+          )
+          ? false
+          : weekday !== 0 && weekday !== 6;
       if (isWorkingDay) days += 1;
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }

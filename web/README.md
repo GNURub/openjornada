@@ -84,6 +84,9 @@ extraordinarios. Cada nueva versión enlaza la anterior, se notifica a la
 persona y el acuse de recepción es idempotente. Su CSV replica la persona,
 periodo, versión, minutos planificados, ordinarios, complementarios,
 extraordinarios y totales, la huella de integridad y el desglose de cada día.
+En contratos parciales variables, el cálculo combina todos los horarios
+semanales cuya vigencia intersecta el mes. Los tramos acotados siguen formando
+parte del histórico aunque se archiven en la interfaz.
 
 La ruta `/informes` permite descargar un **Excel de inspección**. El rango
 predeterminado son los últimos cuatro años y puede ajustarse en la interfaz
@@ -164,6 +167,10 @@ y seleccionar varias personas. La interfaz envía una única petición a
 `POST /api/openjornada/work-schedules/bulk`; PocketBase valida todas las
 personas y crea un horario individual por empleado dentro de una transacción.
 Si una selección no es válida, no se crea ninguna asignación parcial.
+Para una distribución variable se crea un tramo con fecha de inicio y fin por
+cada semana —o más de uno cuando distintos días tengan duraciones diferentes—.
+Esas fechas son la planificación que después utiliza el cierre mensual; no se
+debe convertir a posteriori el tiempo fichado en tiempo planificado.
 
 ## Invitaciones de acceso
 
