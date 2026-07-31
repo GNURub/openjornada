@@ -34,11 +34,13 @@
             />
           </label>
           <label class="block">
-            <span class="field-label">NIF · sólo lectura</span>
+            <span class="field-label">NIF</span>
             <input
-              [value]="company.taxId"
-              readonly
-              class="field-input !bg-stone-50 !text-stone-400"
+              [(ngModel)]="company.taxId"
+              name="taxId"
+              required
+              maxlength="24"
+              class="field-input"
             />
           </label>
           <label class="block">
@@ -86,6 +88,106 @@
             >
           </label>
         </div>
+      </section>
+
+      <section class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="workplace-calendar-title">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="max-w-2xl">
+            <p class="text-sm font-bold uppercase tracking-[0.16em] text-coral-600">Centro de trabajo</p>
+            <h2 id="workplace-calendar-title" class="mt-2 font-display text-2xl font-bold">Dirección y calendario laboral</h2>
+            <p class="mt-2 text-sm leading-6 text-stone-500">Selecciona la ubicación del centro principal. Con ella podemos proponerte los festivos nacionales, autonómicos, provinciales y locales aplicables.</p>
+          </div>
+          <span class="inline-flex w-fit items-center rounded-full bg-stone-100 px-3 py-1.5 text-xs font-bold text-stone-600">País: España</span>
+        </div>
+
+        <div class="mt-6 grid gap-5 sm:grid-cols-2">
+          <label class="block sm:col-span-2">
+            <span class="field-label">Dirección</span>
+            <input [(ngModel)]="company.addressLine1" name="addressLine1" maxlength="200" autocomplete="street-address" class="field-input" placeholder="Calle, número y planta" />
+          </label>
+          <label class="block">
+            <span class="field-label">Información adicional <span class="font-normal text-stone-400">(opcional)</span></span>
+            <input [(ngModel)]="company.addressLine2" name="addressLine2" maxlength="200" class="field-input" placeholder="Edificio, polígono…" />
+          </label>
+          <label class="block">
+            <span class="field-label">Código postal <span class="font-normal text-stone-400">(opcional)</span></span>
+            <input [(ngModel)]="company.postalCode" name="postalCode" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="postal-code" class="field-input" placeholder="28001" />
+          </label>
+          <label class="block">
+            <span class="field-label">Comunidad autónoma</span>
+            <select [ngModel]="company.autonomousCommunitySlug" (ngModelChange)="selectCommunity($event)" name="autonomousCommunity" [disabled]="loadingLocationCatalog() === 'communities'" class="field-input">
+              <option value="">Selecciona una comunidad</option>
+              @for (community of communities(); track community.slug) { <option [value]="community.slug">{{ community.name }}</option> }
+            </select>
+          </label>
+          <label class="block">
+            <span class="field-label">Provincia</span>
+            <select [ngModel]="company.provinceSlug" (ngModelChange)="selectProvince($event)" name="province" [disabled]="!company.autonomousCommunitySlug || loadingLocationCatalog() === 'provinces'" class="field-input">
+              <option value="">Selecciona una provincia</option>
+              @for (province of provinces(); track province.slug) { <option [value]="province.slug">{{ province.name }}</option> }
+            </select>
+          </label>
+          <label class="block sm:col-span-2">
+            <span class="field-label">Municipio</span>
+            <select [ngModel]="company.municipalitySlug" (ngModelChange)="selectMunicipality($event)" name="municipality" [disabled]="!company.provinceSlug || loadingLocationCatalog() === 'municipalities'" class="field-input">
+              <option value="">Selecciona un municipio</option>
+              @for (municipality of municipalities(); track municipality.ine) { <option [value]="municipality.slug">{{ municipality.name }}</option> }
+            </select>
+          </label>
+        </div>
+
+        @if (calendarError()) {
+          <p role="alert" class="mt-5 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{{ calendarError() }}</p>
+        }
+
+        @if (locationComplete()) {
+          <div class="mt-6 rounded-2xl border border-coral-100 bg-coral-50/60 p-5">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p class="text-xs font-bold uppercase tracking-[0.16em] text-coral-700">Calendario detectado</p>
+                <p class="mt-1 font-bold">{{ company.municipalityName }} · {{ company.provinceName }} · {{ company.autonomousCommunityName }}</p>
+                <p class="mt-1 text-sm text-stone-600">Guarda la ubicación y revisa cada fecha antes de importarla.</p>
+              </div>
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <label class="block sm:w-28"><span class="field-label">Año</span><select [ngModel]="calendarYear" (ngModelChange)="changeCalendarYear($event)" name="calendarYear" class="field-input">@for (year of calendarYears; track year) { <option [ngValue]="year">{{ year }}</option> }</select></label>
+                <button type="button" (click)="saveAndPreviewCalendar()" [disabled]="saving() || previewingCalendar() || settingsForm.invalid" class="btn-primary whitespace-nowrap">{{ saving() ? 'Guardando…' : previewingCalendar() ? 'Consultando…' : 'Guardar y revisar festivos' }}</button>
+              </div>
+            </div>
+          </div>
+        } @else {
+          <div class="mt-6 rounded-2xl bg-stone-50 p-5 text-sm text-stone-600"><strong class="block text-stone-800">Completa los tres niveles geográficos</strong><span class="mt-1 block">Al elegir municipio aparecerá la propuesta de calendario laboral.</span></div>
+        }
+
+        @if (calendarPreview(); as preview) {
+          <div class="mt-6 overflow-hidden rounded-2xl border border-stone-200">
+            <div class="border-b border-stone-100 bg-stone-50 px-5 py-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div><p class="font-display text-lg font-bold">Propuesta para {{ preview.location.municipalityName }} · {{ preview.year }}</p><p class="mt-1 text-xs text-stone-500">{{ selectedHolidayDates().length }} fechas nuevas seleccionadas de {{ preview.items.length }} encontradas</p></div>
+                <div class="flex gap-2"><button type="button" (click)="selectAllSuggested(true)" class="text-xs font-bold text-coral-700">Seleccionar nuevas</button><button type="button" (click)="selectAllSuggested(false)" class="text-xs font-bold text-stone-500">Ninguna</button></div>
+              </div>
+            </div>
+            <div class="max-h-[34rem] divide-y divide-stone-100 overflow-y-auto">
+              @for (holiday of preview.items; track holiday.date) {
+                <label class="flex items-start gap-3 px-5 py-4" [class.bg-stone-50]="holiday.existing">
+                  <input type="checkbox" class="mt-1 size-5 shrink-0 accent-coral-500" [checked]="holiday.existing || holidaySelected(holiday.date)" [disabled]="holiday.existing" (change)="toggleHolidayDate(holiday.date, $any($event.target).checked)" />
+                  <span class="min-w-0 flex-1">
+                    <span class="flex flex-wrap items-center gap-2"><strong>{{ holiday.name }}</strong><span class="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold uppercase text-stone-500">{{ holidayScopeLabel(holiday.scope) }}</span>@if (holiday.existing) { <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Ya existe</span> }</span>
+                    <span class="mt-1 block text-sm capitalize text-stone-500">{{ holidayPreviewDate(holiday.date) }}</span>
+                    @if (holiday.existing && holiday.existingName !== holiday.name) { <span class="mt-1 block text-xs text-amber-700">Se conserva “{{ holiday.existingName }}”.</span> }
+                    @if (holiday.sourceUrl) { <a [href]="holiday.sourceUrl" target="_blank" rel="noopener noreferrer" class="relative z-10 mt-1 inline-block text-xs font-semibold text-coral-700 hover:underline">Fuente: {{ holiday.source || 'publicación oficial' }} ↗</a> } @else if (holiday.source) { <span class="mt-1 block text-xs text-stone-400">Fuente: {{ holiday.source }}</span> }
+                  </span>
+                </label>
+              }
+            </div>
+            <div class="border-t border-stone-100 bg-white p-5">
+              @for (warning of preview.warnings; track warning) { <p class="mb-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{{ warning }}</p> }
+              <p class="text-xs leading-5 text-stone-500">Datos de <a [href]="preview.provider.url" target="_blank" rel="noopener noreferrer" class="font-bold text-coral-700 hover:underline">{{ preview.provider.name }}</a>. Revisa las fuentes oficiales antes de tomar decisiones laborales; la importación no sustituye al calendario laboral aprobado por la empresa.</p>
+              <button type="button" (click)="importLaborCalendar()" [disabled]="!selectedHolidayDates().length || importingCalendar()" class="btn-primary mt-4 w-full sm:w-auto">{{ importingCalendar() ? 'Importando…' : 'Importar ' + selectedHolidayDates().length + ' festivos' }}</button>
+            </div>
+          </div>
+        } @else {
+          <p class="mt-5 text-xs leading-5 text-stone-400">Catálogo y festivos proporcionados por <a href="https://calendariosnacionales.com/es/api/" target="_blank" rel="noopener noreferrer" class="font-bold text-coral-700 hover:underline">Calendarios Nacionales</a>, con caché para evitar consultas repetitivas.</p>
+        }
       </section>
 
       <section class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">

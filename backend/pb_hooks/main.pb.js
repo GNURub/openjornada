@@ -38,14 +38,30 @@ onBootstrap((e) => {
     return;
   }
 
-  let organization;
+  let bootstrapAdmin = null;
   try {
-    organization = e.app.findFirstRecordByData(
-      "organizations",
-      "taxId",
-      $os.getenv("PB_ORGANIZATION_TAX_ID") || "BOOTSTRAP",
-    );
-  } catch (_) {
+    bootstrapAdmin = e.app.findAuthRecordByEmail("users", bootstrapEmail);
+  } catch (_) {}
+
+  let organization = null;
+  if (bootstrapAdmin) {
+    try {
+      organization = e.app.findRecordById(
+        "organizations",
+        bootstrapAdmin.getString("organization"),
+      );
+    } catch (_) {}
+  }
+  if (!organization) {
+    try {
+      organization = e.app.findFirstRecordByData(
+        "organizations",
+        "taxId",
+        $os.getenv("PB_ORGANIZATION_TAX_ID") || "BOOTSTRAP",
+      );
+    } catch (_) {}
+  }
+  if (!organization) {
     const collection = e.app.findCollectionByNameOrId("organizations");
     organization = new Record(collection);
     organization.set(
@@ -99,9 +115,7 @@ onBootstrap((e) => {
     }
   }
 
-  try {
-    e.app.findAuthRecordByEmail("users", bootstrapEmail);
-  } catch (_) {
+  if (!bootstrapAdmin) {
     const collection = e.app.findCollectionByNameOrId("users");
     const admin = new Record(collection);
     admin.set("email", bootstrapEmail);
@@ -151,6 +165,15 @@ onBootstrap((e) => {
       employee.set("privacyNoticeAcknowledgedAt", "");
       e.app.save(employee);
     }
+  }
+
+  try {
+    require(`${__hooks}/hr_suite_helpers.js`).seedOrganization(
+      e.app,
+      organization,
+    );
+  } catch (_) {
+    // A partial installation may not have the HR collections yet.
   }
 });
 

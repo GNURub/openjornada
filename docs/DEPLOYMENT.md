@@ -463,6 +463,19 @@ Haz un backup antes de actualizar. PocketBase sigue antes de la versión 1.0:
 revisa siempre su changelog y prueba migraciones y restauración fuera de
 producción.
 
+## Calendario laboral de España
+
+La importación guiada necesita salida HTTPS desde el contenedor hacia
+`calendariosnacionales.com`. La consulta se realiza sólo desde el servidor, con
+timeout, límite de respuesta, validación de rutas y caché en memoria de seis
+horas. No abras ninguna ruta entrante adicional ni expongas el proveedor desde
+el navegador. Si el servicio no está disponible, la creación y edición manual
+de festivos sigue funcionando.
+
+La atribución visible al proveedor y el aviso de contraste con fuentes oficiales
+forman parte de la pantalla de previsualización; no deben eliminarse al adaptar
+la interfaz.
+
 ## Lista de comprobación
 
 - `PB_DEMO_ENABLED=false`.
@@ -480,4 +493,5 @@ producción.
 - Retención mínima de cuatro años revisada y preservaciones legales activas
   antes de cualquier tratamiento de datos antiguos.
 - Monitorización y alertas activas.
+- Salida HTTPS al proveedor de calendario verificada o procedimiento manual documentado.
 - Revisión de [COMPLIANCE_ES.md](COMPLIANCE_ES.md) completada.

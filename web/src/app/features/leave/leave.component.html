@@ -1,148 +1,382 @@
-<div class="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
-  <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+<div class="mx-auto max-w-[1600px] px-4 py-6 sm:px-7 lg:px-10 lg:py-9">
+  <header class="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
     <div>
-      <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Tiempo libre</p>
-      <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Ausencias</h1>
-      <p class="mt-2 max-w-2xl text-stone-500">Solicitudes, saldos, calendario de equipo y políticas en un mismo lugar.</p>
-    </div>
-    <div class="flex flex-col gap-2 sm:flex-row">
-      @if (canManage()) {
-        <button type="button" (click)="openRequest(true)" class="btn-secondary">Asignar ausencia</button>
-      }
-      <button type="button" (click)="openRequest(false)" class="btn-primary">Nueva solicitud</button>
-    </div>
-  </div>
-
-  <div class="mt-7 flex gap-2 overflow-x-auto rounded-2xl border border-stone-200 bg-white p-1.5">
-    <button type="button" (click)="view.set('requests')" class="rounded-xl px-4 py-2.5 text-sm font-bold" [class.bg-stone-900]="view() === 'requests'" [class.text-white]="view() === 'requests'">
-      Solicitudes @if (pendingCount()) { <span class="ml-1 rounded-full bg-coral-500 px-2 py-0.5 text-xs text-white">{{ pendingCount() }}</span> }
-    </button>
-    <button type="button" (click)="view.set('calendar')" class="rounded-xl px-4 py-2.5 text-sm font-bold" [class.bg-stone-900]="view() === 'calendar'" [class.text-white]="view() === 'calendar'">Calendario</button>
-    @if (isAdmin()) {
-      <button type="button" (click)="view.set('settings')" class="rounded-xl px-4 py-2.5 text-sm font-bold" [class.bg-stone-900]="view() === 'settings'" [class.text-white]="view() === 'settings'">Políticas y saldos</button>
-    }
-  </div>
-
-  @if (error()) { <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p> }
-  @if (success()) { <p class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p> }
-
-  @if (formOpen()) {
-    <section class="mt-7 rounded-[2rem] border border-coral-100 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-8">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <span class="grid size-11 place-items-center rounded-2xl bg-coral-500 text-white shadow-lg shadow-coral-200" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="size-5 fill-none stroke-current stroke-2"><path d="M7 3v3M17 3v3M4.5 9.5h15M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/><path d="m9 15 2 2 4-5"/></svg>
+        </span>
         <div>
-          <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">{{ assigning() ? 'Gestión de equipo' : 'Mi tiempo libre' }}</p>
-          <h2 class="mt-2 font-display text-2xl font-bold">{{ assigning() ? 'Asignar ausencia aprobada' : 'Nueva solicitud' }}</h2>
+          <p class="text-xs font-bold uppercase tracking-[0.2em] text-coral-600">Tiempo libre</p>
+          <h1 class="font-display text-3xl font-bold tracking-tight sm:text-4xl">Ausencias</h1>
         </div>
-        <button type="button" aria-label="Cerrar formulario" (click)="formOpen.set(false)" class="grid size-10 place-items-center rounded-full bg-stone-100 text-stone-500">×</button>
       </div>
-      <form (ngSubmit)="createRequest()" class="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        @if (assigning()) {
-          <label class="block"><span class="field-label">Persona</span><select [(ngModel)]="employee" name="employee" required class="field-input">@for (member of members(); track member.id) { <option [value]="member.id">{{ member.name }}</option> }</select></label>
-        }
-        <label class="block"><span class="field-label">Tipo de ausencia</span><select [(ngModel)]="leaveType" name="leaveType" required class="field-input">@for (type of leaveTypes(); track type.id) { <option [value]="type.id">{{ type.name }}</option> }</select></label>
-        <label class="block"><span class="field-label">Desde</span><input [(ngModel)]="startDate" name="startDate" type="date" required class="field-input" /></label>
-        <label class="block"><span class="field-label">Hasta</span><input [(ngModel)]="endDate" name="endDate" type="date" required class="field-input" /></label>
-        <label class="block"><span class="field-label">Duración</span><select [(ngModel)]="dayPart" name="dayPart" class="field-input"><option value="full">Día completo</option><option value="morning">Sólo mañana</option><option value="afternoon">Sólo tarde</option></select></label>
-        <label class="block sm:col-span-2 lg:col-span-3"><span class="field-label">Comentario</span><input [(ngModel)]="reason" name="reason" maxlength="500" class="field-input" placeholder="Añade el contexto necesario" /></label>
-        <label class="block sm:col-span-2 lg:col-span-3">
-          <span class="field-label">Documento justificativo @if (!selectedType()?.requiresDocument) { <span class="font-normal text-stone-400">(opcional)</span> }</span>
-          <input type="file" (change)="onAttachment($event)" [required]="selectedType()?.requiresDocument" accept=".pdf,.jpg,.jpeg,.png,.docx" class="field-input file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-2 file:font-bold" />
-          @if (selectedType()?.requiresDocument) { <span class="mt-1 block text-xs font-semibold text-amber-600">Este tipo de ausencia requiere justificante.</span> }
-        </label>
-        <div class="flex items-end gap-3"><span class="pb-3 text-sm font-bold text-stone-400">{{ requestedDays() }} días</span><button type="submit" [disabled]="saving() || requestedDays() === 0" class="btn-primary flex-1">{{ saving() ? 'Guardando…' : assigning() ? 'Asignar' : 'Enviar' }}</button></div>
-      </form>
-    </section>
-  }
+      <p class="mt-3 max-w-2xl text-sm leading-6 text-stone-500 sm:ml-14">Consulta tus días, revisa el año de un vistazo y gestiona solicitudes sin salir del calendario.</p>
+    </div>
+    <div class="flex min-w-0 gap-2">
+      @if (canManage()) {
+        <button type="button" (click)="openRequest(true)" class="btn-secondary flex-1 sm:flex-none">Asignar ausencia</button>
+      }
+      <button type="button" (click)="openRequest(false)" class="btn-primary flex-1 sm:flex-none">
+        <span aria-hidden="true">＋</span> Solicitar ausencia
+      </button>
+    </div>
+  </header>
+
+  <nav class="mt-6 flex gap-1 overflow-x-auto border-b border-stone-200" aria-label="Secciones de ausencias">
+    <button type="button" (click)="selectView('requests')" class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold transition" [class.border-coral-500]="view() === 'requests'" [class.text-coral-700]="view() === 'requests'" [class.border-transparent]="view() !== 'requests'" [class.text-stone-500]="view() !== 'requests'">Resumen anual</button>
+    @if (canManage()) {
+      <button type="button" (click)="selectView('management')" class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold transition" [class.border-coral-500]="view() === 'management'" [class.text-coral-700]="view() === 'management'" [class.border-transparent]="view() !== 'management'" [class.text-stone-500]="view() !== 'management'">
+        Peticiones del equipo
+        @if (pendingCount()) { <span class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-700">{{ pendingCount() }}</span> }
+      </button>
+    }
+    <button type="button" (click)="selectView('calendar')" class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold transition" [class.border-coral-500]="view() === 'calendar'" [class.text-coral-700]="view() === 'calendar'" [class.border-transparent]="view() !== 'calendar'" [class.text-stone-500]="view() !== 'calendar'">Calendario de equipo</button>
+    @if (isAdmin()) {
+      <button type="button" (click)="selectView('settings')" class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold transition" [class.border-coral-500]="view() === 'settings'" [class.text-coral-700]="view() === 'settings'" [class.border-transparent]="view() !== 'settings'" [class.text-stone-500]="view() !== 'settings'">Políticas y saldos</button>
+    }
+  </nav>
+
+  @if (error()) { <p role="alert" class="mt-5 rounded-2xl border border-red-100 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">{{ error() }}</p> }
+  @if (success()) { <p role="status" class="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">{{ success() }}</p> }
 
   @if (view() === 'requests') {
-    <section class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      @for (balance of balances(); track balance.id) {
-        <article class="rounded-[1.75rem] border border-stone-200 bg-white p-5">
-          <p class="text-xs font-bold uppercase tracking-wider text-stone-400">{{ balance.expand?.leaveType?.name || 'Saldo' }} · {{ balance.year }}</p>
-          <p class="mt-3 font-display text-3xl font-bold">{{ balanceAvailable(balance) }} <span class="text-base text-stone-400">días</span></p>
-          @if (canManage()) { <p class="mt-2 text-xs font-semibold text-stone-400">{{ balance.expand?.employee?.name }}</p> }
-        </article>
-      }
-    </section>
-
-    <section class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      @if (loading()) {
-        @for (item of [1,2,3]; track item) { <div class="h-64 animate-pulse rounded-[2rem] bg-stone-200"></div> }
-      } @else if (requests().length === 0) {
-        <div class="rounded-[2rem] border border-stone-200 bg-white p-12 text-center md:col-span-2 xl:col-span-3"><p class="font-semibold">No hay solicitudes todavía</p></div>
-      } @else {
-        @for (request of requests(); track request.id) {
-          <article class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm">
-            <div class="flex items-start justify-between gap-4">
-              <span class="rounded-full px-3 py-1 text-xs font-bold" [class.bg-amber-100]="request.status === 'pending'" [class.text-amber-700]="request.status === 'pending'" [class.bg-emerald-100]="request.status === 'approved'" [class.text-emerald-700]="request.status === 'approved'" [class.bg-red-100]="request.status === 'rejected'" [class.text-red-700]="request.status === 'rejected'" [class.bg-stone-100]="request.status === 'cancelled'">{{ statusLabel(request.status) }}</span>
-              <span class="text-xs font-bold text-stone-400">{{ request.requestedDays || 0 }} días</span>
+    <div class="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(360px,0.78fr)_minmax(0,1.42fr)]">
+      <div class="space-y-6">
+        <section class="overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-sm">
+          <div class="flex items-center justify-between border-b border-stone-100 px-5 py-4">
+            <div>
+              <h2 class="font-display text-lg font-bold">Saldos de {{ calendarYear() }}</h2>
+              <p class="mt-0.5 text-xs text-stone-400">Del 1 ene. al 31 dic.</p>
             </div>
-            <div class="mt-5 flex items-center gap-2"><span class="size-2.5 rounded-full" [style.background]="typeFor(request)?.color || '#94a3b8'"></span><p class="text-sm font-semibold text-coral-600">{{ typeFor(request)?.name || request.type }}</p></div>
-            <h2 class="mt-2 font-display text-xl font-bold">{{ formatDate(request.startDate) }} @if (request.startDate.slice(0,10) !== request.endDate.slice(0,10)) { — {{ formatDate(request.endDate) }} }</h2>
-            @if (canManage()) { <p class="mt-2 text-sm font-semibold text-stone-500">{{ request.expand?.employee?.name }}</p> }
-            <p class="mt-3 min-h-10 text-sm leading-6 text-stone-400">{{ request.reason || 'Sin comentario' }}</p>
-            @if (request.attachment) { <button type="button" (click)="openAttachment(request)" class="mt-3 text-sm font-bold text-coral-600 hover:text-coral-700">Ver justificante protegido</button> }
-            @if (request.response) { <p class="mt-3 rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-500">{{ request.response }}</p> }
-            @if (canManage() && request.status === 'pending') {
+            <span class="rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-bold text-stone-500">Días</span>
+          </div>
+          @for (balance of overviewBalances(); track balance.id) {
+            <article class="border-b border-stone-100 px-5 py-5 last:border-0">
+              <div class="flex items-center gap-2">
+                <span class="size-2.5 rounded-full" [style.background]="balance.expand?.leaveType?.color || '#f97360'"></span>
+                <p class="font-bold">{{ balance.expand?.leaveType?.name || 'Saldo' }}</p>
+                @if (canManage() && balance.employee !== auth.user()?.id) { <span class="truncate text-xs text-stone-400">· {{ balance.expand?.employee?.name }}</span> }
+              </div>
+              <dl class="mt-5 grid grid-cols-3 gap-2 text-center">
+                <div><dd class="font-display text-2xl font-bold">{{ balanceGenerated(balance) }}</dd><dt class="mt-1 text-xs font-semibold text-stone-400">Generados</dt></div>
+                <div><dd class="font-display text-2xl font-bold text-coral-600">{{ balanceAvailable(balance) }}</dd><dt class="mt-1 text-xs font-semibold text-stone-400">Disponibles</dt></div>
+                <div><dd class="font-display text-2xl font-bold">{{ balanceApproved(balance) }}</dd><dt class="mt-1 text-xs font-semibold text-stone-400">Aprobados</dt></div>
+              </dl>
+            </article>
+          } @empty {
+            <div class="px-6 py-8 text-center">
+              <p class="font-semibold text-stone-700">No hay días configurados</p>
+              <p class="mt-1 text-sm text-stone-400">Los saldos con valor 0 permanecen ocultos.</p>
+            </div>
+          }
+        </section>
+
+        <section class="rounded-[1.75rem] border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">Historial</p>
+              <h2 class="mt-1 font-display text-xl font-bold">Ausencias de {{ calendarYear() }}</h2>
+            </div>
+            <span class="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-500">{{ overviewRequests().length }}</span>
+          </div>
+          <div class="mt-5 divide-y divide-stone-100">
+            @for (request of overviewRequests(); track request.id) {
+              <article class="py-4 first:pt-0 last:pb-0">
+                <div class="flex items-center gap-3">
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <div class="w-11 overflow-hidden rounded-xl border border-stone-200 bg-white text-center">
+                      <p class="py-0.5 text-[9px] font-black text-white" [style.background]="typeFor(request)?.color || '#f97360'">{{ dateTileMonth(request.startDate) }}</p>
+                      <p class="py-1 font-display text-base font-bold">{{ dateTileDay(request.startDate) }}</p>
+                    </div>
+                    @if (request.startDate.slice(0,10) !== request.endDate.slice(0,10)) {
+                      <span class="text-stone-300" aria-hidden="true">→</span>
+                      <div class="w-11 overflow-hidden rounded-xl border border-stone-200 bg-white text-center">
+                        <p class="py-0.5 text-[9px] font-black text-white" [style.background]="typeFor(request)?.color || '#f97360'">{{ dateTileMonth(request.endDate) }}</p>
+                        <p class="py-1 font-display text-base font-bold">{{ dateTileDay(request.endDate) }}</p>
+                      </div>
+                    }
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-bold">{{ typeFor(request)?.name || request.type }}</p>
+                    <p class="mt-0.5 truncate text-xs text-stone-400">
+                      {{ request.requestedDays || 0 }} {{ request.requestedDays === 1 ? 'día' : 'días' }} · {{ dayPartLabel(request.dayPart) }}
+                      @if (canManage()) { · {{ request.expand?.employee?.name }} }
+                    </p>
+                    @if (request.reason) { <p class="mt-1 truncate text-xs text-stone-500">{{ request.reason }}</p> }
+                  </div>
+                  <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-bold"
+                    [class.bg-amber-100]="request.status === 'pending'" [class.text-amber-700]="request.status === 'pending'"
+                    [class.bg-emerald-100]="request.status === 'approved'" [class.text-emerald-700]="request.status === 'approved'"
+                    [class.bg-red-100]="request.status === 'rejected'" [class.text-red-700]="request.status === 'rejected'"
+                    [class.bg-stone-100]="request.status === 'cancelled'" [class.text-stone-600]="request.status === 'cancelled'">
+                    {{ statusLabel(request.status) }}
+                  </span>
+                </div>
+                @if (request.response) {
+                  <p class="mt-3 rounded-xl bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-500">{{ request.response }}</p>
+                }
+                @if (request.attachment || (request.employee === auth.user()?.id && request.status === 'pending')) {
+                  <div class="mt-3 flex flex-wrap items-center gap-3">
+                    @if (request.attachment) {
+                      <button type="button" (click)="openAttachment(request)" class="text-xs font-bold text-coral-600 hover:text-coral-700">Ver justificante protegido ↗</button>
+                    }
+                    @if (request.employee === auth.user()?.id && request.status === 'pending') {
+                      <button type="button" (click)="cancel(request)" [disabled]="cancellingRequest() !== ''" class="relative z-10 inline-flex min-h-11 scroll-my-28 items-center rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-100 hover:text-red-700 disabled:opacity-50">
+                        {{ cancellingRequest() === request.id ? 'Cancelando…' : 'Cancelar solicitud' }}
+                      </button>
+                    }
+                  </div>
+                }
+              </article>
+            } @empty {
+              <p class="rounded-2xl bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">No hay ausencias en este año.</p>
+            }
+          </div>
+        </section>
+      </div>
+
+      <section class="rounded-[1.75rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6" aria-labelledby="annual-calendar-title">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <button type="button" (click)="moveYear(-1)" class="grid size-10 place-items-center rounded-xl border border-stone-200 text-stone-500 hover:bg-stone-50" aria-label="Año anterior">←</button>
+            <h2 id="annual-calendar-title" class="min-w-16 text-center font-display text-xl font-bold">{{ calendarYear() }}</h2>
+            <button type="button" (click)="moveYear(1)" class="grid size-10 place-items-center rounded-xl border border-stone-200 text-stone-500 hover:bg-stone-50" aria-label="Año siguiente">→</button>
+          </div>
+          <button type="button" (click)="openRequest(false)" class="rounded-xl border border-coral-300 px-3.5 py-2 text-xs font-bold text-coral-700 hover:bg-coral-50">＋ Solicitar ausencia</button>
+        </div>
+        @if (loading()) {
+          <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            @for (item of [1,2,3,4,5,6]; track item) { <div class="h-44 animate-pulse rounded-2xl bg-stone-100"></div> }
+          </div>
+        } @else {
+          <div class="mt-6 grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3">
+            @for (month of annualMonths(); track month.date.getMonth()) {
+              <article>
+                <h3 class="mb-2 text-sm font-bold capitalize text-stone-700">{{ month.label }}</h3>
+                <div class="grid grid-cols-7 text-center text-[10px] font-bold uppercase text-stone-300">
+                  @for (day of ['L','M','X','J','V','S','D']; track day) { <span class="py-1">{{ day }}</span> }
+                </div>
+                <div class="grid grid-cols-7 gap-y-0.5 text-center">
+                  @for (cell of month.cells; track cell.key) {
+                    @if (cell.inMonth) {
+                      <div class="group relative grid h-7 place-items-center" [attr.data-date]="cell.key" [attr.data-request-count]="cell.requests.length">
+                        <span class="grid size-7 place-items-center rounded-lg text-[11px] font-semibold transition"
+                          [class.ring-2]="isToday(cell.key)"
+                          [class.ring-coral-400]="isToday(cell.key)"
+                          [class.text-white]="cell.requests.length"
+                          [class.text-red-600]="cell.holiday && !cell.requests.length"
+                          [class.text-stone-700]="!cell.requests.length && !cell.holiday"
+                          [style.background]="dayColor(cell)">
+                          {{ cell.date.getDate() }}
+                        </span>
+                        @if (cell.requests.length || cell.holiday) {
+                          <span class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden w-max max-w-48 -translate-x-1/2 rounded-lg bg-stone-900 px-2 py-1 text-[10px] text-white shadow-lg group-hover:block">
+                            {{ cell.holiday?.name || typeFor(cell.requests[0])?.name }}
+                            @if (canManage() && cell.requests[0]) { · {{ cell.requests[0].expand?.employee?.name }} }
+                          </span>
+                        }
+                      </div>
+                    } @else {
+                      <span class="h-7"></span>
+                    }
+                  }
+                </div>
+              </article>
+            }
+          </div>
+        }
+        <div class="mt-7 flex flex-wrap gap-2 border-t border-stone-100 pt-4 text-xs font-semibold text-stone-500">
+          <span class="flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1"><span class="size-2 rounded-full ring-2 ring-coral-400"></span>Hoy</span>
+          @for (type of leaveTypes(); track type.id) {
+            <span class="flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1"><span class="size-2 rounded-full" [style.background]="type.color"></span>{{ type.name }}</span>
+          }
+        </div>
+      </section>
+    </div>
+
+    @if (canManage() && reviewRequests().length) {
+      <section class="mt-8">
+        <div class="flex items-center gap-3">
+          <h2 class="font-display text-2xl font-bold">Pendientes de revisión</h2>
+          <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">{{ reviewRequests().length }}</span>
+        </div>
+        <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          @for (request of reviewRequests(); track request.id) {
+            <article class="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm">
+              <div class="flex items-center justify-between gap-3">
+                <span class="flex items-center gap-2 text-sm font-bold"><span class="size-2.5 rounded-full" [style.background]="typeFor(request)?.color || '#94a3b8'"></span>{{ typeFor(request)?.name || request.type }}</span>
+                <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">Pendiente</span>
+              </div>
+              <p class="mt-4 font-display text-xl font-bold">{{ request.expand?.employee?.name }}</p>
+              <p class="mt-1 text-sm text-stone-500">{{ formatDate(request.startDate) }} @if (request.startDate.slice(0,10) !== request.endDate.slice(0,10)) { — {{ formatDate(request.endDate) }} } · {{ request.requestedDays }} días</p>
+              @if (request.reason) { <p class="mt-2 text-sm leading-6 text-stone-500">{{ request.reason }}</p> }
               @let conflicts = conflictsFor(request);
               @if (conflicts.approved.length) {
-                <aside class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900" aria-label="Ausencias aprobadas coincidentes">
-                  <p class="text-xs font-bold uppercase tracking-wide">{{ conflictTitle('approved', conflicts.approved.length) }}</p>
-                  <ul class="mt-2 space-y-1.5 text-xs">
-                    @for (conflict of conflicts.approved.slice(0, 3); track conflict.request.id) {
-                      <li>
-                        <span class="font-bold">{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</span>
-                        · {{ typeFor(conflict.request)?.name || conflict.request.type }}
-                        · {{ conflictDateRange(conflict) }}
-                      </li>
-                    }
-                  </ul>
-                  @if (conflicts.approved.length > 3) {
-                    <p class="mt-2 text-xs font-semibold">Y {{ conflicts.approved.length - 3 }} más.</p>
+                <aside class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" aria-label="Ausencias aprobadas coincidentes">
+                  <p class="font-bold">{{ conflictTitle('approved', conflicts.approved.length) }}</p>
+                  @for (conflict of conflicts.approved.slice(0, 3); track conflict.request.id) {
+                    <p class="mt-1"><strong>{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</strong> · {{ typeFor(conflict.request)?.name || conflict.request.type }} · {{ conflictDateRange(conflict) }}</p>
                   }
                 </aside>
               }
               @if (conflicts.pending.length) {
-                <aside class="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-900" aria-label="Solicitudes pendientes coincidentes">
-                  <p class="text-xs font-bold uppercase tracking-wide">{{ conflictTitle('pending', conflicts.pending.length) }}</p>
-                  <ul class="mt-2 space-y-1.5 text-xs">
-                    @for (conflict of conflicts.pending.slice(0, 3); track conflict.request.id) {
-                      <li>
-                        <span class="font-bold">{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</span>
-                        · {{ typeFor(conflict.request)?.name || conflict.request.type }}
-                        · {{ conflictDateRange(conflict) }}
-                      </li>
-                    }
-                  </ul>
-                  @if (conflicts.pending.length > 3) {
-                    <p class="mt-2 text-xs font-semibold">Y {{ conflicts.pending.length - 3 }} más.</p>
+                <aside class="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" aria-label="Solicitudes pendientes coincidentes">
+                  <p class="font-bold">{{ conflictTitle('pending', conflicts.pending.length) }}</p>
+                  @for (conflict of conflicts.pending.slice(0, 3); track conflict.request.id) {
+                    <p class="mt-1"><strong>{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</strong> · {{ typeFor(conflict.request)?.name || conflict.request.type }} · {{ conflictDateRange(conflict) }}</p>
                   }
                 </aside>
               }
-              <div class="mt-5 flex gap-2"><button type="button" (click)="resolve(request, 'rejected')" class="btn-secondary !min-h-10 flex-1 !px-3">Rechazar</button><button type="button" (click)="resolve(request, 'approved')" class="btn-primary !min-h-10 flex-1 !px-3">Aprobar</button></div>
-            } @else if (request.employee === auth.user()?.id && request.status === 'pending') {
-              <button type="button" (click)="cancel(request)" class="mt-5 text-sm font-bold text-stone-500 hover:text-red-600">Cancelar solicitud</button>
-            }
-          </article>
-        }
+              <div class="mt-5 flex gap-2">
+                <button type="button" (click)="resolve(request, 'rejected')" class="btn-secondary !min-h-10 flex-1 !px-3">Rechazar</button>
+                <button type="button" (click)="resolve(request, 'approved')" class="btn-primary !min-h-10 flex-1 !px-3">Aprobar</button>
+              </div>
+            </article>
+          }
+        </div>
+      </section>
+    }
+  }
+
+  @if (view() === 'management' && canManage()) {
+    <section class="mt-7" aria-labelledby="team-requests-title">
+      <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">Gestión de equipo</p>
+          <h2 id="team-requests-title" class="mt-1 font-display text-3xl font-bold">Peticiones de ausencia</h2>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-stone-500">Consulta todas las peticiones, revisa sus detalles y resuelve las que siguen pendientes.</p>
+        </div>
+        <button type="button" (click)="openRequest(true)" class="btn-secondary">＋ Asignar ausencia</button>
+      </div>
+
+      <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <button type="button" (click)="requestStatusFilter.set('pending')" class="rounded-2xl border bg-white p-4 text-left transition hover:border-amber-300" [class.border-amber-300]="requestStatusFilter() === 'pending'" [class.ring-2]="requestStatusFilter() === 'pending'" [class.ring-amber-100]="requestStatusFilter() === 'pending'" [class.border-stone-200]="requestStatusFilter() !== 'pending'">
+          <span class="text-xs font-bold text-amber-600">Pendientes</span>
+          <strong class="mt-1 block font-display text-2xl">{{ requestStatusCount('pending') }}</strong>
+        </button>
+        <button type="button" (click)="requestStatusFilter.set('approved')" class="rounded-2xl border bg-white p-4 text-left transition hover:border-emerald-300" [class.border-emerald-300]="requestStatusFilter() === 'approved'" [class.ring-2]="requestStatusFilter() === 'approved'" [class.ring-emerald-100]="requestStatusFilter() === 'approved'" [class.border-stone-200]="requestStatusFilter() !== 'approved'">
+          <span class="text-xs font-bold text-emerald-600">Aprobadas</span>
+          <strong class="mt-1 block font-display text-2xl">{{ requestStatusCount('approved') }}</strong>
+        </button>
+        <button type="button" (click)="requestStatusFilter.set('rejected')" class="rounded-2xl border bg-white p-4 text-left transition hover:border-red-300" [class.border-red-300]="requestStatusFilter() === 'rejected'" [class.ring-2]="requestStatusFilter() === 'rejected'" [class.ring-red-100]="requestStatusFilter() === 'rejected'" [class.border-stone-200]="requestStatusFilter() !== 'rejected'">
+          <span class="text-xs font-bold text-red-600">Rechazadas</span>
+          <strong class="mt-1 block font-display text-2xl">{{ requestStatusCount('rejected') }}</strong>
+        </button>
+        <button type="button" (click)="requestStatusFilter.set('cancelled')" class="rounded-2xl border bg-white p-4 text-left transition hover:border-stone-400" [class.border-stone-500]="requestStatusFilter() === 'cancelled'" [class.ring-2]="requestStatusFilter() === 'cancelled'" [class.ring-stone-200]="requestStatusFilter() === 'cancelled'" [class.border-stone-200]="requestStatusFilter() !== 'cancelled'">
+          <span class="text-xs font-bold text-stone-500">Canceladas</span>
+          <strong class="mt-1 block font-display text-2xl">{{ requestStatusCount('cancelled') }}</strong>
+        </button>
+      </div>
+
+      <div class="mt-5 flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-3 sm:flex-row">
+        <label class="relative min-w-0 flex-1">
+          <span class="sr-only">Buscar peticiones</span>
+          <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" aria-hidden="true">⌕</span>
+          <input [(ngModel)]="requestSearch" type="search" class="field-input !pl-10" placeholder="Buscar por persona, tipo o comentario" />
+        </label>
+        <button type="button" (click)="requestStatusFilter.set('all')" class="btn-secondary !min-h-12" [class.border-stone-900]="requestStatusFilter() === 'all'" [class.text-stone-900]="requestStatusFilter() === 'all'">Ver todas ({{ requests().length }})</button>
+      </div>
+
+      @if (loading()) {
+        <div class="mt-5 grid gap-4 lg:grid-cols-2">
+          @for (item of [1,2,3,4]; track item) { <div class="h-64 animate-pulse rounded-[1.5rem] bg-stone-200"></div> }
+        </div>
+      } @else {
+        <div class="mt-5 grid gap-4 lg:grid-cols-2">
+          @for (request of managementRequests(); track request.id) {
+            <article class="flex min-w-0 scroll-mt-28 flex-col rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex min-w-0 items-center gap-3">
+                  <span class="grid size-11 shrink-0 place-items-center rounded-2xl bg-stone-900 font-display font-bold text-white">{{ (request.expand?.employee?.name || '?').slice(0, 1).toUpperCase() }}</span>
+                  <div class="min-w-0">
+                    <h3 class="truncate font-display text-lg font-bold">{{ request.expand?.employee?.name || 'Persona del equipo' }}</h3>
+                    <p class="mt-0.5 truncate text-xs text-stone-400">{{ request.expand?.employee?.employeeCode || 'Sin código de empleado' }}</p>
+                  </div>
+                </div>
+                <span class="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+                  [class.bg-amber-100]="request.status === 'pending'" [class.text-amber-700]="request.status === 'pending'"
+                  [class.bg-emerald-100]="request.status === 'approved'" [class.text-emerald-700]="request.status === 'approved'"
+                  [class.bg-red-100]="request.status === 'rejected'" [class.text-red-700]="request.status === 'rejected'"
+                  [class.bg-stone-100]="request.status === 'cancelled'" [class.text-stone-600]="request.status === 'cancelled'">
+                  {{ statusLabel(request.status) }}
+                </span>
+              </div>
+
+              <div class="mt-5 rounded-2xl bg-stone-50 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <span class="flex items-center gap-2 text-sm font-bold"><span class="size-2.5 rounded-full" [style.background]="typeFor(request)?.color || '#94a3b8'"></span>{{ typeFor(request)?.name || request.type }}</span>
+                  <strong class="text-sm">{{ request.requestedDays || 0 }} {{ request.requestedDays === 1 ? 'día' : 'días' }}</strong>
+                </div>
+                <p class="mt-3 font-display text-lg font-bold">{{ formatDate(request.startDate) }} @if (request.startDate.slice(0,10) !== request.endDate.slice(0,10)) { — {{ formatDate(request.endDate) }} }</p>
+                <p class="mt-1 text-xs font-semibold text-stone-400">{{ dayPartLabel(request.dayPart) }}</p>
+              </div>
+
+              @if (request.reason) {
+                <div class="mt-4">
+                  <p class="text-xs font-bold uppercase tracking-wider text-stone-400">Comentario</p>
+                  <p class="mt-1 text-sm leading-6 text-stone-600">{{ request.reason }}</p>
+                </div>
+              }
+              @if (request.response) {
+                <div class="mt-4 rounded-xl border border-stone-100 bg-stone-50 px-3 py-2">
+                  <p class="text-xs font-bold text-stone-400">Respuesta</p>
+                  <p class="mt-1 text-sm text-stone-600">{{ request.response }}</p>
+                </div>
+              }
+              @if (request.attachment) {
+                <button type="button" (click)="openAttachment(request)" class="mt-4 self-start text-sm font-bold text-coral-600 hover:text-coral-700">Ver justificante protegido ↗</button>
+              }
+
+              @if (request.status === 'pending') {
+                @let conflicts = conflictsFor(request);
+                @if (conflicts.approved.length) {
+                  <aside class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" aria-label="Ausencias aprobadas coincidentes">
+                    <p class="font-bold">{{ conflictTitle('approved', conflicts.approved.length) }}</p>
+                    @for (conflict of conflicts.approved.slice(0, 3); track conflict.request.id) {
+                      <p class="mt-1"><strong>{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</strong> · {{ typeFor(conflict.request)?.name || conflict.request.type }} · {{ conflictDateRange(conflict) }}</p>
+                    }
+                  </aside>
+                }
+                @if (conflicts.pending.length) {
+                  <aside class="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" aria-label="Solicitudes pendientes coincidentes">
+                    <p class="font-bold">{{ conflictTitle('pending', conflicts.pending.length) }}</p>
+                    @for (conflict of conflicts.pending.slice(0, 3); track conflict.request.id) {
+                      <p class="mt-1"><strong>{{ conflict.request.expand?.employee?.name || 'Otra persona' }}</strong> · {{ typeFor(conflict.request)?.name || conflict.request.type }} · {{ conflictDateRange(conflict) }}</p>
+                    }
+                  </aside>
+                }
+                <div class="mt-auto flex gap-2 pt-5">
+                  <button type="button" (click)="resolve(request, 'rejected')" [disabled]="resolvingRequest() !== ''" class="btn-secondary relative z-10 min-h-11 flex-1 scroll-my-28 !px-3">{{ resolvingRequest() === request.id ? 'Guardando…' : 'Rechazar' }}</button>
+                  <button type="button" (click)="resolve(request, 'approved')" [disabled]="resolvingRequest() !== ''" class="btn-primary relative z-10 min-h-11 flex-1 scroll-my-28 !px-3">{{ resolvingRequest() === request.id ? 'Guardando…' : 'Aprobar' }}</button>
+                </div>
+              }
+            </article>
+          } @empty {
+            <div class="rounded-[1.5rem] border border-dashed border-stone-300 bg-white p-10 text-center lg:col-span-2">
+              <p class="font-display text-xl font-bold">No hay peticiones con estos filtros</p>
+              <p class="mt-2 text-sm text-stone-500">Prueba con otro estado o elimina el texto de búsqueda.</p>
+              <button type="button" (click)="requestStatusFilter.set('all'); requestSearch = ''" class="mt-4 text-sm font-bold text-coral-600">Limpiar filtros</button>
+            </div>
+          }
+        </div>
       }
     </section>
   }
 
   @if (view() === 'calendar') {
-    <section class="mt-7 overflow-hidden rounded-[2rem] border border-stone-200 bg-white shadow-sm">
-      <div class="flex items-center justify-between border-b border-stone-100 px-5 py-5 sm:px-8">
-        <button type="button" (click)="moveMonth(-1)" class="btn-secondary !min-h-10 !px-4">←</button>
-        <h2 class="font-display text-xl font-bold capitalize">{{ monthLabel() }}</h2>
-        <button type="button" (click)="moveMonth(1)" class="btn-secondary !min-h-10 !px-4">→</button>
+    <section class="mt-7 overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-sm">
+      <div class="flex items-center justify-between border-b border-stone-100 px-4 py-5 sm:px-8">
+        <button type="button" (click)="moveMonth(-1)" class="grid size-10 place-items-center rounded-xl border border-stone-200" aria-label="Mes anterior">←</button>
+        <div class="text-center"><p class="text-xs font-bold uppercase tracking-widest text-coral-600">Equipo</p><h2 class="mt-1 font-display text-xl font-bold capitalize">{{ monthLabel() }}</h2></div>
+        <button type="button" (click)="moveMonth(1)" class="grid size-10 place-items-center rounded-xl border border-stone-200" aria-label="Mes siguiente">→</button>
       </div>
       <div class="grid grid-cols-7 border-b border-stone-100 bg-stone-50 text-center text-xs font-bold uppercase text-stone-400">@for (day of ['L','M','X','J','V','S','D']; track day) { <div class="py-3">{{ day }}</div> }</div>
       <div class="grid grid-cols-7">
         @for (cell of calendarCells(); track cell.key) {
-          <div class="min-h-24 border-b border-r border-stone-100 p-2" [class.bg-stone-50]="!cell.inMonth">
-            <p class="text-xs font-bold" [class.text-stone-300]="!cell.inMonth">{{ cell.date.getDate() }}</p>
-            @if (cell.holiday) { <p class="mt-1 truncate rounded bg-red-50 px-1.5 py-1 text-[10px] font-bold text-red-600">{{ cell.holiday.name }}</p> }
-            @for (request of cell.requests.slice(0,2); track request.id) { <p class="mt-1 truncate rounded px-1.5 py-1 text-[10px] font-bold text-white" [style.background]="typeFor(request)?.color || '#94a3b8'">{{ request.expand?.employee?.name || typeFor(request)?.name }}</p> }
+          <div class="min-h-20 border-b border-r border-stone-100 p-1.5 sm:min-h-28 sm:p-2" [class.bg-stone-50]="!cell.inMonth">
+            <p class="grid size-6 place-items-center rounded-lg text-xs font-bold" [class.text-stone-300]="!cell.inMonth" [class.ring-2]="isToday(cell.key)" [class.ring-coral-400]="isToday(cell.key)">{{ cell.date.getDate() }}</p>
+            @if (cell.holiday) { <p class="mt-1 truncate rounded bg-red-50 px-1.5 py-1 text-[9px] font-bold text-red-600 sm:text-[10px]">{{ cell.holiday.name }}</p> }
+            @for (request of cell.requests.slice(0,2); track request.id) { <p class="mt-1 truncate rounded px-1.5 py-1 text-[9px] font-bold text-white sm:text-[10px]" [style.background]="typeFor(request)?.color || '#94a3b8'">{{ request.expand?.employee?.name || typeFor(request)?.name }}</p> }
           </div>
         }
       </div>
@@ -161,9 +395,53 @@
         <div class="mt-5 space-y-3">@for (period of blackouts(); track period.id) { <div class="rounded-xl bg-amber-50 p-3"><p class="font-semibold">{{ period.name }}</p><p class="mt-1 text-xs text-amber-700">{{ formatDate(period.startDate) }} — {{ formatDate(period.endDate) }}</p></div> }</div>
         <form (ngSubmit)="createBlackout()" class="mt-5 space-y-3"><input [(ngModel)]="blackoutName" name="blackoutName" required class="field-input" placeholder="Campaña de Navidad" /><select [(ngModel)]="blackoutLeaveType" name="blackoutLeaveType" class="field-input"><option value="">Todos los tipos</option>@for (type of leaveTypes(); track type.id) { <option [value]="type.id">{{ type.name }}</option> }</select><input [(ngModel)]="blackoutStart" name="blackoutStart" type="date" required class="field-input" /><input [(ngModel)]="blackoutEnd" name="blackoutEnd" type="date" required class="field-input" /><button class="btn-primary w-full">Bloquear fechas</button></form>
       </section>
-      <section class="rounded-[2rem] border border-stone-200 bg-white p-6">
+      <section class="order-first rounded-[2rem] border border-stone-200 bg-white p-6 xl:order-none">
         <h2 class="font-display text-xl font-bold">Festivos y cupos individuales</h2>
-        <form (ngSubmit)="createHoliday()" class="mt-5 space-y-3"><input [(ngModel)]="holidayName" name="holidayName" required class="field-input" placeholder="Nombre del festivo" /><input [(ngModel)]="holidayDate" name="holidayDate" type="date" required class="field-input" /><button class="btn-primary w-full">Añadir festivo</button></form>
+        <p class="mt-1 text-sm leading-6 text-stone-500">Los festivos se muestran en rojo en los calendarios y no consumen días de ausencia.</p>
+        <form (ngSubmit)="createHoliday()" class="mt-5 space-y-3" [attr.aria-label]="editingHoliday() ? 'Editar festivo' : 'Añadir festivo'">
+          <label class="block"><span class="field-label">Nombre</span><input [(ngModel)]="holidayName" name="holidayName" required maxlength="120" class="field-input" placeholder="Nombre del festivo" /></label>
+          <label class="block"><span class="field-label">Fecha</span><input [(ngModel)]="holidayDate" name="holidayDate" type="date" required class="field-input" /></label>
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <button [disabled]="savingHoliday() !== ''" class="btn-primary flex-1">{{ savingHoliday() ? 'Guardando…' : editingHoliday() ? 'Guardar cambios' : 'Añadir festivo' }}</button>
+            @if (editingHoliday()) { <button type="button" (click)="cancelHolidayEdit()" [disabled]="savingHoliday() !== ''" class="btn-secondary">Cancelar edición</button> }
+          </div>
+        </form>
+        <div class="mt-6 border-t border-stone-100 pt-5">
+          <div class="flex items-end justify-between gap-3">
+            <div><p class="font-display text-lg font-bold">Calendario de festivos</p><p class="mt-1 text-xs text-stone-500">Puedes editar o eliminar los de tu empresa.</p></div>
+            <label class="w-24 shrink-0"><span class="field-label">Año</span><input [(ngModel)]="holidayYear" name="holidayYear" type="number" min="2020" max="2200" class="field-input" /></label>
+          </div>
+          <div class="mt-4 max-h-72 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
+            @for (holiday of holidaysForYear(); track holiday.id) {
+              <article class="scroll-mt-28 rounded-2xl border border-stone-100 bg-stone-50 p-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div class="min-w-0">
+                    <p class="break-words text-sm font-bold">{{ holiday.name }}</p>
+                    <p class="mt-0.5 text-xs text-stone-500">{{ formatDate(holiday.date) }} @if (holiday.scope && holiday.scope !== 'manual') { · {{ holiday.scope === 'autonomico' ? 'Autonómico' : holiday.scope === 'nacional' ? 'Nacional' : holiday.scope === 'provincial' ? 'Provincial' : 'Local' }} }</p>
+                    @if (holiday.sourceUrl) { <a [href]="holiday.sourceUrl" target="_blank" rel="noopener noreferrer" class="relative z-10 mt-1 inline-block text-xs font-semibold text-coral-700 hover:underline">{{ holiday.source || 'Fuente oficial' }} ↗</a> }
+                  </div>
+                  <div class="flex w-full shrink-0 justify-end gap-1 sm:w-auto">
+                    <button type="button" (click)="editHoliday(holiday)" [disabled]="savingHoliday() !== ''" class="relative z-10 inline-flex min-h-11 scroll-my-28 items-center rounded-lg px-3 py-2 text-sm font-bold text-coral-700 hover:bg-coral-50 disabled:opacity-50" [attr.aria-label]="'Editar festivo ' + holiday.name">Editar</button>
+                    @if (pendingHolidayDeletion() !== holiday.id) {
+                      <button type="button" (click)="requestHolidayDeletion(holiday)" [disabled]="savingHoliday() !== ''" class="relative z-10 inline-flex min-h-11 scroll-my-28 items-center rounded-lg px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-50" [attr.aria-label]="'Eliminar festivo ' + holiday.name">Eliminar</button>
+                    }
+                  </div>
+                </div>
+                @if (pendingHolidayDeletion() === holiday.id) {
+                  <div class="mt-3 rounded-xl border border-red-100 bg-red-50 p-3" role="alert">
+                    <p class="text-xs font-semibold text-red-800">¿Eliminar este festivo del calendario?</p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      <button type="button" (click)="deleteHoliday(holiday)" [disabled]="savingHoliday() !== ''" class="rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{{ savingHoliday() === holiday.id ? 'Eliminando…' : 'Confirmar eliminación' }}</button>
+                      <button type="button" (click)="cancelHolidayDeletion()" [disabled]="savingHoliday() !== ''" class="rounded-lg bg-white px-3 py-2 text-xs font-bold text-stone-600">Conservar festivo</button>
+                    </div>
+                  </div>
+                }
+              </article>
+            } @empty {
+              <p class="rounded-2xl bg-stone-50 px-4 py-6 text-center text-sm text-stone-500">No hay festivos configurados para {{ holidayYear }}.</p>
+            }
+          </div>
+        </div>
         <div class="mt-7 border-t border-stone-100 pt-6">
           <div class="flex items-end justify-between gap-3">
             <div><p class="font-display text-lg font-bold">Cupo anual por persona</p><p class="mt-1 text-xs leading-5 text-stone-500">Fija los días contractuales. El arrastre y los ajustes se conservan por separado.</p></div>
@@ -200,3 +478,119 @@
     </div>
   }
 </div>
+
+@if (formOpen()) {
+  <div class="fixed inset-0 z-50 flex items-end justify-center bg-stone-950/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-6" (mousedown)="closeRequestFromBackdrop($event)">
+    <section role="dialog" aria-modal="true" aria-labelledby="leave-dialog-title" class="relative flex max-h-[96dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl sm:max-h-[90dvh] sm:rounded-[2rem]">
+      <div class="pointer-events-none absolute left-6 top-6 grid size-12 place-items-center rounded-2xl bg-coral-500 text-white shadow-lg shadow-coral-200 sm:left-8 sm:top-8" aria-hidden="true">
+        <svg viewBox="0 0 24 24" class="size-6 fill-none stroke-current stroke-2"><path d="M7 3v3M17 3v3M4.5 9.5h15M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/><path d="m9 15 2 2 4-5"/></svg>
+      </div>
+      <button type="button" aria-label="Cerrar formulario" (click)="closeRequest()" class="absolute right-5 top-5 z-10 grid size-10 place-items-center rounded-full bg-stone-100 text-xl text-stone-500 transition hover:bg-stone-200">×</button>
+
+      <div class="relative z-0 min-h-0 flex-1 overflow-y-auto px-5 pb-28 pt-24 sm:px-8">
+        <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">{{ assigning() ? 'Gestión de equipo' : 'Mi tiempo libre' }}</p>
+        <h2 id="leave-dialog-title" class="mt-1 font-display text-3xl font-bold">{{ assigning() ? 'Asignar ausencia' : 'Solicitar ausencia' }}</h2>
+        <p class="mt-2 text-sm leading-6 text-stone-500">{{ assigning() ? 'La ausencia quedará registrada como aprobada para la persona seleccionada.' : 'Elige el tipo, la duración y las fechas. Podrás consultar el estado en tu historial.' }}</p>
+
+        <form id="leave-request-form" (ngSubmit)="createRequest()" class="mt-7 space-y-6">
+          @if (assigning()) {
+            <label class="block">
+              <span class="field-label">Persona</span>
+              <select [ngModel]="employee" (ngModelChange)="setRequestEmployee($event)" name="employee" required class="field-input">
+                @for (member of members(); track member.id) { <option [value]="member.id">{{ member.name }}</option> }
+              </select>
+            </label>
+          }
+
+          <label class="block">
+            <span class="field-label">Tipo de ausencia</span>
+            <div class="relative">
+              <span class="pointer-events-none absolute left-4 top-1/2 size-3 -translate-y-1/2 rounded-full" [style.background]="selectedType()?.color || '#f97360'"></span>
+              <select [(ngModel)]="leaveType" name="leaveType" required class="field-input !pl-10">
+                @for (type of requestableLeaveTypes(); track type.id) { <option [value]="type.id">{{ type.name }}</option> }
+                @empty { <option value="" disabled>No hay tipos disponibles</option> }
+              </select>
+            </div>
+          </label>
+
+          <div>
+            <span class="field-label">Duración</span>
+            <div class="grid grid-cols-3 rounded-2xl bg-stone-100 p-1" role="group" aria-label="Duración de la ausencia">
+              <button type="button" (click)="dayPart = 'full'" class="rounded-xl px-2 py-2.5 text-xs font-bold transition sm:text-sm" [class.bg-white]="dayPart === 'full'" [class.shadow-sm]="dayPart === 'full'" [class.text-coral-700]="dayPart === 'full'" [class.text-stone-500]="dayPart !== 'full'">Día completo</button>
+              <button type="button" (click)="dayPart = 'morning'" class="rounded-xl px-2 py-2.5 text-xs font-bold transition sm:text-sm" [class.bg-white]="dayPart === 'morning'" [class.shadow-sm]="dayPart === 'morning'" [class.text-coral-700]="dayPart === 'morning'" [class.text-stone-500]="dayPart !== 'morning'">Mañana</button>
+              <button type="button" (click)="dayPart = 'afternoon'" class="rounded-xl px-2 py-2.5 text-xs font-bold transition sm:text-sm" [class.bg-white]="dayPart === 'afternoon'" [class.shadow-sm]="dayPart === 'afternoon'" [class.text-coral-700]="dayPart === 'afternoon'" [class.text-stone-500]="dayPart !== 'afternoon'">Tarde</button>
+            </div>
+          </div>
+
+          <div class="relative">
+            <span class="field-label">Fechas</span>
+            <button type="button" (click)="toggleDatePicker()" class="flex min-h-12 w-full items-center justify-between rounded-xl border border-stone-200 bg-white px-4 text-left text-sm font-semibold transition hover:border-coral-300" [attr.aria-expanded]="datePickerOpen()">
+              <span class="flex items-center gap-3"><span class="text-coral-500" aria-hidden="true">▣</span><span [class.text-stone-400]="!startDate">{{ requestDateRangeLabel() }}</span></span>
+              <span class="text-stone-400" aria-hidden="true">⌄</span>
+            </button>
+
+            @if (datePickerOpen()) {
+              <div class="relative z-20 mt-2 rounded-2xl border border-stone-200 bg-white p-3 shadow-xl sm:absolute sm:left-0 sm:right-0">
+                <div class="grid grid-cols-2 gap-3">
+                  <label><span class="field-label">Desde</span><input [ngModel]="startDate" (ngModelChange)="updateStartDate($event)" name="startDate" type="date" required class="field-input" /></label>
+                  <label><span class="field-label">Hasta</span><input [ngModel]="endDate" (ngModelChange)="updateEndDate($event)" name="endDate" type="date" required class="field-input" /></label>
+                </div>
+                <div class="mt-4 flex items-center justify-between">
+                  <button type="button" (click)="movePickerMonth(-1)" class="grid size-9 place-items-center rounded-xl border border-stone-200" aria-label="Mes anterior">←</button>
+                  <p class="text-sm font-bold capitalize">{{ pickerMonthLabel() }}</p>
+                  <button type="button" (click)="movePickerMonth(1)" class="grid size-9 place-items-center rounded-xl border border-stone-200" aria-label="Mes siguiente">→</button>
+                </div>
+                <div class="mt-2 grid grid-cols-7 text-center text-[10px] font-bold uppercase text-stone-300">
+                  @for (day of ['L','M','X','J','V','S','D']; track day) { <span class="py-1.5">{{ day }}</span> }
+                </div>
+                <div class="grid grid-cols-7 text-center">
+                  @for (cell of pickerCells(); track cell.key) {
+                    <button type="button" (click)="selectPickerDate(cell.key)" class="mx-auto grid size-8 place-items-center rounded-xl text-xs font-bold transition hover:bg-coral-50"
+                      [disabled]="!cell.inMonth"
+                      [class.invisible]="!cell.inMonth"
+                      [class.bg-coral-500]="isSelectedDate(cell.key)"
+                      [class.text-white]="isSelectedDate(cell.key)"
+                      [class.bg-coral-100]="isInSelectedRange(cell.key)"
+                      [class.text-coral-800]="isInSelectedRange(cell.key)"
+                      [class.ring-2]="isToday(cell.key) && !isSelectedDate(cell.key)"
+                      [class.ring-coral-300]="isToday(cell.key) && !isSelectedDate(cell.key)">
+                      {{ cell.date.getDate() }}
+                    </button>
+                  }
+                </div>
+                <p class="sr-only">Selecciona primero el día de inicio y después el día final.</p>
+              </div>
+            }
+          </div>
+
+          <label class="block">
+            <span class="field-label">Descripción <span class="font-normal text-stone-400">(opcional)</span></span>
+            <textarea [(ngModel)]="reason" name="reason" maxlength="500" rows="3" class="field-input resize-none" placeholder="Añade el contexto que necesite la persona responsable"></textarea>
+          </label>
+
+          <label class="block">
+            <span class="field-label">Documento justificativo @if (!selectedType()?.requiresDocument) { <span class="font-normal text-stone-400">(opcional)</span> }</span>
+            <input type="file" (change)="onAttachment($event)" [required]="selectedType()?.requiresDocument" accept=".pdf,.jpg,.jpeg,.png,.docx" class="field-input file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-2 file:font-bold" />
+            @if (selectedType()?.requiresDocument) { <span class="mt-1 block text-xs font-semibold text-amber-600">Este tipo de ausencia requiere justificante.</span> }
+          </label>
+
+          <aside class="rounded-2xl border border-coral-100 bg-coral-50/60 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="size-3 shrink-0 rounded-full" [style.background]="selectedType()?.color || '#f97360'"></span>
+                <p class="truncate text-sm font-bold">{{ selectedType()?.name || 'Selecciona un tipo' }}</p>
+              </div>
+              <span class="rounded-full bg-white px-3 py-1 text-xs font-bold text-coral-700">{{ requestedDays() }} {{ requestedDays() === 1 ? 'día' : 'días' }}</span>
+            </div>
+            <p class="mt-2 text-xs text-stone-500">{{ selectedEmployeeName() }} · {{ requestDateRangeLabel() }}</p>
+          </aside>
+        </form>
+      </div>
+
+      <footer class="absolute inset-x-0 bottom-0 z-50 flex items-center justify-between gap-3 border-t border-stone-100 bg-white px-5 py-4 shadow-[0_-12px_30px_rgba(28,25,23,0.06)] sm:px-8">
+        <button type="button" (click)="closeRequest()" class="text-sm font-bold text-stone-500 hover:text-stone-800">Cancelar</button>
+        <button type="submit" form="leave-request-form" [disabled]="saving() || requestedDays() === 0 || !leaveType || !startDate || !endDate" class="btn-primary min-w-36">{{ saving() ? 'Guardando…' : assigning() ? 'Asignar ausencia' : 'Enviar solicitud' }}</button>
+      </footer>
+    </section>
+  </div>
+}

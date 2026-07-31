@@ -61,6 +61,7 @@ test('admin configures and applies corporate branding and PWA metadata', async (
   await page.goto('/ajustes');
   await expect(page.getByRole('heading', { name: 'Identidad corporativa' })).toBeVisible();
 
+  await page.getByLabel('NIF', { exact: true }).fill(' TEST000001 ');
   await page.getByLabel('Color principal hexadecimal').fill('#2457c5');
   await page.getByLabel('Color secundario hexadecimal').fill('#172554');
   await page.getByLabel('Nombre de la PWA').fill('Jornada Centro Aura');
@@ -130,6 +131,15 @@ test('admin configures and applies corporate branding and PWA metadata', async (
   ).toEqual({ width: 32, height: 32 });
 
   const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
+  const organizationResponse = await request.get(
+    `${apiBase}/collections/organizations/records/${admin.record.organization}`,
+    { headers: { Authorization: admin.token } },
+  );
+  expect(organizationResponse.ok(), await organizationResponse.text()).toBeTruthy();
+  expect((await organizationResponse.json()) as { taxId: string }).toMatchObject({
+    taxId: 'TEST000001',
+  });
+
   const manifestResponse = await request.get(
     `http://127.0.0.1:8090/api/openjornada/branding/${admin.record.organization}/manifest.json`,
   );
@@ -166,7 +176,7 @@ test('admin configures and applies corporate branding and PWA metadata', async (
     `${apiBase}/collections/organizations/records/${employee.record.organization}`,
     {
       headers: { Authorization: employee.token },
-      data: { brandPrimaryColor: '#000000' },
+      data: { taxId: 'FORBIDDEN001', brandPrimaryColor: '#000000' },
     },
   );
   expect([403, 404]).toContain(forbiddenUpdate.status());

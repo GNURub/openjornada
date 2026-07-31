@@ -68,6 +68,10 @@ test('an admin can issue, use and revoke an MCP token', async ({ page, request }
   await signIn(page);
   await page.goto('/integraciones');
   await expect(page.getByRole('heading', { name: 'Acceso MCP' })).toBeVisible();
+  const codexSection = page.getByRole('heading', { name: 'Conectar Codex' }).locator('..');
+  await expect(codexSection.locator('code')).toContainText(
+    'url = "http://127.0.0.1:4217/mcp"',
+  );
   await page.getByLabel('Nombre descriptivo').fill(`Playwright ${Date.now()}`);
   await page.getByRole('button', { name: 'Crear token' }).click();
   const tokenInput = page.getByLabel('Token MCP recién creado');

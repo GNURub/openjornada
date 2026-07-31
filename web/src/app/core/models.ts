@@ -53,6 +53,69 @@ export interface OrganizationRecord extends RecordModel {
   pwaIcon: string;
   manualTimeApprovalRequired: boolean;
   timeCorrectionApprovalRequired: boolean;
+  addressLine1: string;
+  addressLine2: string;
+  postalCode: string;
+  countryCode: 'ES' | '';
+  autonomousCommunityCode: string;
+  autonomousCommunitySlug: string;
+  autonomousCommunityName: string;
+  provinceCode: string;
+  provinceSlug: string;
+  provinceName: string;
+  municipalityIne: string;
+  municipalitySlug: string;
+  municipalityName: string;
+  locationUpdatedAt: string;
+}
+
+export interface LaborCalendarCommunity {
+  code: string;
+  slug: string;
+  name: string;
+}
+
+export interface LaborCalendarProvince {
+  code: string;
+  slug: string;
+  name: string;
+}
+
+export interface LaborCalendarMunicipality {
+  ine: string;
+  slug: string;
+  name: string;
+}
+
+export interface LaborCalendarCatalog<T> {
+  items: T[];
+  provider: { name: string; url: string };
+}
+
+export interface LaborCalendarPreviewHoliday {
+  date: string;
+  name: string;
+  scope: 'nacional' | 'autonomico' | 'provincial' | 'local';
+  source: string;
+  sourceUrl: string;
+  existing: boolean;
+  existingName?: string;
+}
+
+export interface LaborCalendarPreview {
+  year: number;
+  location: {
+    communityName: string;
+    provinceName: string;
+    municipalityName: string;
+    municipalityIne: string;
+  };
+  generatedAt: string;
+  confidence: string;
+  warnings: string[];
+  disclaimer: string;
+  items: LaborCalendarPreviewHoliday[];
+  provider: { name: string; url: string };
 }
 
 export interface PrivacyNotice {
@@ -360,6 +423,11 @@ export interface PublicHolidayRecord extends RecordModel {
   organization: string;
   name: string;
   date: string;
+  scope: 'nacional' | 'autonomico' | 'provincial' | 'local' | 'manual' | '';
+  source: string;
+  sourceUrl: string;
+  importProvider: 'calendariosnacionales' | '';
+  importedAt: string;
 }
 
 export interface ExpenseCategoryRecord extends RecordModel {

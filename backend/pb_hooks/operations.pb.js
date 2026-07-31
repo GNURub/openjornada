@@ -7,8 +7,11 @@ onRecordUpdateRequest((e) => {
   ) {
     throw new ForbiddenError("Sólo administración puede cambiar la empresa.");
   }
-  const original = e.record.original();
-  e.record.set("taxId", original.getString("taxId"));
+  const taxId = e.record.getString("taxId").trim();
+  if (!taxId) {
+    throw new BadRequestError("El NIF de la empresa es obligatorio.");
+  }
+  e.record.set("taxId", taxId);
   const colorPattern = /^#[0-9a-fA-F]{6}$/;
   for (const field of ["brandPrimaryColor", "brandSecondaryColor"]) {
     const color = e.record.getString(field);

@@ -94,6 +94,14 @@ export function availableLeaveDays(
   return Math.max(0, allowance + carriedOver + adjustment - approvedDays);
 }
 
+export function hasConfiguredLeaveDays(
+  allowance: number,
+  carriedOver: number,
+  adjustment: number,
+): boolean {
+  return allowance + carriedOver + adjustment > 0;
+}
+
 export function normalizeLeaveAllowance(value: number | string): number | null {
   if (typeof value === 'string' && !value.trim()) return null;
   const allowance = typeof value === 'number' ? value : Number(value.replace(',', '.'));

@@ -58,7 +58,8 @@ la caché PWA.
 
 La pantalla consume `GET/POST /api/openjornada/mcp-tokens` y
 `POST /api/openjornada/mcp-tokens/{id}/revoke`. El protocolo remoto se publica
-en `/mcp`.
+en `/mcp`. El ejemplo de configuración para Codex usa la URL MCP que devuelve
+el servidor, derivada de `PB_PUBLIC_URL`.
 
 ## Control horario
 
@@ -99,6 +100,31 @@ arrastre y de los ajustes excepcionales; el servidor bloquea cambios de empresa,
 persona, tipo o año y audita cada modificación. La estimación de la solicitud y
 la validación de PocketBase usan el horario vigente de la persona: un sábado
 planificado cuenta como vacaciones y un descanso entre semana no se descuenta.
+
+La vista principal de `/ausencias` presenta el saldo disponible, el historial y
+los doce meses del año en un único resumen adaptable. Las solicitudes se crean
+en un modal con selector de jornada completa o media jornada y calendario para
+elegir el rango. Los perfiles `admin` y `manager` conservan una sección
+específica de peticiones del equipo para buscar, filtrar, consultar detalles y
+resolver las que estén pendientes. La persona trabajadora puede consultar todos
+los estados en su historial, abrir justificantes y cancelar una solicitud propia
+mientras continúe pendiente.
+Los festivos aparecen destacados en rojo tanto en el resumen anual como en el
+calendario del equipo. El perfil `admin` puede crearlos, filtrarlos por año,
+editarlos y eliminarlos desde **Políticas y saldos**; el servidor mantiene estas
+operaciones restringidas a la organización del administrador.
+En **Ajustes → Configuración de empresa**, administración puede guardar la
+dirección del centro principal con selectores encadenados de comunidad autónoma,
+provincia y municipio. Al completar la ubicación, la pantalla propone una
+previsualización del calendario laboral aplicable y permite elegir qué fechas
+importar. Las fechas existentes no se sobrescriben y cada alta conserva ámbito,
+fuente y atribución a [Calendarios Nacionales](https://calendariosnacionales.com/es/api/).
+Las respuestas externas se consultan desde el servidor, se validan y se mantienen
+en caché durante seis horas.
+El cupo inicial de **Asuntos propios** es cero. Los tipos cuyo cupo, arrastre y
+ajuste suman cero no aparecen en las tarjetas ni en el selector de nuevas
+solicitudes; administración sigue viéndolos en **Políticas y saldos** para poder
+asignar días.
 
 En el día actual o en uno pasado propio, **Añadir tiempo** abre un editor compacto junto al día,
 con el mismo patrón de entrada rápida para elegir Trabajo o Pausa, indicar desde

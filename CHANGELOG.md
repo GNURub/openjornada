@@ -2,6 +2,47 @@
 
 Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 
+## [0.4.0] - 2026-07-31
+
+### Añadido
+
+- Configuración de la dirección española de la empresa mediante selectores de
+  comunidad autónoma, provincia y municipio.
+- Previsualización e importación selectiva del calendario laboral nacional,
+  autonómico, provincial y local, conservando ámbito, procedencia y auditoría
+  sin sobrescribir festivos existentes.
+- Gestión completa de festivos desde la interfaz, incluida su creación, edición
+  y eliminación manual por administración.
+- Calendario anual de ausencias adaptable, detalle de solicitudes del equipo y
+  cancelación por la persona empleada mientras la petición siga pendiente.
+
+### Cambiado
+
+- Administración puede modificar la razón social y el NIF desde la interfaz;
+  las variables de bootstrap dejan de actuar como configuración permanente.
+- Los asuntos propios parten de cero días y los tipos sin saldo no se ofrecen a
+  la persona empleada, aunque continúan disponibles para administración.
+- El ejemplo para conectar Codex usa `PB_PUBLIC_URL` cuando está configurada y
+  mantiene una URL local segura como alternativa.
+- La experiencia de solicitud, revisión y resolución de ausencias se reorganiza
+  para escritorio, tableta y móvil sin retirar las capacidades existentes.
+
+### Corregido
+
+- Un intervalo cuyo inicio y fin son el mismo día ocupa una sola fecha en el
+  calendario.
+- Responsables y administración conservan el acceso a las peticiones de
+  ausencia y pueden aprobarlas o rechazarlas también desde pantallas pequeñas.
+- Se admite configurar en cero tanto vacaciones como asuntos propios sin fallos
+  de validación ni saldos engañosos en la interfaz.
+
+### Seguridad y cumplimiento
+
+- La importación de festivos se ejecuta en el servidor con proveedor fijo,
+  validación de rutas y datos, límites de respuesta, timeout y caché.
+- Sólo administración puede consultar o importar catálogos laborales; cada
+  operación permanece aislada por empresa y queda registrada en auditoría.
+
 ## [0.3.0] - 2026-07-31
 
 ### Añadido
@@ -42,6 +83,7 @@ Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 - Las preservaciones legales excluyen los registros afectados de cualquier
   futura depuración; no se incorpora una purga automática.
 
+[0.4.0]: https://github.com/GNURub/openjornada/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/GNURub/openjornada/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/GNURub/openjornada/releases/tag/v0.2.0
 [0.1.0]: https://github.com/GNURub/openjornada/releases/tag/v0.1.0

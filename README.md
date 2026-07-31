@@ -26,7 +26,7 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
   aprobación, con tipos de pausa remunerados o no remunerados.
 - Correcciones de jornada con aprobación y trazabilidad inmutable.
 - Ausencias con tipos, cupos anuales distintos por persona, saldos, arrastres,
-  ajustes, festivos, medias jornadas, bloqueos, justificantes, calendario,
+  ajustes, festivos manuales o importados por ubicación española, medias jornadas, bloqueos, justificantes, calendario,
   asignación y aprobación. Los días descontados respetan el horario vigente de
   cada persona, incluidos sábados laborables y días libres entre semana.
 - Gastos con categorías, recibos protegidos, revisión, aprobación y pago.
@@ -213,7 +213,7 @@ instancia. Consulta la
 | `PB_MCP_ENABLED`              | No              | Activa MCP; usa `false` como corte de emergencia. Por defecto está activo.    |
 | `PB_MCP_INTERNAL_URL`         | No              | URL HTTP interna de PocketBase; sólo acepta `127.0.0.1`.                      |
 | `PB_ORGANIZATION_NAME`        | Sí              | Empresa creada durante el bootstrap inicial.                                  |
-| `PB_ORGANIZATION_TAX_ID`      | Sí              | Identificador único usado para un bootstrap idempotente.                      |
+| `PB_ORGANIZATION_TAX_ID`      | Sí              | NIF usado al crear la empresa inicial; después se gestiona desde la UI.        |
 | `PB_TIMEZONE`                 | Sí              | Zona IANA, por ejemplo `Europe/Madrid`.                                       |
 | `PB_BOOTSTRAP_ADMIN_EMAIL`    | Sí              | Correo de la primera cuenta administradora.                                   |
 | `PB_BOOTSTRAP_ADMIN_PASSWORD` | Sí              | Contraseña inicial robusta.                                                   |
@@ -230,7 +230,9 @@ instancia. Consulta la
 | `PB_DEMO_PASSWORD`            | Demo            | Contraseña de la empleada de ejemplo.                                         |
 
 Las variables de bootstrap crean registros si no existen; no sobrescriben
-contraseñas ni datos ya guardados.
+contraseñas ni datos ya guardados. En instalaciones existentes, la empresa se
+resuelve mediante la cuenta administradora inicial, por lo que cambiar el NIF
+desde la UI no obliga a mantener sincronizado `PB_ORGANIZATION_TAX_ID`.
 
 ### Correo SMTP
 

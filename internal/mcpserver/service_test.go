@@ -58,6 +58,24 @@ func TestSignValueIsBoundToKeyAndPayload(t *testing.T) {
 	}
 }
 
+func TestMCPURLFromPublicURL(t *testing.T) {
+	tests := map[string]struct {
+		publicURL string
+		want      string
+	}{
+		"absolute URL":   {publicURL: "https://jornada.example.com", want: "https://jornada.example.com/mcp"},
+		"trailing slash": {publicURL: " https://jornada.example.com/ ", want: "https://jornada.example.com/mcp"},
+		"empty fallback": {publicURL: "", want: "/mcp"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := mcpURLFromPublicURL(test.publicURL); got != test.want {
+				t.Fatalf("mcpURLFromPublicURL(%q) = %q, want %q", test.publicURL, got, test.want)
+			}
+		})
+	}
+}
+
 func TestToolCatalogNamesAreUniqueAndExplicit(t *testing.T) {
 	seen := map[string]bool{}
 	for _, tool := range toolCatalog() {

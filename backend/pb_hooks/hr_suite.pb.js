@@ -1,104 +1,7 @@
 onBootstrap((e) => {
   e.next()
   try {
-    e.app.findCollectionByNameOrId("leave_types")
-    const seedRecord = (collectionName, lookupFilter, params, values) => {
-      try {
-        return e.app.findFirstRecordByFilter(collectionName, lookupFilter, params)
-      } catch (_) {
-        const record = new Record(e.app.findCollectionByNameOrId(collectionName))
-        for (const key of Object.keys(values)) record.set(key, values[key])
-        e.app.save(record)
-        return record
-      }
-    }
-    const seedOrganization = (organization) => {
-      const defaults = [
-        ["vacation", "Vacaciones", "#f97360", true, true, false],
-        ["medical", "Consulta médica", "#38bdf8", false, true, true],
-        ["personal", "Asuntos propios", "#a78bfa", true, true, false],
-        ["other", "Otro permiso", "#94a3b8", false, true, false],
-      ]
-      const types = {}
-      for (const item of defaults) {
-        types[item[0]] = seedRecord(
-          "leave_types",
-          "organization = {:organization} && code = {:code}",
-          { organization: organization.id, code: item[0] },
-          {
-            organization: organization.id,
-            code: item[0],
-            name: item[1],
-            color: item[2],
-            deductsBalance: item[3],
-            requiresApproval: item[4],
-            requiresDocument: item[5],
-            active: true,
-          },
-        )
-      }
-      const categories = [
-        ["Transporte", "#38bdf8", 150],
-        ["Comidas", "#f59e0b", 80],
-        ["Material", "#a78bfa", 500],
-        ["Formación", "#10b981", 1000],
-        ["Otros", "#94a3b8", 250],
-      ]
-      for (const item of categories) {
-        seedRecord(
-          "expense_categories",
-          "organization = {:organization} && name = {:name}",
-          { organization: organization.id, name: item[0] },
-          {
-            organization: organization.id,
-            name: item[0],
-            color: item[1],
-            limitAmount: item[2],
-            active: true,
-          },
-        )
-      }
-      const year = new Date().getUTCFullYear()
-      const users = e.app.findRecordsByFilter(
-        "users",
-        "organization = {:organization} && active = true",
-        "name",
-        500,
-        0,
-        { organization: organization.id },
-      )
-      for (const user of users) {
-        for (const item of [
-          [types.vacation.id, 22],
-          [types.personal.id, 2],
-        ]) {
-          seedRecord(
-            "leave_balances",
-            "employee = {:employee} && leaveType = {:leaveType} && year = {:year}",
-            { employee: user.id, leaveType: item[0], year },
-            {
-              organization: organization.id,
-              employee: user.id,
-              leaveType: item[0],
-              year,
-              allowance: item[1],
-              carriedOver: 0,
-              adjustment: 0,
-            },
-          )
-        }
-      }
-    }
-    const organizations = e.app.findRecordsByFilter(
-      "organizations",
-      "id != ''",
-      "name",
-      200,
-      0,
-    )
-    for (const organization of organizations) {
-      seedOrganization(organization)
-    }
+    require(`${__hooks}/hr_suite_helpers.js`).seedOrganizations(e.app)
   } catch (_) {
     // The first bootstrap can run before migrations are applied.
   }
@@ -106,31 +9,10 @@ onBootstrap((e) => {
 
 onRecordAfterCreateSuccess((e) => {
   try {
-    const year = new Date().getUTCFullYear()
-    for (const config of [["vacation", 22], ["personal", 2]]) {
-      const type = e.app.findFirstRecordByFilter(
-        "leave_types",
-        "organization = {:organization} && code = {:code}",
-        { organization: e.record.getString("organization"), code: config[0] },
-      )
-      try {
-        e.app.findFirstRecordByFilter(
-          "leave_balances",
-          "employee = {:employee} && leaveType = {:leaveType} && year = {:year}",
-          { employee: e.record.id, leaveType: type.id, year },
-        )
-      } catch (_) {
-        const balance = new Record(e.app.findCollectionByNameOrId("leave_balances"))
-        balance.set("organization", e.record.getString("organization"))
-        balance.set("employee", e.record.id)
-        balance.set("leaveType", type.id)
-        balance.set("year", year)
-        balance.set("allowance", config[1])
-        balance.set("carriedOver", 0)
-        balance.set("adjustment", 0)
-        e.app.save(balance)
-      }
-    }
+    require(`${__hooks}/hr_suite_helpers.js`).ensureUserDefaultLeaveBalances(
+      e.app,
+      e.record,
+    )
   } catch (error) {
     console.log("No se pudieron inicializar los saldos de la persona:", error)
   }

@@ -4,6 +4,7 @@ import {
   countRequestedDays,
   countScheduledDays,
   findLeaveConflicts,
+  hasConfiguredLeaveDays,
   normalizeLeaveAllowance,
 } from './leave-calculations';
 import type { LeaveRequestRecord, WorkScheduleRecord } from './models';
@@ -114,6 +115,14 @@ describe('leave calculations', () => {
     expect(normalizeLeaveAllowance(-0.5)).toBeNull();
     expect(normalizeLeaveAllowance(22.25)).toBeNull();
     expect(normalizeLeaveAllowance(366.5)).toBeNull();
+  });
+
+  it('only exposes balances with configured leave days', () => {
+    expect(hasConfiguredLeaveDays(0, 0, 0)).toBe(false);
+    expect(hasConfiguredLeaveDays(2, 0, 0)).toBe(true);
+    expect(hasConfiguredLeaveDays(0, 1, 0)).toBe(true);
+    expect(hasConfiguredLeaveDays(0, 0, 0.5)).toBe(true);
+    expect(hasConfiguredLeaveDays(1, 0, -1)).toBe(false);
   });
 
   it('classifies approved and pending conflicts from other employees', () => {

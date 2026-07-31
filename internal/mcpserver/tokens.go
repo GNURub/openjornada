@@ -43,7 +43,10 @@ func (s *Service) listTokens(e *core.RequestEvent) error {
 	for _, record := range records {
 		items = append(items, s.tokenView(record, ""))
 	}
-	return e.JSON(http.StatusOK, map[string]any{"items": items})
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":  items,
+		"mcpUrl": s.publicMCPURL(),
+	})
 }
 
 func (s *Service) createToken(e *core.RequestEvent) error {

@@ -121,6 +121,33 @@ async function apiCreateEmployee(
   };
 }
 
+async function apiCreateManager(
+  request: import('@playwright/test').APIRequestContext,
+  adminToken: string,
+  organization: string,
+  suffix: string,
+): Promise<{ email: string; password: string }> {
+  const email = `responsable-ausencias-${suffix}@example.com`;
+  const password = 'ManagerPassword123!';
+  const response = await request.post('http://127.0.0.1:8090/api/collections/users/records', {
+    headers: { Authorization: adminToken },
+    data: {
+      organization,
+      name: `Responsable ${suffix}`,
+      email,
+      password,
+      passwordConfirm: password,
+      employeeCode: `MGR-${suffix}`,
+      jobTitle: 'Responsable',
+      weeklyHours: 40,
+      role: 'manager',
+      active: true,
+    },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  return { email, password };
+}
+
 test('an employee can sign in and start the workday', async ({ page, request }, testInfo) => {
   const admin = await apiSignIn(request, 'admin@example.com', 'TestPassword123!');
   const employee = await apiCreateEmployee(
@@ -280,10 +307,6 @@ test('a leave request can be submitted, approved and notified', async ({
     start.setDate(start.getDate() + 1);
   }
   const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  while (end.getDay() === 0 || end.getDay() === 6) {
-    end.setDate(end.getDate() + 1);
-  }
   const toDateInput = (date: Date) =>
     [
       date.getFullYear(),
@@ -294,13 +317,33 @@ test('a leave request can be submitted, approved and notified', async ({
 
   await signIn(page, 'empleada@example.com', 'DemoPassword123!');
   await page.goto('/ausencias');
-  await page.getByRole('button', { name: 'Nueva solicitud' }).click();
+  await page.getByRole('button', { name: 'Solicitar ausencia' }).first().click();
+  await expect(page.getByRole('dialog', { name: 'Solicitar ausencia' })).toBeVisible();
+  await expect(
+    page.getByRole('combobox', { name: 'Tipo de ausencia' }).getByRole('option', {
+      name: 'Asuntos propios',
+    }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/Asuntos propios · \d{4}/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Selecciona las fechas' }).click();
   await page.getByLabel('Desde').fill(toDateInput(start));
   await page.getByLabel('Hasta').fill(toDateInput(end));
-  await page.getByLabel('Comentario').fill(reason);
-  await page.getByRole('button', { name: 'Enviar', exact: true }).click();
+  await page.getByLabel('Descripción').fill(reason);
+  await page.getByRole('button', { name: 'Enviar solicitud', exact: true }).click();
 
   await expect(page.getByText('Solicitud enviada.')).toBeVisible();
+  const selectedDate = toDateInput(start);
+  const previousDate = new Date(start);
+  previousDate.setDate(previousDate.getDate() - 1);
+  const annualCalendar = page.locator('section[aria-labelledby="annual-calendar-title"]');
+  await expect(annualCalendar.locator(`[data-date="${selectedDate}"]`)).toHaveAttribute(
+    'data-request-count',
+    '1',
+  );
+  await expect(annualCalendar.locator(`[data-date="${toDateInput(previousDate)}"]`)).toHaveAttribute(
+    'data-request-count',
+    '0',
+  );
   await expect(
     page.locator('article').filter({ hasText: reason }).getByText('Pendiente'),
   ).toBeVisible();
@@ -339,6 +382,29 @@ test('a leave request can be submitted, approved and notified', async ({
   const personalType = leaveTypes.items.find((leaveType) => leaveType.code === 'personal');
   expect(vacationType).toBeTruthy();
   expect(personalType).toBeTruthy();
+  const personalBalanceResponse = await apiRequest.get(
+    'http://127.0.0.1:8090/api/collections/leave_balances/records',
+    {
+      headers: { Authorization: admin.token },
+      params: {
+        filter: `employee = '${approvedEmployee.id}' && leaveType = '${personalType!.id}'`,
+        fields: 'id,allowance',
+      },
+    },
+  );
+  expect(personalBalanceResponse.ok(), await personalBalanceResponse.text()).toBeTruthy();
+  const personalBalances = (await personalBalanceResponse.json()) as {
+    items: Array<{ id: string; allowance: number }>;
+  };
+  expect(personalBalances.items[0]?.allowance).toBe(0);
+  const enablePersonalBalance = await apiRequest.patch(
+    `http://127.0.0.1:8090/api/collections/leave_balances/records/${personalBalances.items[0].id}`,
+    {
+      headers: { Authorization: admin.token },
+      data: { allowance: 1 },
+    },
+  );
+  expect(enablePersonalBalance.ok(), await enablePersonalBalance.text()).toBeTruthy();
 
   const approvedConflictResponse = await apiRequest.post(
     'http://127.0.0.1:8090/api/collections/leave_requests/records',
@@ -385,7 +451,12 @@ test('a leave request can be submitted, approved and notified', async ({
 
   await changeAccount(page, 'admin@example.com', 'TestPassword123!');
   await page.goto('/ausencias');
-  const request = page.locator('article').filter({ hasText: reason });
+  await page.getByRole('button', { name: /Peticiones del equipo/ }).click();
+  await expect(page.getByRole('heading', { name: 'Peticiones de ausencia' })).toBeVisible();
+  const request = page
+    .locator('article')
+    .filter({ hasText: reason })
+    .filter({ has: page.getByRole('button', { name: 'Aprobar' }) });
   await expect(request.getByText('Marina Estética')).toBeVisible();
   const approvedWarning = request.getByLabel('Ausencias aprobadas coincidentes');
   await expect(approvedWarning.getByText('1 ausencia aprobada coincidente')).toBeVisible();
@@ -401,9 +472,69 @@ test('a leave request can be submitted, approved and notified', async ({
     page.locator('article').filter({ hasText: reason }).getByText('Aprobada', { exact: true }),
   ).toBeVisible();
 
+  const manager = await apiCreateManager(
+    apiRequest,
+    admin.token,
+    admin.record.organization,
+    suffix,
+  );
+  await changeAccount(page, manager.email, manager.password);
+  await page.goto('/ausencias');
+  await page.getByRole('button', { name: /Peticiones del equipo/ }).click();
+  const approvedRequest = page.locator('article').filter({ hasText: reason });
+  await expect(approvedRequest.getByText('Marina Estética')).toBeVisible();
+  await expect(approvedRequest.getByText('Aprobada', { exact: true })).toBeVisible();
+
   await changeAccount(page, 'empleada@example.com', 'DemoPassword123!');
   await page.goto('/avisos');
   await expect(page.getByText('Solicitud de ausencia aprobada').first()).toBeVisible();
+  await page.goto('/ausencias');
+  const employeeHistory = page.locator('article').filter({ hasText: reason });
+  await expect(employeeHistory.getByText('Aprobada', { exact: true })).toBeVisible();
+  await expect(employeeHistory.getByText('Solicitud aprobada.', { exact: true })).toBeVisible();
+});
+
+test('an employee can cancel a pending leave request from the history', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  const projectOffset =
+    {
+      'desktop-chromium': 80,
+      'tablet-chromium': 90,
+      'mobile-chromium': 100,
+    }[testInfo.project.name] ?? 110;
+  const date = new Date();
+  date.setDate(date.getDate() + projectOffset);
+  while (date.getDay() === 0 || date.getDay() === 6) date.setDate(date.getDate() + 1);
+  const dateValue = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+  const reason = `Cancelar ausencia E2E ${testInfo.project.name}`;
+
+  await signIn(page, 'empleada@example.com', 'DemoPassword123!');
+  await page.goto('/ausencias');
+  await page.getByRole('button', { name: 'Solicitar ausencia' }).first().click();
+  await page.getByRole('button', { name: 'Selecciona las fechas' }).click();
+  await page.getByLabel('Desde').fill(dateValue);
+  await page.getByLabel('Hasta').fill(dateValue);
+  await page.getByLabel('Descripción').fill(reason);
+  await page.getByRole('button', { name: 'Enviar solicitud', exact: true }).click();
+
+  const historyItem = page.locator('article').filter({ hasText: reason });
+  await expect(historyItem.getByText('Pendiente', { exact: true })).toBeVisible();
+  await historyItem.getByRole('button', { name: 'Cancelar solicitud' }).click();
+  await expect(page.getByText('Solicitud cancelada.')).toBeVisible();
+  await expect(
+    page.locator('article').filter({ hasText: reason }).getByText('Cancelada', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator('article').filter({ hasText: reason }).getByRole('button', {
+      name: 'Cancelar solicitud',
+    }),
+  ).toHaveCount(0);
 });
 
 test('an administrator can assign an employee schedule', async ({ page, request }, testInfo) => {

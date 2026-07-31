@@ -11,6 +11,12 @@ import {
 } from '../../core/branding.service';
 import {
   BreakTypeRecord,
+  LaborCalendarCatalog,
+  LaborCalendarCommunity,
+  LaborCalendarMunicipality,
+  LaborCalendarPreview,
+  LaborCalendarPreviewHoliday,
+  LaborCalendarProvince,
   LegalHoldRecord,
   OrganizationRecord,
   RetentionPreview,
@@ -43,6 +49,20 @@ export class SettingsComponent {
   protected readonly logoError = signal('');
   protected readonly savingBreakType = signal('');
   protected readonly savingLegalHold = signal('');
+  protected readonly communities = signal<LaborCalendarCommunity[]>([]);
+  protected readonly provinces = signal<LaborCalendarProvince[]>([]);
+  protected readonly municipalities = signal<LaborCalendarMunicipality[]>([]);
+  protected readonly calendarPreview = signal<LaborCalendarPreview | null>(null);
+  protected readonly selectedHolidayDates = signal<string[]>([]);
+  protected readonly loadingLocationCatalog = signal('');
+  protected readonly previewingCalendar = signal(false);
+  protected readonly importingCalendar = signal(false);
+  protected readonly calendarError = signal('');
+  protected readonly calendarYears = [
+    new Date().getFullYear(),
+    new Date().getFullYear() + 1,
+  ];
+  protected calendarYear = new Date().getFullYear();
   protected newBreakTypeName = '';
   protected newBreakTypePaid = false;
   protected legalHoldEmployee = '';
@@ -94,15 +114,16 @@ export class SettingsComponent {
     this.logoError.set('');
   }
 
-  protected async save(): Promise<void> {
+  protected async save(): Promise<boolean> {
     const organization = this.organization();
-    if (!organization || this.logoError()) return;
+    if (!organization || this.logoError()) return false;
     this.saving.set(true);
     this.error.set('');
     this.success.set('');
     try {
       const payload: Record<string, unknown> = {
         name: organization.name.trim(),
+        taxId: organization.taxId.trim(),
         timezone: organization.timezone,
         retentionYears: organization.retentionYears,
         privacyContact: organization.privacyContact.trim(),
@@ -119,6 +140,20 @@ export class SettingsComponent {
         pwaShortName: organization.pwaShortName.trim(),
         manualTimeApprovalRequired: organization.manualTimeApprovalRequired,
         timeCorrectionApprovalRequired: organization.timeCorrectionApprovalRequired,
+        addressLine1: organization.addressLine1.trim(),
+        addressLine2: organization.addressLine2.trim(),
+        postalCode: organization.postalCode.trim(),
+        countryCode: 'ES',
+        autonomousCommunityCode: organization.autonomousCommunityCode,
+        autonomousCommunitySlug: organization.autonomousCommunitySlug,
+        autonomousCommunityName: organization.autonomousCommunityName,
+        provinceCode: organization.provinceCode,
+        provinceSlug: organization.provinceSlug,
+        provinceName: organization.provinceName,
+        municipalityIne: organization.municipalityIne,
+        municipalitySlug: organization.municipalitySlug,
+        municipalityName: organization.municipalityName,
+        locationUpdatedAt: this.locationComplete() ? new Date().toISOString() : '',
       };
       if (this.logoFile && this.iconFile) {
         payload['brandLogo'] = this.logoFile;
@@ -145,15 +180,169 @@ export class SettingsComponent {
       this.iconFile = null;
       this.removeLogo = false;
       this.success.set('Configuración guardada. La identidad corporativa ya está aplicada.');
+      return true;
     } catch (error) {
       this.error.set(
         error instanceof ClientResponseError && error.response?.['message']
           ? String(error.response['message'])
           : 'No se pudo guardar la configuración.',
       );
+      return false;
     } finally {
       this.saving.set(false);
     }
+  }
+
+  protected locationComplete(): boolean {
+    const organization = this.organization();
+    return Boolean(
+      organization?.autonomousCommunitySlug &&
+        organization.provinceSlug &&
+        organization.municipalitySlug,
+    );
+  }
+
+  protected async changeCalendarYear(year: number): Promise<void> {
+    this.calendarYear = year;
+    this.calendarPreview.set(null);
+    this.selectedHolidayDates.set([]);
+    await this.loadCommunities(true);
+    if (this.organization()?.autonomousCommunitySlug) await this.loadProvinces(true);
+    if (this.organization()?.provinceSlug) await this.loadMunicipalities(true);
+  }
+
+  protected async selectCommunity(slug: string): Promise<void> {
+    const organization = this.organization();
+    if (!organization) return;
+    const selected = this.communities().find((item) => item.slug === slug);
+    organization.autonomousCommunitySlug = selected?.slug ?? '';
+    organization.autonomousCommunityCode = selected?.code ?? '';
+    organization.autonomousCommunityName = selected?.name ?? '';
+    organization.provinceSlug = '';
+    organization.provinceCode = '';
+    organization.provinceName = '';
+    organization.municipalitySlug = '';
+    organization.municipalityIne = '';
+    organization.municipalityName = '';
+    this.provinces.set([]);
+    this.municipalities.set([]);
+    this.clearCalendarProposal();
+    if (selected) await this.loadProvinces(false);
+  }
+
+  protected async selectProvince(slug: string): Promise<void> {
+    const organization = this.organization();
+    if (!organization) return;
+    const selected = this.provinces().find((item) => item.slug === slug);
+    organization.provinceSlug = selected?.slug ?? '';
+    organization.provinceCode = selected?.code ?? '';
+    organization.provinceName = selected?.name ?? '';
+    organization.municipalitySlug = '';
+    organization.municipalityIne = '';
+    organization.municipalityName = '';
+    this.municipalities.set([]);
+    this.clearCalendarProposal();
+    if (selected) await this.loadMunicipalities(false);
+  }
+
+  protected selectMunicipality(slug: string): void {
+    const organization = this.organization();
+    if (!organization) return;
+    const selected = this.municipalities().find((item) => item.slug === slug);
+    organization.municipalitySlug = selected?.slug ?? '';
+    organization.municipalityIne = selected?.ine ?? '';
+    organization.municipalityName = selected?.name ?? '';
+    this.clearCalendarProposal();
+  }
+
+  protected async saveAndPreviewCalendar(): Promise<void> {
+    if (!this.locationComplete() || !(await this.save())) return;
+    await this.previewLaborCalendar();
+  }
+
+  protected async previewLaborCalendar(): Promise<void> {
+    if (!this.locationComplete() || this.previewingCalendar()) return;
+    this.previewingCalendar.set(true);
+    this.calendarError.set('');
+    try {
+      const preview = await this.pb.send<LaborCalendarPreview>(
+        `/api/openjornada/labor-calendar/preview?year=${this.calendarYear}`,
+        { method: 'GET' },
+      );
+      this.calendarPreview.set(preview);
+      this.selectedHolidayDates.set(
+        preview.items.filter((holiday) => !holiday.existing).map((holiday) => holiday.date),
+      );
+    } catch (error) {
+      this.calendarPreview.set(null);
+      this.selectedHolidayDates.set([]);
+      this.calendarError.set(
+        this.responseMessage(error, 'No se pudo preparar el calendario laboral.'),
+      );
+    } finally {
+      this.previewingCalendar.set(false);
+    }
+  }
+
+  protected toggleHolidayDate(date: string, selected: boolean): void {
+    this.selectedHolidayDates.update((dates) =>
+      selected ? [...new Set([...dates, date])] : dates.filter((item) => item !== date),
+    );
+  }
+
+  protected selectAllSuggested(selected: boolean): void {
+    this.selectedHolidayDates.set(
+      selected
+        ? (this.calendarPreview()?.items ?? [])
+            .filter((holiday) => !holiday.existing)
+            .map((holiday) => holiday.date)
+        : [],
+    );
+  }
+
+  protected holidaySelected(date: string): boolean {
+    return this.selectedHolidayDates().includes(date);
+  }
+
+  protected async importLaborCalendar(): Promise<void> {
+    if (!this.selectedHolidayDates().length || this.importingCalendar()) return;
+    this.importingCalendar.set(true);
+    this.calendarError.set('');
+    this.success.set('');
+    try {
+      const result = await this.pb.send<{ imported: number; skipped: number }>(
+        '/api/openjornada/labor-calendar/import',
+        {
+          method: 'POST',
+          body: { year: this.calendarYear, dates: this.selectedHolidayDates() },
+        },
+      );
+      await this.previewLaborCalendar();
+      this.success.set(
+        `${result.imported} festivos importados${result.skipped ? `; ${result.skipped} ya existían` : ''}.`,
+      );
+    } catch (error) {
+      this.calendarError.set(this.responseMessage(error, 'No se pudo importar el calendario.'));
+    } finally {
+      this.importingCalendar.set(false);
+    }
+  }
+
+  protected holidayScopeLabel(scope: LaborCalendarPreviewHoliday['scope']): string {
+    return {
+      nacional: 'Nacional',
+      autonomico: 'Autonómico',
+      provincial: 'Provincial',
+      local: 'Local',
+    }[scope];
+  }
+
+  protected holidayPreviewDate(value: string): string {
+    return new Intl.DateTimeFormat('es-ES', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    }).format(new Date(`${value}T12:00:00`));
   }
 
   protected async createBreakType(): Promise<void> {
@@ -280,6 +469,66 @@ export class SettingsComponent {
       : 'Sin límite';
   }
 
+  private clearCalendarProposal(): void {
+    this.calendarPreview.set(null);
+    this.selectedHolidayDates.set([]);
+    this.calendarError.set('');
+  }
+
+  private async loadCommunities(_preserveSelection: boolean): Promise<void> {
+    this.loadingLocationCatalog.set('communities');
+    this.calendarError.set('');
+    try {
+      const response = await this.pb.send<LaborCalendarCatalog<LaborCalendarCommunity>>(
+        `/api/openjornada/labor-calendar/communities?year=${this.calendarYear}`,
+        { method: 'GET' },
+      );
+      this.communities.set(response.items);
+    } catch (error) {
+      this.calendarError.set(
+        this.responseMessage(error, 'No se pudieron cargar las comunidades autónomas.'),
+      );
+    } finally {
+      this.loadingLocationCatalog.set('');
+    }
+  }
+
+  private async loadProvinces(_preserveSelection: boolean): Promise<void> {
+    const community = this.organization()?.autonomousCommunitySlug;
+    if (!community) return;
+    this.loadingLocationCatalog.set('provinces');
+    this.calendarError.set('');
+    try {
+      const response = await this.pb.send<LaborCalendarCatalog<LaborCalendarProvince>>(
+        `/api/openjornada/labor-calendar/provinces?year=${this.calendarYear}&community=${encodeURIComponent(community)}`,
+        { method: 'GET' },
+      );
+      this.provinces.set(response.items);
+    } catch (error) {
+      this.calendarError.set(this.responseMessage(error, 'No se pudieron cargar las provincias.'));
+    } finally {
+      this.loadingLocationCatalog.set('');
+    }
+  }
+
+  private async loadMunicipalities(_preserveSelection: boolean): Promise<void> {
+    const organization = this.organization();
+    if (!organization?.autonomousCommunitySlug || !organization.provinceSlug) return;
+    this.loadingLocationCatalog.set('municipalities');
+    this.calendarError.set('');
+    try {
+      const response = await this.pb.send<LaborCalendarCatalog<LaborCalendarMunicipality>>(
+        `/api/openjornada/labor-calendar/municipalities?year=${this.calendarYear}&community=${encodeURIComponent(organization.autonomousCommunitySlug)}&province=${encodeURIComponent(organization.provinceSlug)}`,
+        { method: 'GET' },
+      );
+      this.municipalities.set(response.items);
+    } catch (error) {
+      this.calendarError.set(this.responseMessage(error, 'No se pudieron cargar los municipios.'));
+    } finally {
+      this.loadingLocationCatalog.set('');
+    }
+  }
+
   private async load(): Promise<void> {
     const organizationId = this.auth.user()?.organization;
     if (!organizationId) {
@@ -302,6 +551,20 @@ export class SettingsComponent {
       record.pwaShortName = record.pwaShortName?.trim() || record.pwaName.slice(0, 20);
       record.manualTimeApprovalRequired = Boolean(record.manualTimeApprovalRequired);
       record.timeCorrectionApprovalRequired = record.timeCorrectionApprovalRequired !== false;
+      record.addressLine1 ??= '';
+      record.addressLine2 ??= '';
+      record.postalCode ??= '';
+      record.countryCode = 'ES';
+      record.autonomousCommunityCode ??= '';
+      record.autonomousCommunitySlug ??= '';
+      record.autonomousCommunityName ??= '';
+      record.provinceCode ??= '';
+      record.provinceSlug ??= '';
+      record.provinceName ??= '';
+      record.municipalityIne ??= '';
+      record.municipalitySlug ??= '';
+      record.municipalityName ??= '';
+      record.locationUpdatedAt ??= '';
       this.organization.set(record);
       const [breakTypes, legalHolds, members] = await Promise.all([
         this.pb.collection('break_types').getFullList({ sort: 'name' }),
@@ -317,6 +580,9 @@ export class SettingsComponent {
       this.breakTypes.set(breakTypes as BreakTypeRecord[]);
       this.legalHolds.set(legalHolds as LegalHoldRecord[]);
       this.members.set(members as UserRecord[]);
+      await this.loadCommunities(true);
+      if (record.autonomousCommunitySlug) await this.loadProvinces(true);
+      if (record.provinceSlug) await this.loadMunicipalities(true);
       await this.loadRetentionPreview();
       this.logoPreview.set(
         record.brandLogo ? this.pb.files.getURL(record, record.brandLogo) : DEFAULT_LOGO_URL,

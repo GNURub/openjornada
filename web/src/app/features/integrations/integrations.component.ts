@@ -5,6 +5,7 @@ import { PocketBaseService } from '../../core/pocketbase.service';
 
 interface TokenListResponse {
   items: McpTokenRecord[];
+  mcpUrl: string;
 }
 
 @Component({
@@ -21,6 +22,13 @@ export class IntegrationsComponent {
   protected readonly error = signal('');
   protected readonly success = signal('');
   protected readonly generatedToken = signal('');
+  protected readonly mcpUrl = signal('https://tu-dominio.example/mcp');
+  protected readonly codexConfig = computed(
+    () => `[mcp_servers.openjornada]
+url = "${this.mcpUrl()}"
+bearer_token_env_var = "OPENJORNADA_MCP_TOKEN"
+default_tools_approval_mode = "writes"`,
+  );
   protected readonly activeTokens = computed(
     () =>
       this.tokens().filter(
@@ -45,6 +53,7 @@ export class IntegrationsComponent {
         method: 'GET',
       });
       this.tokens.set(response.items);
+      if (response.mcpUrl) this.mcpUrl.set(response.mcpUrl);
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudieron cargar los tokens MCP.'));
     } finally {

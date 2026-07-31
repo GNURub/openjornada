@@ -152,6 +152,22 @@ func (s *Service) validOrigin(r *http.Request) bool {
 		strings.EqualFold(parsedOrigin.Host, parsedPublic.Host)
 }
 
+func (s *Service) publicMCPURL() string {
+	publicURL := strings.TrimSpace(os.Getenv("PB_PUBLIC_URL"))
+	if publicURL == "" {
+		publicURL = s.app.Settings().Meta.AppURL
+	}
+	return mcpURLFromPublicURL(publicURL)
+}
+
+func mcpURLFromPublicURL(publicURL string) string {
+	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	if publicURL == "" {
+		return "/mcp"
+	}
+	return publicURL + "/mcp"
+}
+
 func (s *Service) authenticate(header string) (*principal, error) {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
