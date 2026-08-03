@@ -19,6 +19,9 @@
     </a>
 
     <nav aria-label="Navegación principal" class="space-y-2">
+      <p class="px-3 pb-1 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-stone-400">
+        Mi espacio
+      </p>
       <a
         routerLink="/"
         [routerLinkActiveOptions]="{ exact: true }"
@@ -160,6 +163,13 @@
         </svg>
         Objetivos
       </a>
+      @if (auth.canViewReports() || auth.canManageTeam()) {
+        <p
+          class="!mt-6 border-t border-stone-200 px-3 pt-5 pb-1 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-stone-400"
+        >
+          Gestión
+        </p>
+      }
       @if (auth.canViewReports()) {
         <a routerLink="/informes" routerLinkActive="!bg-coral-50 !text-coral-700" class="nav-link">
           <svg
