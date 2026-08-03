@@ -15,6 +15,8 @@ export interface UserRecord extends RecordModel {
   employmentType: 'unknown' | 'full_time' | 'part_time';
   contractedWeeklyMinutes: number;
   complementaryHoursAgreement: boolean;
+  scheduleMode: 'scheduled' | 'weekly_flexible';
+  flexibleWeekdays: number[];
   jobTitle: string;
   privacyNoticeAcknowledgedVersion: string;
   privacyNoticeAcknowledgedAt: string;
@@ -307,7 +309,15 @@ export interface TimesheetDay {
 }
 
 export interface TimesheetResponse {
-  employee: { id: string; name: string; employeeCode: string };
+  employee: {
+    id: string;
+    name: string;
+    employeeCode: string;
+    employmentType: UserRecord['employmentType'];
+    scheduleMode: UserRecord['scheduleMode'];
+    contractedWeeklyMinutes: number;
+    flexibleWeekdays: number[];
+  };
   timezone: string;
   from: string;
   to: string;

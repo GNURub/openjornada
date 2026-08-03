@@ -28,6 +28,8 @@ function employee(id: string): UserRecord {
     employmentType: partTime ? 'part_time' : 'full_time',
     contractedWeeklyMinutes: partTime ? 1200 : 2400,
     complementaryHoursAgreement: partTime,
+    scheduleMode: 'scheduled',
+    flexibleWeekdays: [1, 2, 3, 4, 5],
     jobTitle: 'Técnica',
     privacyNoticeAcknowledgedVersion: '',
     privacyNoticeAcknowledgedAt: '',
@@ -40,7 +42,15 @@ function employee(id: string): UserRecord {
 
 function timesheet(id: string): TimesheetResponse {
   return {
-    employee: { id, name: 'Ana/Prueba', employeeCode: 'EMP:01' },
+    employee: {
+      id,
+      name: 'Ana/Prueba',
+      employeeCode: 'EMP:01',
+      employmentType: id === 'employee-2' ? 'part_time' : 'full_time',
+      scheduleMode: 'scheduled',
+      contractedWeeklyMinutes: id === 'employee-2' ? 1200 : 2400,
+      flexibleWeekdays: [1, 2, 3, 4, 5],
+    },
     timezone: 'Europe/Madrid',
     from: '2026-06-01',
     to: '2026-06-02',

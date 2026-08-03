@@ -1033,6 +1033,7 @@ routerAdd(
       authOrganization,
     );
     const timezone = organization.getString("timezone") || "Europe/Madrid";
+    const scheduleMode = helper.scheduleMode(employee);
     const startAt = new DateTime(from + " 00:00:00", timezone);
     const endAt = new DateTime(to + " 23:59:59", timezone);
     if ((endAt.unix() - startAt.unix()) / 86400 > 366) {
@@ -1126,6 +1127,7 @@ routerAdd(
     const today = helper.today(timezone);
     let totalWorked = 0;
     let totalPlanned = 0;
+    let totalOvertime = 0;
     for (
       let cursor = startAt;
       cursor.unix() <= endAt.unix();
@@ -1172,26 +1174,27 @@ routerAdd(
         }
       }
 
-      let selectedSchedule = null;
-      for (const schedule of schedules) {
-        if (
-          !helper.scheduleAppliesOnDate(schedule, date, timezone)
-        ) {
-          continue;
+      const weekday = cursor.time().in(new Timezone(timezone)).weekday();
+      let plannedMinutes = 0;
+      if (scheduleMode === "weekly_flexible") {
+        plannedMinutes = helper.flexibleMinutesForWeekday(employee, weekday);
+      } else {
+        let selectedSchedule = null;
+        for (const schedule of schedules) {
+          if (!helper.scheduleAppliesOnDate(schedule, date, timezone)) continue;
+          let weekdays = [];
+          try {
+            weekdays = JSON.parse(schedule.getString("weekdays") || "[]");
+          } catch (_) {}
+          if (weekdays.indexOf(Number(weekday)) >= 0) {
+            selectedSchedule = schedule;
+            break;
+          }
         }
-        let weekdays = [];
-        try {
-          weekdays = JSON.parse(schedule.getString("weekdays") || "[]");
-        } catch (_) {}
-        const weekday = cursor.time().in(new Timezone(timezone)).weekday();
-        if (weekdays.indexOf(Number(weekday)) >= 0) {
-          selectedSchedule = schedule;
-          break;
-        }
+        plannedMinutes = selectedSchedule
+          ? helper.scheduleMinutes(selectedSchedule)
+          : 0;
       }
-      let plannedMinutes = selectedSchedule
-        ? helper.scheduleMinutes(selectedSchedule)
-        : 0;
       const absences = [];
       let fullAbsence = false;
       let halfAbsences = 0;
@@ -1224,14 +1227,39 @@ routerAdd(
       else if (halfAbsences > 0) plannedMinutes = Math.round(plannedMinutes / 2);
 
       const balanceMinutes = workedMinutes - plannedMinutes;
+      let overtimeMinutes = Math.max(0, balanceMinutes);
+      if (scheduleMode === "weekly_flexible") {
+        const weekStart = new DateTime(
+          helper.mondayKey(date) + " 00:00:00",
+          timezone,
+        );
+        let workedBefore = 0;
+        for (const span of spanResult.spans) {
+          const overlapStart = Math.max(span.startUnix, weekStart.unix());
+          const overlapEnd = Math.min(span.endUnix, cursor.unix());
+          if (overlapEnd > overlapStart) {
+            workedBefore += Math.round((overlapEnd - overlapStart) / 60);
+          }
+        }
+        const ordinaryMinutes = Math.min(
+          workedMinutes,
+          Math.max(
+            0,
+            Math.round(employee.getFloat("contractedWeeklyMinutes")) -
+              workedBefore,
+          ),
+        );
+        overtimeMinutes = Math.max(0, workedMinutes - ordinaryMinutes);
+      }
       totalWorked += workedMinutes;
       totalPlanned += plannedMinutes;
+      totalOvertime += overtimeMinutes;
       days.push({
         date,
         workedMinutes,
         plannedMinutes,
         balanceMinutes,
-        overtimeMinutes: Math.max(0, balanceMinutes),
+        overtimeMinutes,
         holiday: holidayByDate[date] || "",
         absences,
         events: dayEvents,
@@ -1258,6 +1286,10 @@ routerAdd(
         id: employee.id,
         name: employee.getString("name"),
         employeeCode: employee.getString("employeeCode"),
+        employmentType: employee.getString("employmentType"),
+        scheduleMode,
+        contractedWeeklyMinutes: employee.getFloat("contractedWeeklyMinutes"),
+        flexibleWeekdays: helper.flexibleWeekdays(employee),
       },
       timezone,
       from,
@@ -1272,7 +1304,7 @@ routerAdd(
         workedMinutes: totalWorked,
         plannedMinutes: totalPlanned,
         balanceMinutes: totalWorked - totalPlanned,
-        overtimeMinutes: Math.max(0, totalWorked - totalPlanned),
+        overtimeMinutes: totalOvertime,
       },
       days,
     });

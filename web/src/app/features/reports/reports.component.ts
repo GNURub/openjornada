@@ -155,7 +155,7 @@ export class ReportsComponent {
         sort: 'name',
         filter: "role = 'employee'",
         fields:
-          'id,name,email,organization,role,active,employeeCode,weeklyHours,employmentType,contractedWeeklyMinutes,complementaryHoursAgreement,jobTitle',
+          'id,name,email,organization,role,active,employeeCode,weeklyHours,employmentType,contractedWeeklyMinutes,complementaryHoursAgreement,scheduleMode,flexibleWeekdays,jobTitle',
       })) as UserRecord[];
       if (!employees.length) {
         throw new Error('No hay personas empleadas para incluir.');

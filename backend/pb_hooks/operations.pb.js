@@ -136,6 +136,9 @@ onRecordCreateRequest((e) => {
     const first = new Date(startValue);
     const last = new Date(endValue);
     const scheduleHelper = require(`${__hooks}/timesheet_helpers.js`);
+    const employee = e.app.findRecordById("users", employeeId);
+    const scheduleMode = scheduleHelper.scheduleMode(employee);
+    const flexibleWeekdays = scheduleHelper.flexibleWeekdays(employee);
     const timezone =
       e.app.findRecordById("organizations", organization).getString("timezone") ||
       "Europe/Madrid";
@@ -175,27 +178,30 @@ onRecordCreateRequest((e) => {
         cursor.setUTCDate(cursor.getUTCDate() + 1);
         continue;
       }
-      let selectedSchedule = null;
-      for (const schedule of schedules) {
-        if (!scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone)) {
-          continue;
+      let isWorkingDay = flexibleWeekdays.indexOf(weekday) >= 0;
+      if (scheduleMode === "scheduled") {
+        let selectedSchedule = null;
+        for (const schedule of schedules) {
+          if (!scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone)) {
+            continue;
+          }
+          let weekdays = [];
+          try {
+            weekdays = JSON.parse(schedule.getString("weekdays") || "[]");
+          } catch (_) {}
+          if (weekdays.indexOf(Number(weekday)) >= 0) {
+            selectedSchedule = schedule;
+            break;
+          }
         }
-        let weekdays = [];
-        try {
-          weekdays = JSON.parse(schedule.getString("weekdays") || "[]");
-        } catch (_) {}
-        if (weekdays.indexOf(Number(weekday)) >= 0) {
-          selectedSchedule = schedule;
-          break;
-        }
+        isWorkingDay = selectedSchedule
+          ? true
+          : schedules.some((schedule) =>
+              scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone),
+            )
+            ? false
+            : weekday !== 0 && weekday !== 6;
       }
-      const isWorkingDay = selectedSchedule
-        ? true
-        : schedules.some((schedule) =>
-            scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone),
-          )
-          ? false
-          : weekday !== 0 && weekday !== 6;
       if (isWorkingDay) days += 1;
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }

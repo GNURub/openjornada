@@ -93,6 +93,7 @@
           <span class="field-label">Jornada semanal</span>
           <input
             [(ngModel)]="newMember.weeklyHours"
+            (ngModelChange)="updateNewWeeklyHours($event)"
             name="weeklyHours"
             type="number"
             min="1"
@@ -101,6 +102,44 @@
             class="field-input"
           />
         </label>
+        <label class="block">
+          <span class="field-label">Cómputo de jornada</span>
+          <select
+            [(ngModel)]="newMember.scheduleMode"
+            name="scheduleMode"
+            required
+            class="field-input"
+          >
+            <option value="scheduled">Planificación con horarios</option>
+            <option value="weekly_flexible">Cómputo semanal flexible</option>
+          </select>
+        </label>
+        @if (newMember.scheduleMode === 'weekly_flexible') {
+          <fieldset class="rounded-2xl bg-stone-50 px-4 py-3 sm:col-span-2">
+            <legend class="field-label px-1">Días laborables de referencia</legend>
+            <div class="flex flex-wrap gap-2">
+              @for (day of weekdays; track day.value) {
+                <button
+                  type="button"
+                  (click)="toggleNewFlexibleWeekday(day.value)"
+                  [attr.aria-pressed]="newMember.flexibleWeekdays.includes(day.value)"
+                  [attr.aria-label]="'Usar ' + day.name + ' como día laborable de referencia'"
+                  class="grid size-9 place-items-center rounded-full border text-xs font-bold transition"
+                  [class.border-coral-500]="newMember.flexibleWeekdays.includes(day.value)"
+                  [class.bg-coral-500]="newMember.flexibleWeekdays.includes(day.value)"
+                  [class.text-white]="newMember.flexibleWeekdays.includes(day.value)"
+                  [class.border-stone-200]="!newMember.flexibleWeekdays.includes(day.value)"
+                  [class.bg-white]="!newMember.flexibleWeekdays.includes(day.value)"
+                >
+                  {{ day.label }}
+                </button>
+              }
+            </div>
+            <p class="mt-2 text-xs text-stone-500">
+              Se usan para vacaciones y festivos; no fijan una hora de entrada o salida.
+            </p>
+          </fieldset>
+        }
         <label class="block">
           <span class="field-label">Tipo de contrato</span>
           <select
@@ -214,7 +253,10 @@
                       ? 'Tiempo completo'
                       : 'Contrato pendiente de clasificar'
                 }}
-                · {{ member.contractedWeeklyMinutes || 0 }} min / semana
+                · {{ member.contractedWeeklyMinutes || 0 }} min / semana ·
+                {{
+                  member.scheduleMode === 'weekly_flexible' ? 'Cómputo flexible' : 'Con horarios'
+                }}
               </p>
             </div>
             <div class="min-w-32">
@@ -289,6 +331,84 @@
                 </select>
               }
             </div>
+            @if (
+              (auth.user()?.role === 'admin' || auth.user()?.role === 'manager') &&
+              member.role === 'employee'
+            ) {
+              <div class="w-full rounded-2xl bg-stone-50 p-4 sm:ml-15">
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <label class="block">
+                    <span class="field-label">Cómputo de jornada</span>
+                    <select
+                      aria-label="Cómputo de jornada de {{ member.name }}"
+                      [ngModel]="member.scheduleMode || 'scheduled'"
+                      (ngModelChange)="updateMember(member, { scheduleMode: $event })"
+                      class="field-input"
+                    >
+                      <option value="scheduled">Planificación con horarios</option>
+                      <option value="weekly_flexible">Cómputo semanal flexible</option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="field-label">Minutos semanales</span>
+                    <input
+                      #weeklyMinutes
+                      type="number"
+                      min="1"
+                      max="10080"
+                      [value]="member.contractedWeeklyMinutes"
+                      (change)="saveContractedMinutes(member, weeklyMinutes.value)"
+                      class="field-input"
+                      [attr.aria-label]="'Minutos contratados por semana de ' + member.name"
+                    />
+                  </label>
+                  @if (member.employmentType === 'part_time') {
+                    <label class="flex items-center gap-3 rounded-xl bg-white px-4 py-3">
+                      <input
+                        type="checkbox"
+                        [ngModel]="member.complementaryHoursAgreement"
+                        (ngModelChange)="
+                          updateMember(member, { complementaryHoursAgreement: $event })
+                        "
+                        class="size-5 accent-coral-500"
+                      />
+                      <span class="text-sm font-semibold">Pacto de horas complementarias</span>
+                    </label>
+                  }
+                </div>
+                @if (member.scheduleMode === 'weekly_flexible') {
+                  <div class="mt-3">
+                    <p class="field-label">Días laborables de referencia</p>
+                    <div class="flex flex-wrap gap-2">
+                      @for (day of weekdays; track day.value) {
+                        <button
+                          type="button"
+                          (click)="toggleFlexibleWeekday(member, day.value)"
+                          [attr.aria-pressed]="(member.flexibleWeekdays || []).includes(day.value)"
+                          [attr.aria-label]="'Usar ' + day.name + ' para ' + member.name"
+                          class="grid size-9 place-items-center rounded-full border text-xs font-bold transition"
+                          [class.border-coral-500]="
+                            (member.flexibleWeekdays || []).includes(day.value)
+                          "
+                          [class.bg-coral-500]="(member.flexibleWeekdays || []).includes(day.value)"
+                          [class.text-white]="(member.flexibleWeekdays || []).includes(day.value)"
+                          [class.border-stone-200]="
+                            !(member.flexibleWeekdays || []).includes(day.value)
+                          "
+                          [class.bg-white]="!(member.flexibleWeekdays || []).includes(day.value)"
+                        >
+                          {{ day.label }}
+                        </button>
+                      }
+                    </div>
+                    <p class="mt-2 text-xs text-stone-500">
+                      Referencia para ausencias y festivos. Los fichajes se computan contra el total
+                      semanal.
+                    </p>
+                  </div>
+                }
+              </div>
+            }
             @if (
               member.id !== auth.user()?.id &&
               (auth.user()?.role === 'admin' || member.role === 'employee')

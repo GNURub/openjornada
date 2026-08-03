@@ -22,10 +22,13 @@ export default defineConfig({
     },
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
   ],
-  webServer: {
-    command: 'pnpm run e2e:serve',
-    url: 'http://127.0.0.1:4217',
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  webServer:
+    process.env['OPENJORNADA_E2E_EXTERNAL_SERVER'] === 'true'
+      ? undefined
+      : {
+          command: 'pnpm run e2e:serve',
+          url: 'http://127.0.0.1:4217',
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
 });

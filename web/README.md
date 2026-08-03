@@ -75,7 +75,8 @@ cadena completa de la persona.
 El panel principal obtiene también de ese endpoint la planificación del día.
 El objetivo y la barra de progreso se adaptan a sus minutos reales; cuando no
 hay un tramo aplicable muestran **Sin planificación** en vez de presuponer ocho
-horas.
+horas. En **cómputo semanal flexible**, el panel muestra el objetivo semanal y
+acumula los fichajes de lunes a domingo contra los minutos contratados.
 
 Al terminar jornada o pausa, el modal muestra la duración y permite ajustar la
 hora. Si la diferencia material supera el umbral de revisión, exige un motivo;
@@ -91,7 +92,11 @@ periodo, versión, minutos planificados, ordinarios, complementarios,
 extraordinarios y totales, la huella de integridad y el desglose de cada día.
 En contratos parciales variables, el cálculo combina todos los horarios
 semanales cuya vigencia intersecta el mes. Los tramos acotados siguen formando
-parte del histórico aunque se archiven en la interfaz.
+parte del histórico aunque se archiven en la interfaz. Si la persona usa
+**cómputo semanal flexible**, no necesita franjas fijas: el cierre clasifica el
+exceso sobre la cuota semanal como extraordinario en tiempo completo o como
+complementario en tiempo parcial con pacto. Sin pacto, el cierre bloquea sólo
+cuando se supera realmente esa cuota semanal.
 
 La ruta `/informes` permite descargar un **Excel de inspección**. El rango
 predeterminado son los últimos cuatro años y puede ajustarse en la interfaz
@@ -108,6 +113,8 @@ arrastre y de los ajustes excepcionales; el servidor bloquea cambios de empresa,
 persona, tipo o año y audita cada modificación. La estimación de la solicitud y
 la validación de PocketBase usan el horario vigente de la persona: un sábado
 planificado cuenta como vacaciones y un descanso entre semana no se descuenta.
+En cómputo flexible usan los días laborables de referencia configurados en
+`/equipo`, que no representan horas pactadas de entrada o salida.
 
 La vista principal de `/ausencias` presenta el saldo disponible, el historial y
 los doce meses del año en un único resumen adaptable. Las solicitudes se crean
@@ -178,6 +185,11 @@ Esas fechas son la planificación que después utiliza el cierre mensual; no se
 debe convertir a posteriori el tiempo fichado en tiempo planificado.
 Las tarjetas distinguen visualmente horarios próximos, activos, finalizados y
 archivados, de modo que una ficha activa pero ya vencida no parece vigente.
+
+En `/equipo`, administración y responsables pueden elegir **Cómputo semanal
+flexible**, editar los minutos contratados, el pacto de horas complementarias y
+los días laborables de referencia. El modo tradicional de planificación con
+horarios sigue siendo el valor predeterminado.
 
 ## Invitaciones de acceso
 

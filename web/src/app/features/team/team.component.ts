@@ -13,6 +13,8 @@ interface NewMember {
   employmentType: UserRecord['employmentType'];
   contractedWeeklyMinutes: number;
   complementaryHoursAgreement: boolean;
+  scheduleMode: UserRecord['scheduleMode'];
+  flexibleWeekdays: number[];
   role: UserRole;
   password: string;
 }
@@ -147,6 +149,8 @@ export class TeamComponent {
         | 'employmentType'
         | 'contractedWeeklyMinutes'
         | 'complementaryHoursAgreement'
+        | 'scheduleMode'
+        | 'flexibleWeekdays'
       >
     >,
   ): Promise<void> {
@@ -157,7 +161,7 @@ export class TeamComponent {
       this.members.update((members) =>
         members.map((item) => (item.id === member.id ? (updated as UserRecord) : item)),
       );
-      this.success.set('Los permisos se han actualizado.');
+      this.success.set('La configuración de la persona se ha actualizado.');
     } catch {
       this.error.set('No se han podido actualizar los permisos.');
       await this.load();
@@ -171,6 +175,52 @@ export class TeamComponent {
       employee: 'Empleada',
       representative: 'Representante',
     }[role];
+  }
+
+  protected readonly weekdays = [
+    { value: 1, label: 'L', name: 'lunes' },
+    { value: 2, label: 'M', name: 'martes' },
+    { value: 3, label: 'X', name: 'miércoles' },
+    { value: 4, label: 'J', name: 'jueves' },
+    { value: 5, label: 'V', name: 'viernes' },
+    { value: 6, label: 'S', name: 'sábado' },
+    { value: 0, label: 'D', name: 'domingo' },
+  ] as const;
+
+  protected updateNewWeeklyHours(hours: number): void {
+    this.newMember.weeklyHours = hours;
+    if (Number.isFinite(Number(hours))) {
+      this.newMember.contractedWeeklyMinutes = Math.max(0, Math.round(Number(hours) * 60));
+    }
+  }
+
+  protected toggleNewFlexibleWeekday(weekday: number): void {
+    const selected = new Set(this.newMember.flexibleWeekdays);
+    if (selected.has(weekday) && selected.size > 1) selected.delete(weekday);
+    else selected.add(weekday);
+    this.newMember.flexibleWeekdays = this.orderedWeekdays(selected);
+  }
+
+  protected toggleFlexibleWeekday(member: UserRecord, weekday: number): void {
+    const selected = new Set(
+      member.flexibleWeekdays?.length ? member.flexibleWeekdays : [1, 2, 3, 4, 5],
+    );
+    if (selected.has(weekday) && selected.size > 1) selected.delete(weekday);
+    else selected.add(weekday);
+    void this.updateMember(member, { flexibleWeekdays: this.orderedWeekdays(selected) });
+  }
+
+  protected saveContractedMinutes(member: UserRecord, rawValue: string): void {
+    const minutes = Math.round(Number(rawValue));
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10080) {
+      this.error.set('Los minutos semanales deben estar entre 1 y 10.080.');
+      return;
+    }
+    void this.updateMember(member, { contractedWeeklyMinutes: minutes });
+  }
+
+  private orderedWeekdays(values: Set<number>): number[] {
+    return [1, 2, 3, 4, 5, 6, 0].filter((weekday) => values.has(weekday));
   }
 
   protected invitationState(member: UserRecord): InvitationDisplayState {
@@ -217,6 +267,8 @@ export class TeamComponent {
       employmentType: 'full_time',
       contractedWeeklyMinutes: 2400,
       complementaryHoursAgreement: false,
+      scheduleMode: 'scheduled',
+      flexibleWeekdays: [1, 2, 3, 4, 5],
       role: 'employee',
       password: '',
     };

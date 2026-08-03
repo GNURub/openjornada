@@ -173,8 +173,7 @@ export class LeaveComponent {
     return this.requests()
       .filter((request) => Number(request.startDate.slice(0, 4)) === this.calendarYear())
       .sort(
-        (left, right) =>
-          new Date(right.startDate).getTime() - new Date(left.startDate).getTime(),
+        (left, right) => new Date(right.startDate).getTime() - new Date(left.startDate).getTime(),
       );
   }
 
@@ -214,7 +213,7 @@ export class LeaveComponent {
       );
       return Boolean(
         balance &&
-          hasConfiguredLeaveDays(balance.allowance, balance.carriedOver, balance.adjustment),
+        hasConfiguredLeaveDays(balance.allowance, balance.carriedOver, balance.adjustment),
       );
     });
   }
@@ -252,7 +251,7 @@ export class LeaveComponent {
             ? this.pb.collection('users').getFullList({
                 sort: 'name',
                 filter: 'active = true',
-                fields: 'id,name,employeeCode,role',
+                fields: 'id,name,employeeCode,role,scheduleMode,flexibleWeekdays',
               })
             : Promise.resolve([]),
           this.pb.collection('work_schedules').getFullList({
@@ -268,10 +267,7 @@ export class LeaveComponent {
             normalizeLeaveDateKey(request.startDate, 'start'),
             'start',
           ),
-          endDate: pocketBaseDateBoundary(
-            normalizeLeaveDateKey(request.endDate, 'end'),
-            'end',
-          ),
+          endDate: pocketBaseDateBoundary(normalizeLeaveDateKey(request.endDate, 'end'), 'end'),
         })),
       );
       this.balances.set(balances as LeaveBalanceRecord[]);
@@ -300,9 +296,7 @@ export class LeaveComponent {
     this.ensureRequestableLeaveType();
   }
 
-  protected selectView(
-    view: 'requests' | 'management' | 'calendar' | 'settings',
-  ): void {
+  protected selectView(view: 'requests' | 'management' | 'calendar' | 'settings'): void {
     this.view.set(view);
     window.scrollTo({ top: 0, left: 0 });
   }
@@ -324,6 +318,9 @@ export class LeaveComponent {
   }
 
   protected requestedDays(): number {
+    const selectedEmployee =
+      this.members().find((member) => member.id === this.employee) ??
+      (this.auth.user()?.id === this.employee ? this.auth.user() : undefined);
     return countRequestedDays(
       this.startDate,
       this.endDate,
@@ -331,6 +328,8 @@ export class LeaveComponent {
       this.holidays().map((holiday) => holiday.date),
       this.schedules(),
       this.employee,
+      selectedEmployee?.scheduleMode ?? 'scheduled',
+      selectedEmployee?.flexibleWeekdays ?? [1, 2, 3, 4, 5],
     );
   }
 
@@ -651,10 +650,7 @@ export class LeaveComponent {
   private ensureRequestableLeaveType(): void {
     const types = this.requestableLeaveTypes();
     if (types.some((type) => type.id === this.leaveType)) return;
-    this.leaveType =
-      types.find((type) => type.code === 'vacation')?.id ??
-      types[0]?.id ??
-      '';
+    this.leaveType = types.find((type) => type.code === 'vacation')?.id ?? types[0]?.id ?? '';
   }
 
   protected typeFor(request: LeaveRequestRecord): LeaveTypeRecord | undefined {

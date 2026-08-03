@@ -40,8 +40,18 @@ export function countRequestedDays(
   holidays: readonly string[] = [],
   schedules: readonly WorkScheduleRecord[] = [],
   employee = '',
+  scheduleMode: 'scheduled' | 'weekly_flexible' = 'scheduled',
+  flexibleWeekdays: readonly number[] = [1, 2, 3, 4, 5],
 ): number {
-  const days = countScheduledDays(startValue, endValue, holidays, schedules, employee);
+  const days = countScheduledDays(
+    startValue,
+    endValue,
+    holidays,
+    schedules,
+    employee,
+    scheduleMode,
+    flexibleWeekdays,
+  );
   return days === 1 && dayPart !== 'full' ? 0.5 : days;
 }
 
@@ -51,6 +61,8 @@ export function countScheduledDays(
   holidays: readonly string[] = [],
   schedules: readonly WorkScheduleRecord[] = [],
   employee = '',
+  scheduleMode: 'scheduled' | 'weekly_flexible' = 'scheduled',
+  flexibleWeekdays: readonly number[] = [1, 2, 3, 4, 5],
 ): number {
   const start = new Date(`${startValue.slice(0, 10)}T12:00:00`);
   const end = new Date(`${endValue.slice(0, 10)}T12:00:00`);
@@ -77,9 +89,12 @@ export function countScheduledDays(
         (!item.validUntil || item.validUntil.slice(0, 10) >= key),
     );
     const weekday = current.getDay();
-    const isWorkingDay = schedule
-      ? schedule.weekdays.includes(weekday)
-      : weekday !== 0 && weekday !== 6;
+    const isWorkingDay =
+      scheduleMode === 'weekly_flexible'
+        ? flexibleWeekdays.includes(weekday)
+        : schedule
+          ? schedule.weekdays.includes(weekday)
+          : weekday !== 0 && weekday !== 6;
     if (isWorkingDay) total += 1;
   }
   return total;

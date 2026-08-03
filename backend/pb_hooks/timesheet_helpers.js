@@ -979,6 +979,52 @@ function scheduleMinutes(schedule) {
   return Math.max(0, end - start - schedule.getFloat("breakMinutes"))
 }
 
+function scheduleMode(employee) {
+  return employee.getString("scheduleMode") === "weekly_flexible"
+    ? "weekly_flexible"
+    : "scheduled"
+}
+
+function flexibleWeekdays(employee) {
+  let values = employee.get("flexibleWeekdays")
+  try {
+    if (typeof values === "string") values = JSON.parse(values || "[]")
+  } catch (_) {
+    values = []
+  }
+  const selected = {}
+  for (const value of Array.from(values || [])) {
+    const weekday = Number(value)
+    if (Number.isInteger(weekday) && weekday >= 0 && weekday <= 6) {
+      selected[weekday] = true
+    }
+  }
+  const normalized = [1, 2, 3, 4, 5, 6, 0].filter(
+    (weekday) => selected[weekday],
+  )
+  return normalized.length ? normalized : [1, 2, 3, 4, 5]
+}
+
+function flexibleMinutesForWeekday(employee, weekday) {
+  const weekdays = flexibleWeekdays(employee)
+  const position = weekdays.indexOf(Number(weekday))
+  if (position < 0) return 0
+  const weeklyMinutes = Math.max(
+    0,
+    Math.round(employee.getFloat("contractedWeeklyMinutes")),
+  )
+  const base = Math.floor(weeklyMinutes / weekdays.length)
+  return base + (position < weeklyMinutes % weekdays.length ? 1 : 0)
+}
+
+function mondayKey(date) {
+  const value = new Date(date + "T12:00:00Z")
+  if (isNaN(value.getTime())) return date
+  const offset = (value.getUTCDay() + 6) % 7
+  value.setUTCDate(value.getUTCDate() - offset)
+  return value.toISOString().slice(0, 10)
+}
+
 function recordDateInRange(record, date, timezone, startField, endField) {
   const start = localKey(record.getString(startField), timezone)
   const rawEnd = record.getString(endField)
@@ -1009,9 +1055,12 @@ module.exports = {
   editableDayState,
   editableDays,
   effectiveEvents,
+  flexibleMinutesForWeekday,
+  flexibleWeekdays,
   hasApprovedTimeHistory,
   integrityTipHash,
   localKey,
+  mondayKey,
   materializeRequest,
   materializeReplacement,
   normalizeIntervals,
@@ -1019,6 +1068,7 @@ module.exports = {
   notifyResolution,
   recordDateInRange,
   scheduleAppliesOnDate,
+  scheduleMode,
   scheduleMinutes,
   sequenceAnomalyDates,
   storedIntervals,

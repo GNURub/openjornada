@@ -194,6 +194,14 @@ En una jornada parcial variable, el cierre no debe tomar 8 horas por día ni
 copiar las horas fichadas como si fueran planificación. Suma los minutos de los
 planes aplicables a cada fecha del mes, aunque esos planes ya estén archivados,
 y los contrasta con el registro efectivo. El resultado queda versionado e
-inmutable y se pone a disposición del empleado. Si falta una semana planificada,
-la interfaz la muestra como no planificada: el responsable debe completar el
-plan antes de usar el resumen como documentación laboral definitiva.
+inmutable y se pone a disposición del empleado. En modo planificado, si no hay
+ningún horario aplicable al mes, el cierre lo indica expresamente y el
+responsable debe completar el plan. En modo de cómputo semanal flexible no se
+exigen franjas: el registro se contrasta con la cuota semanal y los días de
+referencia se reservan para vacaciones y festivos.
+
+Casos añadidos: cierre sin horarios de una semana flexible con distribución
+diaria variable; clasificación del exceso semanal a tiempo completo; aceptación
+de jornada parcial hasta la cuota sin pacto; mensaje específico cuando el modo
+planificado no tiene ningún horario aplicable; y visualización del modo y sus
+días de referencia en la UI de equipo.

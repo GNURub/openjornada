@@ -22,6 +22,7 @@ export class DashboardComponent {
   protected readonly pip = inject(WorktimePictureInPictureService);
   protected readonly now = signal(new Date());
   protected readonly plannedMinutes = signal(0);
+  protected readonly workedBeforeTodayMinutes = signal(0);
   protected readonly planLoading = signal(true);
   protected readonly eventLabel = eventLabel;
   protected readonly dailyTarget = computed(() =>
@@ -31,8 +32,13 @@ export class DashboardComponent {
         ? formatMinutes(this.plannedMinutes())
         : 'Sin planificación',
   );
+  protected readonly targetLabel = computed(() =>
+    this.auth.user()?.scheduleMode === 'weekly_flexible' ? 'Objetivo semanal' : 'Objetivo diario',
+  );
   protected readonly dailyProgress = computed(() => {
-    const worked = calculateWorkedMs(this.worktime.events(), this.now());
+    const worked =
+      calculateWorkedMs(this.worktime.events(), this.now()) +
+      this.workedBeforeTodayMinutes() * 60_000;
     return calculateDailyProgress(worked, this.plannedMinutes());
   });
   protected readonly greeting = computed(() => {
@@ -101,22 +107,39 @@ export class DashboardComponent {
 
   private async loadDailyPlan(): Promise<void> {
     const today = this.localDateKey(new Date());
+    const flexible = this.auth.user()?.scheduleMode === 'weekly_flexible';
+    const from = flexible ? this.localDateKey(this.startOfWeek(new Date())) : today;
     try {
       const response = await this.pb.send<TimesheetResponse>(
-        `/api/openjornada/timesheet?from=${today}&to=${today}`,
+        `/api/openjornada/timesheet?from=${from}&to=${today}`,
         { method: 'GET' },
       );
-      this.plannedMinutes.set(response.days[0]?.plannedMinutes ?? 0);
+      if (flexible) {
+        this.plannedMinutes.set(response.employee.contractedWeeklyMinutes ?? 0);
+        this.workedBeforeTodayMinutes.set(
+          response.days
+            .filter((day) => day.date < today)
+            .reduce((total, day) => total + day.workedMinutes, 0),
+        );
+      } else {
+        this.plannedMinutes.set(response.days[0]?.plannedMinutes ?? 0);
+      }
     } catch {
       this.plannedMinutes.set(0);
+      this.workedBeforeTodayMinutes.set(0);
     } finally {
       this.planLoading.set(false);
     }
   }
 
+  private startOfWeek(date: Date): Date {
+    const monday = new Date(date);
+    monday.setHours(12, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return monday;
+  }
+
   private localDateKey(date: Date): string {
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-      .toISOString()
-      .slice(0, 10);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
   }
 }

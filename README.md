@@ -23,7 +23,9 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Resúmenes mensuales inmutables por persona, diferenciando jornada ordinaria,
   complementaria y extraordinaria, con versiones, entrega y acuse de recepción.
   Los horarios pueden planificarse por semanas con distribuciones distintas y
-  conservan su efecto histórico después de archivarse.
+  conservan su efecto histórico después de archivarse. Como alternativa, cada
+  persona puede usar cómputo semanal flexible: se configura el total contratado
+  y unos días laborables de referencia sin inventar franjas de entrada o salida.
 - Política por empresa para aplicar esas altas automáticamente o someterlas a
   aprobación, con tipos de pausa remunerados o no remunerados.
 - Correcciones de jornada con aprobación y trazabilidad inmutable.

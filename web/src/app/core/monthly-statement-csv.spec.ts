@@ -53,6 +53,8 @@ function statement(): MonthlyTimeStatement {
         employmentType: 'part_time',
         contractedWeeklyMinutes: 1200,
         complementaryHoursAgreement: true,
+        scheduleMode: 'scheduled',
+        flexibleWeekdays: [1, 2, 3, 4, 5],
         jobTitle: '',
         privacyNoticeAcknowledgedVersion: '',
         privacyNoticeAcknowledgedAt: '',

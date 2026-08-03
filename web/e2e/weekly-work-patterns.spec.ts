@@ -90,6 +90,8 @@ async function createEmployee(
   employmentType: 'full_time' | 'part_time',
   contractedWeeklyMinutes: number,
   complementaryHoursAgreement: boolean,
+  scheduleMode: UserRecord['scheduleMode'] = 'scheduled',
+  flexibleWeekdays: number[] = [1, 2, 3, 4, 5],
 ): Promise<EmployeeProfile> {
   const email = `semana-${label}-${suffix}@example.com`;
   const name = `Semana ${label}`;
@@ -106,6 +108,8 @@ async function createEmployee(
       employmentType,
       contractedWeeklyMinutes,
       complementaryHoursAgreement,
+      scheduleMode,
+      flexibleWeekdays,
       role: 'employee',
       active: true,
     },
@@ -115,6 +119,18 @@ async function createEmployee(
   const employee = JSON.parse(body) as UserRecord;
   const auth = await signIn(request, email, employeePassword);
   return { id: employee.id, email, name, token: auth.token, record: employee };
+}
+
+function flexiblePlannedMinutes(period: string, weeklyMinutes: number, weekdays: number[]): number {
+  const [year, month] = period.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const ordered = [1, 2, 3, 4, 5, 6, 0].filter((weekday) => weekdays.includes(weekday));
+  const base = Math.floor(weeklyMinutes / ordered.length);
+  return Array.from({ length: lastDay }, (_, index) => {
+    const weekday = new Date(Date.UTC(year, month - 1, index + 1, 12)).getUTCDay();
+    const position = ordered.indexOf(weekday);
+    return position < 0 ? 0 : base + (position < weeklyMinutes % ordered.length ? 1 : 0);
+  }).reduce((total, minutes) => total + minutes, 0);
 }
 
 async function assignSchedule(
@@ -714,6 +730,116 @@ test('full-time and part-time weekly patterns classify overtime and complementar
   ).toBeVisible();
 });
 
+test('weekly flexible computation closes variable weeks without fixed time bands', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'desktop-chromium',
+    'Una ejecución cubre el cómputo semanal flexible.',
+  );
+
+  const admin = await signIn(request, adminEmail, adminPassword);
+  const suffix = `${Date.now()}`;
+  const week = testWeek();
+  const referenceWeekdays = [1, 2, 3, 4, 5];
+
+  const fullTime = await createEmployee(
+    request,
+    admin,
+    suffix,
+    'flexible-completa',
+    'full_time',
+    2400,
+    false,
+    'weekly_flexible',
+    referenceWeekdays,
+  );
+  const variableDays = [
+    ['09:00', '17:00'],
+    ['08:00', '17:00'],
+    ['10:00', '18:00'],
+    ['07:00', '15:00'],
+    ['08:00', '17:00'],
+  ] as const;
+  for (let index = 0; index < variableDays.length; index += 1) {
+    await addWorkedDay(
+      request,
+      admin,
+      fullTime,
+      week.dates[index],
+      variableDays[index][0],
+      variableDays[index][1],
+    );
+  }
+  const fullTimeClose = await closeMonth(request, admin, fullTime, week.period);
+  expect(fullTimeClose.status, fullTimeClose.text).toBe(201);
+  verifySummaryAndCsv(fullTimeClose.statement!, fullTime, week.period, {
+    employmentType: 'full_time',
+    contractedMinutes: flexiblePlannedMinutes(week.period, 2400, referenceWeekdays),
+    ordinaryMinutes: 2400,
+    complementaryMinutes: 0,
+    overtimeMinutes: 120,
+    totalMinutes: 2520,
+  });
+  expect(recordsForWeek(fullTimeClose.statement!, week)[4]).toMatchObject({
+    workedMinutes: 540,
+    ordinaryMinutes: 420,
+    overtimeMinutes: 120,
+  });
+
+  const partTime = await createEmployee(
+    request,
+    admin,
+    suffix,
+    'flexible-parcial',
+    'part_time',
+    1200,
+    false,
+    'weekly_flexible',
+    referenceWeekdays,
+  );
+  await addWorkedDay(request, admin, partTime, week.dates[0], '08:00', '18:00');
+  await addWorkedDay(request, admin, partTime, week.dates[3], '09:00', '19:00');
+  const partTimeClose = await closeMonth(request, admin, partTime, week.period);
+  expect(partTimeClose.status, partTimeClose.text).toBe(201);
+  verifySummaryAndCsv(partTimeClose.statement!, partTime, week.period, {
+    employmentType: 'part_time',
+    contractedMinutes: flexiblePlannedMinutes(week.period, 1200, referenceWeekdays),
+    ordinaryMinutes: 1200,
+    complementaryMinutes: 0,
+    overtimeMinutes: 0,
+    totalMinutes: 1200,
+  });
+
+  const scheduled = await createEmployee(
+    request,
+    admin,
+    suffix,
+    'sin-plan-periodo',
+    'part_time',
+    1200,
+    false,
+  );
+  await addWorkedDay(request, admin, scheduled, week.dates[0], '09:00', '13:00');
+  const rejectedClose = await closeMonth(request, admin, scheduled, week.period);
+  expect(rejectedClose.status).toBe(400);
+  expect(rejectedClose.text).toContain(`No existe una planificación aplicable a ${week.period}`);
+  expect(rejectedClose.text).not.toContain('sin pacto de horas complementarias');
+
+  await page.addInitScript(({ token, record }) => {
+    localStorage.setItem('pocketbase_auth', JSON.stringify({ token, record }));
+  }, admin);
+  await page.goto(`${appBase}/equipo`);
+  await acknowledgePrivacyNotice(page);
+  const flexibleMember = page.locator(`[data-member-email="${fullTime.email}"]`);
+  await expect(flexibleMember).toContainText('Cómputo flexible');
+  await expect(flexibleMember.getByLabel(`Cómputo de jornada de ${fullTime.name}`)).toHaveValue(
+    'weekly_flexible',
+  );
+  await expect(flexibleMember.getByText('Días laborables de referencia')).toBeVisible();
+});
+
 test('a flexible part-time schedule keeps every archived week in the monthly close', async ({
   page,
   request,
@@ -771,11 +897,12 @@ test('a flexible part-time schedule keeps every archived week in the monthly clo
       pattern.start,
       pattern.end,
     );
-    expectedPlannedMinutes += dates.filter(
-      (date) =>
-        date.startsWith(`${baseWeek.period}-`) &&
-        pattern.weekdays.includes(new Date(`${date}T12:00:00Z`).getUTCDay()),
-    ).length * pattern.dailyMinutes;
+    expectedPlannedMinutes +=
+      dates.filter(
+        (date) =>
+          date.startsWith(`${baseWeek.period}-`) &&
+          pattern.weekdays.includes(new Date(`${date}T12:00:00Z`).getUTCDay()),
+      ).length * pattern.dailyMinutes;
   }
 
   const scheduleList = await request.get(`${apiBase}/collections/work_schedules/records`, {
@@ -892,10 +1019,7 @@ test('a flexible part-time schedule keeps every archived week in the monthly clo
       data: { active: true },
     },
   );
-  expect(
-    reactivatePastSchedule.ok(),
-    await reactivatePastSchedule.text(),
-  ).toBeTruthy();
+  expect(reactivatePastSchedule.ok(), await reactivatePastSchedule.text()).toBeTruthy();
 
   const employeeContext = await page.context().browser()!.newContext();
   await employeeContext.addInitScript(({ token, record }) => {

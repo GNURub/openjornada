@@ -102,6 +102,20 @@ describe('leave calculations', () => {
     ).toBe(1);
   });
 
+  it('uses reference weekdays for weekly flexible employees without fixed schedules', () => {
+    expect(
+      countScheduledDays(
+        '2026-08-15',
+        '2026-08-17',
+        [],
+        [],
+        'employee-a',
+        'weekly_flexible',
+        [1, 6],
+      ),
+    ).toBe(2);
+  });
+
   it('calculates the available balance with carry-over and adjustments', () => {
     expect(availableLeaveDays(22, 3, -1, 8.5)).toBe(15.5);
     expect(availableLeaveDays(2, 0, 0, 5)).toBe(0);

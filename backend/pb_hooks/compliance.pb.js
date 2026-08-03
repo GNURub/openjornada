@@ -125,6 +125,7 @@ function ojMonthlyStatementData(app, organization, employee, period) {
       "Indica los minutos contratados por semana antes de cerrar el mes.",
     );
   }
+  const scheduleMode = helper.scheduleMode(employee);
 
   const pending = app.findRecordsByFilter(
     "manual_time_requests",
@@ -159,10 +160,32 @@ function ojMonthlyStatementData(app, organization, employee, period) {
     0,
     { employee: employee.id },
   );
-  if (!schedules.length) {
-    throw new BadRequestError(
-      "Asigna un horario laboral antes de cerrar el resumen mensual.",
-    );
+  if (scheduleMode === "scheduled") {
+    let applicableSchedule = false;
+    for (
+      let cursor = bounds.start;
+      cursor.unix() <= bounds.end.unix() && !applicableSchedule;
+      cursor = cursor.addDate(0, 0, 1)
+    ) {
+      const date = cursor
+        .time()
+        .in(new Timezone(timezone))
+        .format("2006-01-02");
+      const weekday = cursor.time().in(new Timezone(timezone)).weekday();
+      for (const candidate of schedules) {
+        if (!helper.scheduleAppliesOnDate(candidate, date, timezone)) continue;
+        const weekdays = Array.from(candidate.get("weekdays") || []);
+        if (weekdays.indexOf(Number(weekday)) >= 0) {
+          applicableSchedule = true;
+          break;
+        }
+      }
+    }
+    if (!applicableSchedule) {
+      throw new BadRequestError(
+        `No existe una planificación aplicable a ${period}. Configura el horario del periodo o activa el cómputo semanal flexible antes de cerrarlo.`,
+      );
+    }
   }
 
   const holidays = app.findRecordsByFilter(
@@ -225,21 +248,22 @@ function ojMonthlyStatementData(app, organization, employee, period) {
       }
     }
 
-    let schedule = null;
-    for (const candidate of schedules) {
-      if (
-        !helper.scheduleAppliesOnDate(candidate, date, timezone)
-      ) {
-        continue;
+    const weekday = cursor.time().in(new Timezone(timezone)).weekday();
+    let planned = 0;
+    if (scheduleMode === "weekly_flexible") {
+      planned = helper.flexibleMinutesForWeekday(employee, weekday);
+    } else {
+      let schedule = null;
+      for (const candidate of schedules) {
+        if (!helper.scheduleAppliesOnDate(candidate, date, timezone)) continue;
+        const weekdays = Array.from(candidate.get("weekdays") || []);
+        if (weekdays.indexOf(Number(weekday)) >= 0) {
+          schedule = candidate;
+          break;
+        }
       }
-      const weekdays = Array.from(candidate.get("weekdays") || []);
-      const weekday = cursor.time().in(new Timezone(timezone)).weekday();
-      if (weekdays.indexOf(Number(weekday)) >= 0) {
-        schedule = candidate;
-        break;
-      }
+      planned = schedule ? helper.scheduleMinutes(schedule) : 0;
     }
-    let planned = schedule ? helper.scheduleMinutes(schedule) : 0;
     let fullAbsence = false;
     let halfAbsences = 0;
     for (const leave of leaves) {
@@ -260,7 +284,29 @@ function ojMonthlyStatementData(app, organization, employee, period) {
     if (holidayByDate[date] || fullAbsence) planned = 0;
     else if (halfAbsences) planned = Math.round(planned / 2);
 
-    const ordinary = Math.min(worked, planned);
+    let ordinary = Math.min(worked, planned);
+    if (scheduleMode === "weekly_flexible") {
+      const weekStart = new DateTime(
+        helper.mondayKey(date) + " 00:00:00",
+        timezone,
+      );
+      let workedBefore = 0;
+      for (const span of spans.spans) {
+        const overlapStart = Math.max(span.startUnix, weekStart.unix());
+        const overlapEnd = Math.min(span.endUnix, cursor.unix());
+        if (overlapEnd > overlapStart) {
+          workedBefore += Math.round((overlapEnd - overlapStart) / 60);
+        }
+      }
+      ordinary = Math.min(
+        worked,
+        Math.max(
+          0,
+          Math.round(employee.getFloat("contractedWeeklyMinutes")) -
+            workedBefore,
+        ),
+      );
+    }
     const excess = Math.max(0, worked - ordinary);
     let complementary = 0;
     let overtime = 0;
@@ -305,6 +351,7 @@ function ojMonthlyStatementData(app, organization, employee, period) {
 
   return {
     employmentType,
+    scheduleMode,
     contractedMinutes,
     totalMinutes,
     ordinaryMinutes,

@@ -134,6 +134,8 @@ onBootstrap((e) => {
     admin.set("employmentType", "full_time");
     admin.set("contractedWeeklyMinutes", 2400);
     admin.set("complementaryHoursAgreement", false);
+    admin.set("scheduleMode", "scheduled");
+    admin.set("flexibleWeekdays", [1, 2, 3, 4, 5]);
     admin.set("privacyNoticeAcknowledgedVersion", "");
     admin.set("privacyNoticeAcknowledgedAt", "");
     e.app.save(admin);
@@ -161,6 +163,8 @@ onBootstrap((e) => {
       employee.set("employmentType", "full_time");
       employee.set("contractedWeeklyMinutes", 2400);
       employee.set("complementaryHoursAgreement", false);
+      employee.set("scheduleMode", "scheduled");
+      employee.set("flexibleWeekdays", [1, 2, 3, 4, 5]);
       employee.set("privacyNoticeAcknowledgedVersion", "");
       employee.set("privacyNoticeAcknowledgedAt", "");
       e.app.save(employee);
@@ -426,6 +430,37 @@ onRecordCreateRequest((e) => {
       Math.max(0, Math.round(e.record.getFloat("weeklyHours") * 60)),
     );
   }
+  e.record.set(
+    "weeklyHours",
+    Math.max(0, e.record.getFloat("contractedWeeklyMinutes") / 60),
+  );
+  const scheduleMode = e.record.getString("scheduleMode");
+  e.record.set(
+    "scheduleMode",
+    scheduleMode === "weekly_flexible" ? "weekly_flexible" : "scheduled",
+  );
+  let flexibleWeekdays = e.record.get("flexibleWeekdays");
+  try {
+    if (typeof flexibleWeekdays === "string") {
+      flexibleWeekdays = JSON.parse(flexibleWeekdays || "[]");
+    }
+  } catch (_) {
+    flexibleWeekdays = [];
+  }
+  const selectedWeekdays = {};
+  for (const value of Array.from(flexibleWeekdays || [])) {
+    const weekday = Number(value);
+    if (Number.isInteger(weekday) && weekday >= 0 && weekday <= 6) {
+      selectedWeekdays[weekday] = true;
+    }
+  }
+  const normalizedWeekdays = [1, 2, 3, 4, 5, 6, 0].filter(
+    (weekday) => selectedWeekdays[weekday],
+  );
+  e.record.set(
+    "flexibleWeekdays",
+    normalizedWeekdays.length ? normalizedWeekdays : [1, 2, 3, 4, 5],
+  );
   e.next();
 }, "users");
 
@@ -476,6 +511,8 @@ onRecordUpdateRequest((e) => {
       "complementaryHoursAgreement",
       original.getBool("complementaryHoursAgreement"),
     );
+    e.record.set("scheduleMode", original.getString("scheduleMode"));
+    e.record.set("flexibleWeekdays", original.get("flexibleWeekdays"));
     return e.next();
   }
 
@@ -489,6 +526,39 @@ onRecordUpdateRequest((e) => {
   } else if (actorRole !== "admin") {
     throw new ForbiddenError("No tienes permisos para modificar esta persona.");
   }
+
+  e.record.set(
+    "scheduleMode",
+    e.record.getString("scheduleMode") === "weekly_flexible"
+      ? "weekly_flexible"
+      : "scheduled",
+  );
+  let flexibleWeekdays = e.record.get("flexibleWeekdays");
+  try {
+    if (typeof flexibleWeekdays === "string") {
+      flexibleWeekdays = JSON.parse(flexibleWeekdays || "[]");
+    }
+  } catch (_) {
+    flexibleWeekdays = [];
+  }
+  const selectedWeekdays = {};
+  for (const value of Array.from(flexibleWeekdays || [])) {
+    const weekday = Number(value);
+    if (Number.isInteger(weekday) && weekday >= 0 && weekday <= 6) {
+      selectedWeekdays[weekday] = true;
+    }
+  }
+  const normalizedWeekdays = [1, 2, 3, 4, 5, 6, 0].filter(
+    (weekday) => selectedWeekdays[weekday],
+  );
+  e.record.set(
+    "flexibleWeekdays",
+    normalizedWeekdays.length ? normalizedWeekdays : [1, 2, 3, 4, 5],
+  );
+  e.record.set(
+    "weeklyHours",
+    Math.max(0, e.record.getFloat("contractedWeeklyMinutes") / 60),
+  );
 
   e.next();
 }, "users");

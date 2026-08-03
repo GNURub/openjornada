@@ -57,7 +57,7 @@ export class MonthlyStatementsComponent {
               filter: "active = true && role = 'employee'",
               sort: 'name',
               fields:
-                'id,name,employeeCode,employmentType,contractedWeeklyMinutes,complementaryHoursAgreement',
+                'id,name,employeeCode,employmentType,contractedWeeklyMinutes,complementaryHoursAgreement,scheduleMode,flexibleWeekdays',
             })
           : Promise.resolve([]),
       ]);
