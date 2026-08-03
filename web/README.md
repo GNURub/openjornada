@@ -191,6 +191,9 @@ flexible**, editar las horas semanales contratadas en intervalos de quince
 minutos, el pacto de horas complementarias y los días laborables de referencia.
 El servidor conserva el dato normalizado en minutos para los cálculos. El modo
 tradicional de planificación con horarios sigue siendo el valor predeterminado.
+La ayuda contextual del pacto recuerda que sólo debe marcarse en contratos
+parciales cuando exista el correspondiente acuerdo escrito, no para justificar
+automáticamente un exceso de fichaje.
 
 ## Invitaciones de acceso
 

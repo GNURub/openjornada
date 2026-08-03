@@ -841,6 +841,14 @@ test('weekly flexible computation closes variable weeks without fixed time bands
     flexibleMember.getByLabel(`Horas contratadas por semana de ${fullTime.name}`),
   ).toHaveValue('40');
   await expect(flexibleMember.getByText('Días laborables de referencia')).toBeVisible();
+
+  const partTimeMember = page.locator(`[data-member-email="${partTime.email}"]`);
+  await partTimeMember
+    .getByRole('button', { name: `Qué es el pacto de horas complementarias de ${partTime.name}` })
+    .hover();
+  await expect(partTimeMember.getByRole('tooltip')).toContainText(
+    'Actívalo si existe un pacto escrito',
+  );
 });
 
 test('a flexible part-time schedule keeps every archived week in the monthly close', async ({
