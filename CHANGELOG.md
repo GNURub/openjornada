@@ -2,6 +2,36 @@
 
 Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 
+## [0.5.0] - 2026-08-03
+
+### Añadido
+
+- Modalidad de cómputo semanal flexible por persona, sin franjas fijas, con
+  cuota semanal contratada y días laborables de referencia para ausencias y
+  festivos.
+- Configuración desde Equipo del modo de cómputo, las horas semanales y los
+  días de referencia, expresando las cantidades en horas e intervalos de quince
+  minutos.
+- Cobertura automatizada del cierre mensual, CSV e inspección para jornadas
+  parciales con distribuciones distintas cada semana.
+
+### Cambiado
+
+- El panel muestra un objetivo semanal cuando la persona usa cómputo flexible y
+  deja de presuponer una jornada diaria sin planificación.
+- El cierre contrasta los fichajes con la cuota de cada semana; el exceso es
+  extraordinario a tiempo completo y sólo complementario a tiempo parcial si
+  existe pacto.
+- La ayuda de Equipo explica el alcance del pacto de horas complementarias y la
+  navegación separa las herramientas personales de las de gestión.
+
+### Corregido
+
+- El cierre diferencia la ausencia de planificación de un exceso parcial sin
+  pacto y muestra un mensaje específico para cada situación.
+- Las ausencias usan los días de referencia en cómputo flexible y el calendario
+  mantiene una única acción principal para solicitarlas.
+
 ## [0.4.0] - 2026-07-31
 
 ### Añadido
@@ -83,6 +113,7 @@ Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 - Las preservaciones legales excluyen los registros afectados de cualquier
   futura depuración; no se incorpora una purga automática.
 
+[0.5.0]: https://github.com/GNURub/openjornada/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/GNURub/openjornada/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/GNURub/openjornada/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/GNURub/openjornada/releases/tag/v0.2.0
