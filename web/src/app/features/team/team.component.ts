@@ -210,13 +210,23 @@ export class TeamComponent {
     void this.updateMember(member, { flexibleWeekdays: this.orderedWeekdays(selected) });
   }
 
-  protected saveContractedMinutes(member: UserRecord, rawValue: string): void {
-    const minutes = Math.round(Number(rawValue));
-    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10080) {
-      this.error.set('Los minutos semanales deben estar entre 1 y 10.080.');
+  protected contractedWeeklyHours(member: UserRecord): number {
+    return (member.contractedWeeklyMinutes || 0) / 60;
+  }
+
+  protected formatContractedWeeklyHours(member: UserRecord): string {
+    return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(
+      this.contractedWeeklyHours(member),
+    );
+  }
+
+  protected saveContractedHours(member: UserRecord, rawValue: string): void {
+    const hours = Number(rawValue);
+    if (!Number.isFinite(hours) || hours < 0.25 || hours > 80) {
+      this.error.set('Las horas semanales deben estar entre 0,25 y 80.');
       return;
     }
-    void this.updateMember(member, { contractedWeeklyMinutes: minutes });
+    void this.updateMember(member, { contractedWeeklyMinutes: Math.round(hours * 60) });
   }
 
   private orderedWeekdays(values: Set<number>): number[] {

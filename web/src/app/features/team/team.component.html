@@ -90,17 +90,27 @@
           <input [(ngModel)]="newMember.jobTitle" name="jobTitle" required class="field-input" />
         </label>
         <label class="block">
-          <span class="field-label">Jornada semanal</span>
-          <input
-            [(ngModel)]="newMember.weeklyHours"
-            (ngModelChange)="updateNewWeeklyHours($event)"
-            name="weeklyHours"
-            type="number"
-            min="1"
-            max="80"
-            required
-            class="field-input"
-          />
+          <span class="field-label">Horas contratadas por semana</span>
+          <span class="relative block">
+            <input
+              [(ngModel)]="newMember.weeklyHours"
+              (ngModelChange)="updateNewWeeklyHours($event)"
+              name="weeklyHours"
+              type="number"
+              min="0.25"
+              max="80"
+              step="0.25"
+              required
+              class="field-input pr-24"
+            />
+            <span
+              class="pointer-events-none absolute inset-y-0 right-4 flex items-center text-xs font-semibold text-stone-400"
+              >h / semana</span
+            >
+          </span>
+          <span class="mt-2 block text-xs text-stone-400"
+            >Puedes usar cuartos de hora, por ejemplo 20,25 o 20,5.</span
+          >
         </label>
         <label class="block">
           <span class="field-label">Cómputo de jornada</span>
@@ -151,18 +161,6 @@
             <option value="full_time">Tiempo completo</option>
             <option value="part_time">Tiempo parcial</option>
           </select>
-        </label>
-        <label class="block">
-          <span class="field-label">Minutos contratados por semana</span>
-          <input
-            [(ngModel)]="newMember.contractedWeeklyMinutes"
-            name="contractedWeeklyMinutes"
-            type="number"
-            min="1"
-            max="10080"
-            required
-            class="field-input"
-          />
         </label>
         @if (newMember.employmentType === 'part_time') {
           <label class="flex items-center gap-3 rounded-2xl bg-stone-50 px-4 py-3">
@@ -253,7 +251,7 @@
                       ? 'Tiempo completo'
                       : 'Contrato pendiente de clasificar'
                 }}
-                · {{ member.contractedWeeklyMinutes || 0 }} min / semana ·
+                · {{ formatContractedWeeklyHours(member) }} h / semana ·
                 {{
                   member.scheduleMode === 'weekly_flexible' ? 'Cómputo flexible' : 'Con horarios'
                 }}
@@ -350,17 +348,24 @@
                     </select>
                   </label>
                   <label class="block">
-                    <span class="field-label">Minutos semanales</span>
-                    <input
-                      #weeklyMinutes
-                      type="number"
-                      min="1"
-                      max="10080"
-                      [value]="member.contractedWeeklyMinutes"
-                      (change)="saveContractedMinutes(member, weeklyMinutes.value)"
-                      class="field-input"
-                      [attr.aria-label]="'Minutos contratados por semana de ' + member.name"
-                    />
+                    <span class="field-label">Horas contratadas por semana</span>
+                    <span class="relative block">
+                      <input
+                        #weeklyHours
+                        type="number"
+                        min="0.25"
+                        max="80"
+                        step="0.25"
+                        [value]="contractedWeeklyHours(member)"
+                        (change)="saveContractedHours(member, weeklyHours.value)"
+                        class="field-input pr-24"
+                        [attr.aria-label]="'Horas contratadas por semana de ' + member.name"
+                      />
+                      <span
+                        class="pointer-events-none absolute inset-y-0 right-4 flex items-center text-xs font-semibold text-stone-400"
+                        >h / semana</span
+                      >
+                    </span>
                   </label>
                   @if (member.employmentType === 'part_time') {
                     <label class="flex items-center gap-3 rounded-xl bg-white px-4 py-3">

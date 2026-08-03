@@ -837,6 +837,9 @@ test('weekly flexible computation closes variable weeks without fixed time bands
   await expect(flexibleMember.getByLabel(`Cómputo de jornada de ${fullTime.name}`)).toHaveValue(
     'weekly_flexible',
   );
+  await expect(
+    flexibleMember.getByLabel(`Horas contratadas por semana de ${fullTime.name}`),
+  ).toHaveValue('40');
   await expect(flexibleMember.getByText('Días laborables de referencia')).toBeVisible();
 });
 

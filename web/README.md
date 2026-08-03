@@ -187,9 +187,10 @@ Las tarjetas distinguen visualmente horarios próximos, activos, finalizados y
 archivados, de modo que una ficha activa pero ya vencida no parece vigente.
 
 En `/equipo`, administración y responsables pueden elegir **Cómputo semanal
-flexible**, editar los minutos contratados, el pacto de horas complementarias y
-los días laborables de referencia. El modo tradicional de planificación con
-horarios sigue siendo el valor predeterminado.
+flexible**, editar las horas semanales contratadas en intervalos de quince
+minutos, el pacto de horas complementarias y los días laborables de referencia.
+El servidor conserva el dato normalizado en minutos para los cálculos. El modo
+tradicional de planificación con horarios sigue siendo el valor predeterminado.
 
 ## Invitaciones de acceso
 
