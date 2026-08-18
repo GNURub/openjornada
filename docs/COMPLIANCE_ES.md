@@ -1,6 +1,6 @@
 # Cumplimiento del registro de jornada en España
 
-Última revisión técnica: 30 de julio de 2026.
+Última revisión técnica: 18 de agosto de 2026.
 
 Este documento describe las salvaguardas incorporadas y las decisiones que la empresa debe completar. No sustituye el asesoramiento laboral o de protección de datos ni la consulta del convenio colectivo aplicable.
 
@@ -24,6 +24,7 @@ El artículo 34.9 del Estatuto de los Trabajadores exige un registro diario con 
 | Inspección                             | Administración, responsables y representación autorizada pueden descargar desde Informes un Excel con cuatro años por defecto y rango editable de hasta cuatro años. Contiene una hoja resumen y otra por cada empleado activo o inactivo —también si su contrato aún no está clasificado—, con planificación, tiempo trabajado, balance, horas complementarias/extraordinarias, entradas, salidas, pausas, ausencias, incidencias y huellas. También pueden seleccionar una persona y periodo para entregar CSV y JSON con todos los campos probatorios y comprobar hash de cada evento, predecesores, raíz y punta de la cadena. |
 | Jornada parcial y extraordinaria       | El perfil distingue tiempo completo/parcial, minutos semanales contratados, modo de cómputo y existencia de pacto de horas complementarias. Una distribución variable puede documentarse con planificaciones semanales vigentes o con cómputo semanal flexible sin franjas fijas. En este último, los fichajes reales se acumulan contra la cuota semanal y nunca se convierten retroactivamente en planificación; los días de referencia sólo permiten valorar ausencias y festivos. El exceso semanal es extraordinario en tiempo completo y complementario en tiempo parcial únicamente cuando existe pacto. El cierre mensual bloquea contratos sin clasificar, secuencias anómalas, solicitudes pendientes, meses sin planificación aplicable en modo planificado y excesos parciales sin pacto. El CSV conserva los totales, la huella y el desglose diario. |
 | Control de acceso                      | Reglas por organización y rol en PocketBase, reforzadas por hooks contra elevación de privilegios.                                                                                                                                                                                                                  |
+| Fichaje mediante terminal RFID         | Cada terminal usa una credencial independiente que puede rotarse o revocarse. La relación entre UID y persona está aislada por empresa, el valor se cifra y nunca se muestra después de asignarlo; no se escribe información personal en la tarjeta. Los eventos conservan terminal, hora de recepción, hora del dispositivo, última sincronización y secuencia. Las acciones offline se firman y los conflictos se convierten en incidencias que deben corregirse antes del cierre. Un tag basado sólo en UID puede clonarse: su presentación no equivale a autenticación fuerte ni sustituye los procedimientos de custodia, corrección y supervisión. |
 | Automatización MCP                     | Tokens individuales de administración o responsables, almacenados sólo como hash, con caducidad máxima de seis meses, revocación, límite de peticiones y reevaluación del rol en cada acceso. Las herramientas reutilizan las reglas y validaciones del servidor; su auditoría no conserva argumentos ni contenido. |
 | Descargas mediante MCP                 | Los adjuntos y documentos protegidos se sirven a través de enlaces firmados de cinco minutos. La descarga vuelve a comprobar vigencia del token, cuenta activa, rol, empresa y acceso al registro, y responde con `no-store`.                                                                                       |
 | Invitaciones de acceso                 | Los enlaces se generan con aleatoriedad criptográfica, sólo se almacena su hash, caducan a las 72 horas y quedan inutilizados al aceptarse o sustituirse. El envío y la aceptación se auditan sin registrar el token ni la contraseña.                                                                              |
@@ -76,6 +77,11 @@ Referencias oficiales:
 14. Revisar cada año los festivos importados frente al BOE, boletín autonómico y
     calendario municipal aplicables antes de publicar el calendario laboral de
     la empresa; corregir manualmente cualquier diferencia.
+15. Inventariar los terminales RFID, limitar el acceso físico, rotar o revocar
+    inmediatamente la clave de cualquier dispositivo perdido y revisar las
+    incidencias de sincronización antes de cerrar cada mes. Informar a la
+    plantilla de que el tag identifica una asignación operativa y puede clonarse;
+    no debe presentarse como autenticación fuerte.
 
 Las funciones de ausencias, horarios, avisos e informes apoyan la gestión interna, pero no sustituyen la política laboral de la empresa, el convenio aplicable ni los procedimientos formales de comunicación.
 

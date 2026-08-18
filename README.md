@@ -46,6 +46,10 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - Servidor MCP remoto para que administración y responsables operen sobre
   equipo, jornada, ausencias, gastos, documentos, tareas, objetivos y avisos
   mediante tokens revocables de hasta seis meses.
+- Terminales RFID con credencial independiente por dispositivo, PIN empresarial,
+  asignación cifrada de tarjetas, fichaje guiado, cola offline firmada y revisión
+  de incidencias. El entorno de desarrollo incluye un simulador de pantalla
+  320 × 240 para probar el flujo sin hardware.
 - Identidad corporativa por empresa: colores, logotipo y nombre; el icono de la
   PWA y los favicons se generan automáticamente desde el logotipo.
 - PWA instalable con manifiesto por empresa, iconos adaptativos y shell disponible
@@ -283,6 +287,31 @@ o posterior y los navegadores de Playwright:
 cd web
 pnpm exec playwright install chromium
 ```
+
+## Terminales RFID
+
+Administración configura los dispositivos desde **Integraciones → Terminales
+RFID**. Al crear o rotar una credencial, la clave completa se muestra una sola
+vez; después sólo puede revocarse o sustituirse. El PIN empresarial abre durante
+cinco minutos las funciones de alta de tarjetas en los terminales.
+
+Las tarjetas se vinculan a personas desde **Equipo**. OpenJornada no escribe
+datos personales en el tag: normaliza su UID, guarda una huella para resolverlo
+y cifra el valor necesario para sustituir o revocar la asignación. Un UID puede
+clonarse, por lo que este mecanismo acredita la presentación del tag, no una
+identidad fuerte. La primera versión admite hasta 30 personas activas con tag
+por empresa. Las incidencias de sincronización se revisan en **Control
+horario → Incidencias RFID** antes del cierre mensual.
+
+La API del dispositivo vive en `/api/openjornada/terminal/v1`. Cada acción
+online usa hora de servidor y contexto firmado; la cola offline se firma en el
+terminal, conserva hora y secuencia del dispositivo y sólo se acepta si el reloj
+tuvo una sincronización fiable en las últimas 24 horas. Usa siempre HTTPS,
+custodia físicamente las claves y revoca cualquier terminal perdido.
+
+Con `pnpm start` está disponible `/terminal-simulator`. La ruta sólo existe en
+desarrollo y permite simular lector, botones A/B/C, reloj, reinicio, pérdida de
+red y posterior sincronización sin conectar un M5Stack.
 
 ## Integración MCP
 

@@ -61,6 +61,30 @@ La pantalla consume `GET/POST /api/openjornada/mcp-tokens` y
 en `/mcp`. El ejemplo de configuración para Codex usa la URL MCP que devuelve
 el servidor, derivada de `PB_PUBLIC_URL`.
 
+## Terminales RFID y simulador
+
+La sección **Integraciones → Terminales RFID** permite a `admin` crear, rotar y
+revocar una credencial por dispositivo y configurar el PIN empresarial. Los
+perfiles `admin` y `manager` consultan los terminales; sólo administración ve o
+cambia secretos. En `/equipo` ambos perfiles pueden comprobar si una persona
+tiene tag, asignar uno, sustituirlo o revocarlo. El UID se envía una vez y no se
+vuelve a mostrar. La caché offline v1 admite hasta 30 personas activas con tag.
+
+Los dispositivos consumen `/api/openjornada/terminal/v1`: `bootstrap`,
+`resolve`, `actions`, `sync`, sesiones administrativas, caché y asignación de
+tags. Un contexto firmado y efímero enlaza cada lectura online con sus acciones.
+La cola sin conexión conserva la hora capturada, la secuencia y una firma HMAC;
+el servidor comprueba el reloj, la asignación vigente y el estado resultante.
+Los conflictos aparecen en **Control horario → Incidencias RFID**, desde donde
+administración o responsables abren la trazabilidad y documentan su resolución.
+
+`/terminal-simulator` sólo se registra con el servidor de desarrollo de Angular.
+Muestra una pantalla 320 × 240, botones A/B/C, lector UID, estado de red, avance
+del reloj y reinicio. Permite probar la asignación con A+C mantenidos tres
+segundos, el flujo normal de jornada, la corrección de una pausa olvidada en una
+jornada de al menos cuatro horas y la sincronización de acciones offline. La
+clave introducida permanece únicamente en memoria y se pierde al recargar.
+
 ## Control horario
 
 La ruta `/registros` muestra por defecto la **Hoja de fichajes** diaria o
