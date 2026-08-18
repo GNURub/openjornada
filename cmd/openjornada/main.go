@@ -8,6 +8,7 @@ import (
 
 	"github.com/GNURub/openjornada/internal/laborcalendar"
 	"github.com/GNURub/openjornada/internal/mcpserver"
+	"github.com/GNURub/openjornada/internal/terminal"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -53,9 +54,11 @@ func main() {
 
 	mcpService := mcpserver.New(app)
 	laborCalendarService := laborcalendar.New(app)
+	terminalService := terminal.New(app)
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		mcpService.Register(e)
 		laborCalendarService.Register(e)
+		terminalService.Register(e)
 		return e.Next()
 	})
 

@@ -360,7 +360,35 @@ function eventHashMatches(record) {
   const manualRequest = record.getString("manualRequest")
   const candidates = []
 
-  if (record.getString("integrityVersion") === "v2") {
+  if (record.getString("integrityVersion") === "v3") {
+    for (const occurred of dateVariants(occurredAt)) {
+      for (const recorded of dateVariants(record.getString("recordedAt"))) {
+        for (const captured of dateVariants(record.getString("deviceCapturedAt"))) {
+          for (const synced of dateVariants(record.getString("clockSyncedAt"))) {
+            candidates.push([
+              "v3",
+              employee,
+              organization,
+              kind,
+              record.getString("correctedKind"),
+              record.getString("corrects"),
+              occurred,
+              recorded,
+              record.getFloat("adjustmentSeconds"),
+              record.getString("adjustmentReason"),
+              requestId,
+              previousHash,
+              record.getString("terminal"),
+              captured,
+              synced,
+              record.getFloat("deviceSequence"),
+              record.getBool("queuedOffline"),
+            ])
+          }
+        }
+      }
+    }
+  } else if (record.getString("integrityVersion") === "v2") {
     for (const occurred of dateVariants(occurredAt)) {
       for (const recorded of dateVariants(record.getString("recordedAt"))) {
         candidates.push([
@@ -447,6 +475,11 @@ function exportedEvent(record) {
     previousHash: record.getString("previousHash"),
     integrityHash: record.getString("integrityHash"),
     integrityVersion: record.getString("integrityVersion") || "v1",
+    terminal: record.getString("terminal"),
+    deviceCapturedAt: record.getString("deviceCapturedAt"),
+    clockSyncedAt: record.getString("clockSyncedAt"),
+    deviceSequence: record.getFloat("deviceSequence"),
+    queuedOffline: record.getBool("queuedOffline"),
     created: record.getString("created"),
   }
 }

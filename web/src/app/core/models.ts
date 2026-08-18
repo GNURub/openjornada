@@ -24,6 +24,7 @@ export interface UserRecord extends RecordModel {
   invitationSentAt: string;
   invitationExpiresAt: string;
   invitationAcceptedAt: string;
+  hasRfidTag?: boolean;
 }
 
 export interface McpTokenRecord {
@@ -209,9 +210,9 @@ export interface WorkEventRecord extends RecordModel {
   recordedAt: string;
   adjustmentSeconds: number;
   adjustmentReason: string;
-  integrityVersion: 'v1' | 'v2' | '';
+  integrityVersion: 'v1' | 'v2' | 'v3' | '';
   timezone: string;
-  source: 'desktop' | 'mobile' | 'tablet' | 'admin' | 'manual';
+  source: 'desktop' | 'mobile' | 'tablet' | 'admin' | 'manual' | 'terminal';
   note: string;
   createdBy: string;
   corrects: string;
@@ -223,6 +224,11 @@ export interface WorkEventRecord extends RecordModel {
   breakType: string;
   breakPaid: boolean;
   voidsTarget: boolean;
+  terminal: string;
+  deviceCapturedAt: string;
+  clockSyncedAt: string;
+  deviceSequence: number;
+  queuedOffline: boolean;
 }
 
 export interface BreakTypeRecord extends RecordModel {
