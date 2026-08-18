@@ -49,6 +49,28 @@ async function signIn(
   throw new Error('No se pudo autenticar el admin');
 }
 
+test('the simulator opens administration only after a complete mouse hold', async ({ page }) => {
+  await page.goto('/terminal-simulator');
+  const control = page.getByTestId('simulate-admin-hold');
+  const box = await control.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.waitForTimeout(500);
+  await page.mouse.up();
+  await page.waitForTimeout(2_600);
+  await expect(page.getByText('Acerca tu tarjeta')).toBeVisible();
+
+  await page.mouse.down();
+  await page.waitForTimeout(3_100);
+  await page.mouse.up();
+  await expect(page.getByText('PIN de administración')).toBeVisible();
+});
+
 test('RFID terminal creates, assigns and records an idempotent work event', async ({
   page,
   request,

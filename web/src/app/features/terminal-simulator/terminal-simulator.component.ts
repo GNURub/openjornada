@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, OnDestroy, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   TerminalAction,
@@ -39,7 +39,7 @@ interface CachedEmployee {
   imports: [FormsModule],
   templateUrl: './terminal-simulator.component.html',
 })
-export class TerminalSimulatorComponent {
+export class TerminalSimulatorComponent implements OnDestroy {
   private readonly terminals = inject(TerminalService);
   protected readonly screen = signal<Screen>('idle');
   protected readonly connected = signal(false);
@@ -61,6 +61,8 @@ export class TerminalSimulatorComponent {
   >([]);
   protected readonly adminEmployeeIndex = signal(0);
   protected readonly heldButtons = signal(new Set<SimulatorButton>());
+  protected readonly adminHoldActive = signal(false);
+  protected readonly adminHoldRemaining = signal(3);
   protected readonly buttonLabels = computed(() => {
     const state = this.resolved()?.state;
     return state ? visibleButtonLabels(state) : {};
@@ -83,6 +85,15 @@ export class TerminalSimulatorComponent {
   private messageTimer: ReturnType<typeof setTimeout> | undefined;
   private actionTimer: ReturnType<typeof setTimeout> | undefined;
   private adminHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  private adminHoldCountdown: ReturnType<typeof setInterval> | undefined;
+  private adminGestureCompleted = false;
+  private readonly suppressedButtonClicks = new Set<SimulatorButton>();
+
+  ngOnDestroy(): void {
+    clearTimeout(this.messageTimer);
+    clearTimeout(this.actionTimer);
+    this.cancelAdminHold();
+  }
 
   protected now(): Date {
     return new Date(Date.now() + this.nowOffsetMs);
@@ -180,8 +191,7 @@ export class TerminalSimulatorComponent {
     next.add(button);
     this.heldButtons.set(next);
     if (next.has('A') && next.has('C') && this.screen() === 'idle') {
-      clearTimeout(this.adminHoldTimer);
-      this.adminHoldTimer = setTimeout(() => this.openAdminPin(), 3_000);
+      this.startAdminHold();
     }
   }
 
@@ -189,10 +199,44 @@ export class TerminalSimulatorComponent {
     const next = new Set(this.heldButtons());
     next.delete(button);
     this.heldButtons.set(next);
-    if (!(next.has('A') && next.has('C'))) clearTimeout(this.adminHoldTimer);
+    if (this.adminGestureCompleted && this.suppressedButtonClicks.has(button)) {
+      setTimeout(() => this.suppressedButtonClicks.delete(button), 1_000);
+    }
+    if (next.size === 0) this.adminGestureCompleted = false;
+    if (!(next.has('A') && next.has('C'))) this.cancelAdminHold();
+  }
+
+  protected startAdminHold(): void {
+    if (this.adminHoldActive() || this.busy() || this.screen() !== 'idle') return;
+
+    this.adminHoldActive.set(true);
+    this.adminHoldRemaining.set(3);
+    this.adminHoldCountdown = setInterval(
+      () => this.adminHoldRemaining.update((seconds) => Math.max(1, seconds - 1)),
+      1_000,
+    );
+    this.adminHoldTimer = setTimeout(() => {
+      clearInterval(this.adminHoldCountdown);
+      this.adminHoldActive.set(false);
+      this.adminHoldRemaining.set(3);
+      if (this.heldButtons().has('A') && this.heldButtons().has('C')) {
+        this.adminGestureCompleted = true;
+        this.suppressedButtonClicks.add('A');
+        this.suppressedButtonClicks.add('C');
+      }
+      void this.openAdminPin();
+    }, 3_000);
+  }
+
+  protected cancelAdminHold(): void {
+    clearTimeout(this.adminHoldTimer);
+    clearInterval(this.adminHoldCountdown);
+    this.adminHoldActive.set(false);
+    this.adminHoldRemaining.set(3);
   }
 
   protected async press(button: SimulatorButton): Promise<void> {
+    if (this.suppressedButtonClicks.delete(button)) return;
     if (this.busy()) return;
     switch (this.screen()) {
       case 'actions':

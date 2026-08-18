@@ -149,17 +149,18 @@
             type="button"
             (pointerdown)="pointerDown($any(button))"
             (pointerup)="pointerUp($any(button))"
+            (pointercancel)="pointerUp($any(button))"
             (pointerleave)="pointerUp($any(button))"
             (click)="press($any(button))"
             (dblclick)="(button === 'A' || button === 'C') && holdTime($any(button))"
-            class="min-h-14 rounded-2xl bg-stone-700 font-display text-xl font-bold text-white shadow-lg active:translate-y-0.5 active:bg-coral-600"
+            class="min-h-14 touch-none rounded-2xl bg-stone-700 font-display text-xl font-bold text-white shadow-lg active:translate-y-0.5 active:bg-coral-600"
           >
             {{ button }}
           </button>
         }
       </div>
       <p class="mt-4 text-center text-xs text-stone-400">
-        Mantén A+C durante 3 segundos para administración
+        En el dispositivo: mantén A+C durante 3 segundos
       </p>
     </section>
 
@@ -185,6 +186,42 @@
       >
         {{ connected() ? 'Reconectar / NTP' : 'Conectar' }}
       </button>
+      <div class="rounded-2xl border border-stone-200 p-3">
+        <p
+          id="admin-hold-help"
+          role="status"
+          aria-live="polite"
+          class="mb-2 text-xs text-stone-500"
+        >
+          @if (adminHoldActive()) {
+            Mantén pulsado; faltan {{ adminHoldRemaining() }} segundos.
+          } @else {
+            Con ratón, mantén pulsado este control durante 3 segundos.
+          }
+        </p>
+        <button
+          type="button"
+          data-testid="simulate-admin-hold"
+          aria-describedby="admin-hold-help"
+          [disabled]="busy() || screen() !== 'idle'"
+          (pointerdown)="startAdminHold(); $event.preventDefault()"
+          (pointerup)="cancelAdminHold()"
+          (pointercancel)="cancelAdminHold()"
+          (pointerleave)="cancelAdminHold()"
+          (keydown.space)="startAdminHold(); $event.preventDefault()"
+          (keyup.space)="cancelAdminHold()"
+          (keydown.enter)="startAdminHold(); $event.preventDefault()"
+          (keyup.enter)="cancelAdminHold()"
+          (blur)="cancelAdminHold()"
+          class="btn-secondary relative w-full touch-none justify-center overflow-hidden"
+        >
+          @if (adminHoldActive()) {
+            Mantén pulsado… {{ adminHoldRemaining() }} s
+          } @else {
+            Simular A+C (3 s)
+          }
+        </button>
+      </div>
       <label class="block"
         ><span class="field-label">UID simulado</span
         ><input [(ngModel)]="uid" class="field-input font-mono uppercase" placeholder="04:A1:B2:C3"
