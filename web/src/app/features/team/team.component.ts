@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth.service';
 import { UserRecord, UserRole } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
+import { TerminalService } from '../../core/terminal.service';
 
 interface NewMember {
   name: string;
@@ -35,6 +36,7 @@ type InvitationDisplayState = 'none' | 'pending' | 'expired' | 'accepted';
 })
 export class TeamComponent {
   private readonly pb = inject(PocketBaseService).client;
+  private readonly terminals = inject(TerminalService);
   protected readonly auth = inject(AuthService);
   protected readonly members = signal<UserRecord[]>([]);
   protected readonly loading = signal(true);
@@ -44,6 +46,9 @@ export class TeamComponent {
   protected readonly error = signal('');
   protected readonly success = signal('');
   protected readonly toast = signal<{ type: 'success' | 'error'; message: string } | null>(null);
+  protected readonly rfidTarget = signal<UserRecord | null>(null);
+  protected readonly savingRfid = signal(false);
+  protected rfidUid = '';
   protected newMember: NewMember = this.emptyMember();
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -58,11 +63,66 @@ export class TeamComponent {
       const records = await this.pb.collection('users').getFullList({
         sort: 'name',
       });
-      this.members.set(records as UserRecord[]);
+      const members = records as UserRecord[];
+      try {
+        const statuses = await this.terminals.listEmployees();
+        const byId = new Map(statuses.items.map((item) => [item.id, item.hasRfidTag]));
+        this.members.set(
+          members.map((member) => ({ ...member, hasRfidTag: byId.get(member.id) ?? false })),
+        );
+      } catch {
+        this.members.set(members);
+      }
     } catch {
       this.error.set('No se ha podido cargar el equipo.');
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  protected openRfid(member: UserRecord): void {
+    this.rfidTarget.set(member);
+    this.rfidUid = '';
+    this.error.set('');
+  }
+
+  protected async saveRfid(): Promise<void> {
+    const member = this.rfidTarget();
+    if (!member || this.savingRfid()) return;
+    if (!/^[0-9a-fA-F:\- ]{8,30}$/.test(this.rfidUid.trim())) {
+      this.error.set('Introduce un UID RFID válido, por ejemplo 04:A1:B2:C3.');
+      return;
+    }
+    if (member.hasRfidTag && !confirm(`¿Sustituir el tag actual de ${member.name}?`)) return;
+    this.savingRfid.set(true);
+    try {
+      await this.terminals.assignEmployee(member.id, this.rfidUid, !!member.hasRfidTag);
+      this.members.update((items) =>
+        items.map((item) => (item.id === member.id ? { ...item, hasRfidTag: true } : item)),
+      );
+      this.rfidTarget.set(null);
+      this.success.set(`Tag asignado a ${member.name}.`);
+    } catch (error) {
+      this.error.set(this.errorMessage(error, 'No se pudo asignar el tag.'));
+    } finally {
+      this.savingRfid.set(false);
+    }
+  }
+
+  protected async revokeRfid(member: UserRecord): Promise<void> {
+    if (!confirm(`¿Revocar el tag de ${member.name}?`)) return;
+    this.savingRfid.set(true);
+    try {
+      await this.terminals.revokeEmployee(member.id);
+      this.members.update((items) =>
+        items.map((item) => (item.id === member.id ? { ...item, hasRfidTag: false } : item)),
+      );
+      this.rfidTarget.set(null);
+      this.success.set(`Tag revocado para ${member.name}.`);
+    } catch (error) {
+      this.error.set(this.errorMessage(error, 'No se pudo revocar el tag.'));
+    } finally {
+      this.savingRfid.set(false);
     }
   }
 

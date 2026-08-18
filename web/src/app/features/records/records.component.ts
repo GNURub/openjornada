@@ -11,6 +11,8 @@ import { PocketBaseService } from '../../core/pocketbase.service';
 import { pocketBaseDateTime } from '../../core/pocketbase-date';
 import { eventLabel } from '../../core/time-calculations';
 import { TimesheetComponent } from './timesheet.component';
+import { TerminalIncidentRecord } from '../../core/terminal.models';
+import { TerminalService } from '../../core/terminal.service';
 
 @Component({
   selector: 'app-records',
@@ -19,6 +21,7 @@ import { TimesheetComponent } from './timesheet.component';
 })
 export class RecordsComponent {
   private readonly pb = inject(PocketBaseService).client;
+  private readonly terminals = inject(TerminalService);
   protected readonly auth = inject(AuthService);
   protected readonly events = signal<WorkEventRecord[]>([]);
   protected readonly correctionRequests = signal<CorrectionRequestRecord[]>([]);
@@ -28,9 +31,10 @@ export class RecordsComponent {
   protected readonly success = signal('');
   protected readonly savingCorrection = signal(false);
   protected readonly exportingEvidence = signal(false);
+  protected readonly terminalIncidents = signal<TerminalIncidentRecord[]>([]);
   protected readonly correctionTarget = signal<WorkEventRecord | null>(null);
   protected readonly eventLabel = eventLabel;
-  protected readonly activeTab = signal<'sheet' | 'trace'>('sheet');
+  protected readonly activeTab = signal<'sheet' | 'trace' | 'incidents'>('sheet');
   protected readonly canViewCompany = computed(() => this.auth.user()?.role !== 'employee');
   protected readonly canResolve = computed(() => {
     const role = this.auth.user()?.role;
@@ -42,6 +46,37 @@ export class RecordsComponent {
   protected from = this.toInputDate(new Date(new Date().setDate(new Date().getDate() - 30)));
   protected to = this.toInputDate(new Date());
   protected employee = this.auth.user()?.id ?? '';
+
+  protected async openTerminalIncident(incident: TerminalIncidentRecord): Promise<void> {
+    this.employee = incident.employee;
+    const date = new Date(incident.deviceCapturedAt);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 10);
+    this.from = local;
+    this.to = local;
+    this.activeTab.set('trace');
+    await this.load();
+  }
+
+  protected async resolveTerminalIncident(incident: TerminalIncidentRecord): Promise<void> {
+    const note = prompt(
+      'Indica qué corrección se realizó (mínimo 8 caracteres):',
+      'Jornada revisada y corregida.',
+    );
+    if (!note) return;
+    try {
+      await this.terminals.resolveIncident(incident.id, note);
+      this.terminalIncidents.update((items) => items.filter((item) => item.id !== incident.id));
+      this.success.set('Incidencia RFID cerrada.');
+    } catch (error) {
+      const response =
+        typeof error === 'object' && error !== null && 'response' in error
+          ? (error as { response?: { message?: string } }).response
+          : undefined;
+      this.error.set(response?.message || 'No se pudo cerrar la incidencia RFID.');
+    }
+  }
 
   constructor() {
     void this.initialize();
@@ -234,6 +269,14 @@ export class RecordsComponent {
         this.members.set(records as UserRecord[]);
       } catch {
         this.error.set('No se ha podido cargar la lista de personas.');
+      }
+    }
+    if (this.canResolve()) {
+      try {
+        const response = await this.terminals.listIncidents();
+        this.terminalIncidents.set(response.items.filter((item) => item.status === 'pending'));
+      } catch {
+        this.terminalIncidents.set([]);
       }
     }
     await this.load();

@@ -1,0 +1,245 @@
+<div class="min-h-screen bg-stone-200 p-4 text-stone-900 sm:p-8">
+  <div class="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <section class="rounded-[2.5rem] bg-stone-900 p-5 shadow-2xl sm:p-8">
+      <div
+        class="mx-auto aspect-[4/3] w-full max-w-[640px] overflow-hidden rounded-xl border-4 border-stone-700 bg-[#eef7f3] shadow-inner"
+      >
+        <div class="flex h-full flex-col p-5 sm:p-8">
+          <header
+            class="flex items-center justify-between text-xs font-bold text-stone-500 sm:text-sm"
+          >
+            <span>{{ online() ? '● ONLINE' : '○ OFFLINE' }}</span>
+            <span>{{ queue().length }} pendientes</span>
+            <span>{{ formattedTime() }}</span>
+          </header>
+          <main class="grid min-h-0 flex-1 place-items-center text-center">
+            @switch (screen()) {
+              @case ('idle') {
+                <div>
+                  <p class="font-display text-5xl font-bold tabular-nums sm:text-7xl">
+                    {{ formattedTime() }}
+                  </p>
+                  <p class="mt-5 text-lg font-bold sm:text-2xl">Acerca tu tarjeta</p>
+                  @if (!clockTrusted() && !online()) {
+                    <p class="mt-3 text-sm font-bold text-red-700">Sin hora fiable</p>
+                  }
+                </div>
+              }
+              @case ('message') {
+                <p class="max-w-md font-display text-2xl font-bold sm:text-4xl">{{ message() }}</p>
+              }
+              @case ('actions') {
+                <div>
+                  <p class="text-sm font-bold uppercase tracking-widest text-stone-500">
+                    {{
+                      resolved()?.state?.kind === 'on_break'
+                        ? 'En pausa'
+                        : resolved()?.state?.kind === 'working'
+                          ? 'Trabajando'
+                          : 'Sin jornada'
+                    }}
+                  </p>
+                  <p class="mt-3 font-display text-3xl font-bold sm:text-5xl">
+                    {{ resolved()?.employee?.displayName }}
+                  </p>
+                  @if (resolved()?.state?.staleBreak) {
+                    <p class="mt-3 font-bold text-amber-700">Pausa abierta hace más de 25 min</p>
+                  }
+                  @if (resolved()?.state?.longShift) {
+                    <p class="mt-3 font-bold text-amber-700">Jornada abierta durante 4 h o más</p>
+                  }
+                </div>
+              }
+              @case ('time-picker') {
+                <div>
+                  <p class="text-base font-bold">
+                    {{
+                      pickerClosesBreak()
+                        ? '¿A qué hora terminaste la pausa?'
+                        : '¿A qué hora terminaste?'
+                    }}
+                  </p>
+                  <p class="mt-5 font-display text-5xl font-bold tabular-nums sm:text-7xl">
+                    {{ formattedSelectedTime() }}
+                  </p>
+                  <p class="mt-3 text-xs text-stone-500">Mantén A/C para saltar 30 minutos</p>
+                </div>
+              }
+              @case ('close-confirm') {
+                <div>
+                  <p class="font-display text-3xl font-bold sm:text-5xl">
+                    ¿Deseas cerrar ahora la jornada?
+                  </p>
+                  <p class="mt-5 font-bold text-stone-500">A: No · C: Sí</p>
+                </div>
+              }
+              @case ('admin-pin') {
+                <div>
+                  <p class="text-lg font-bold">PIN de administración</p>
+                  <div class="mt-5 flex justify-center gap-3">
+                    @for (digit of pinDigits(); track $index) {
+                      <span
+                        class="grid size-14 place-items-center rounded-xl border-2 bg-white font-display text-3xl font-bold"
+                        [class.border-coral-500]="$index === pinIndex()"
+                        >{{ digit }}</span
+                      >
+                    }
+                  </div>
+                  <p class="mt-4 text-sm text-stone-500">A − · B siguiente · C +</p>
+                </div>
+              }
+              @case ('admin-employees') {
+                <div>
+                  <p class="text-sm font-bold uppercase tracking-widest text-stone-500">
+                    Asignar tag
+                  </p>
+                  <p class="mt-4 font-display text-3xl font-bold sm:text-5xl">
+                    {{ currentEmployee()?.name || 'Sin empleados' }}
+                  </p>
+                  <p
+                    class="mt-3 font-bold"
+                    [class.text-emerald-700]="currentEmployee()?.hasRfidTag"
+                  >
+                    {{ currentEmployee()?.hasRfidTag ? 'Tag asignado' : 'Sin tag' }}
+                  </p>
+                  <p class="mt-4 text-sm text-stone-500">A/C navegar · B seleccionar</p>
+                </div>
+              }
+              @case ('admin-scan') {
+                <div>
+                  <p class="font-display text-3xl font-bold sm:text-5xl">
+                    Acerca el tag para {{ currentEmployee()?.name }}
+                  </p>
+                  <p class="mt-4 text-sm text-stone-500">A para volver</p>
+                </div>
+              }
+            }
+          </main>
+          <footer class="grid grid-cols-3 gap-3 text-center text-xs font-bold sm:text-base">
+            <span
+              [class.text-coral-700]="screen() === 'actions' && resolved()?.state?.staleBreak"
+              >{{
+                screen() === 'time-picker'
+                  ? '−5 min'
+                  : screen() === 'close-confirm'
+                    ? 'No'
+                    : buttonLabels().A || 'A'
+              }}</span
+            >
+            <span>{{ screen() === 'time-picker' ? 'Confirmar' : buttonLabels().B || 'B' }}</span>
+            <span
+              [class.text-coral-700]="
+                buttonLabels().C === 'Antes' ||
+                (screen() === 'actions' && resolved()?.state?.staleBreak)
+              "
+              >{{
+                screen() === 'time-picker'
+                  ? '+5 min'
+                  : screen() === 'close-confirm'
+                    ? 'Sí'
+                    : buttonLabels().C || 'C'
+              }}</span
+            >
+          </footer>
+        </div>
+      </div>
+      <div class="mx-auto mt-5 grid max-w-[640px] grid-cols-3 gap-5">
+        @for (button of ['A', 'B', 'C']; track button) {
+          <button
+            type="button"
+            (pointerdown)="pointerDown($any(button))"
+            (pointerup)="pointerUp($any(button))"
+            (pointerleave)="pointerUp($any(button))"
+            (click)="press($any(button))"
+            (dblclick)="(button === 'A' || button === 'C') && holdTime($any(button))"
+            class="min-h-14 rounded-2xl bg-stone-700 font-display text-xl font-bold text-white shadow-lg active:translate-y-0.5 active:bg-coral-600"
+          >
+            {{ button }}
+          </button>
+        }
+      </div>
+      <p class="mt-4 text-center text-xs text-stone-400">
+        Mantén A+C durante 3 segundos para administración
+      </p>
+    </section>
+
+    <aside class="space-y-5 rounded-[2rem] bg-white p-6 shadow-xl">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral-600">Solo desarrollo</p>
+        <h1 class="mt-2 font-display text-2xl font-bold">Simulador M5Stack</h1>
+      </div>
+      <label class="block"
+        ><span class="field-label">API key del terminal</span
+        ><input
+          [(ngModel)]="token"
+          type="password"
+          autocomplete="off"
+          class="field-input font-mono text-xs"
+          placeholder="ojterm_…"
+      /></label>
+      <button
+        type="button"
+        (click)="connect()"
+        [disabled]="busy()"
+        class="btn-primary w-full justify-center"
+      >
+        {{ connected() ? 'Reconectar / NTP' : 'Conectar' }}
+      </button>
+      <label class="block"
+        ><span class="field-label">UID simulado</span
+        ><input [(ngModel)]="uid" class="field-input font-mono uppercase" placeholder="04:A1:B2:C3"
+      /></label>
+      <button
+        type="button"
+        (click)="scan()"
+        [disabled]="!connected() || busy()"
+        class="btn-primary w-full justify-center"
+      >
+        Acercar tag
+      </button>
+      <div class="grid grid-cols-2 gap-3">
+        <button type="button" (click)="toggleOnline()" class="btn-secondary justify-center">
+          {{ online() ? 'Perder red' : 'Recuperar red' }}</button
+        ><button
+          type="button"
+          (click)="synchronize()"
+          [disabled]="!online() || queue().length === 0"
+          class="btn-secondary justify-center"
+        >
+          Sincronizar
+        </button>
+      </div>
+      <div class="grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          (click)="advance(30)"
+          class="rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold"
+        >
+          +30 min</button
+        ><button
+          type="button"
+          (click)="advance(240)"
+          class="rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold"
+        >
+          +4 h</button
+        ><button
+          type="button"
+          (click)="reboot()"
+          class="rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold"
+        >
+          Reiniciar
+        </button>
+      </div>
+      <div class="rounded-2xl bg-stone-50 p-4 text-xs text-stone-600">
+        <p><strong>Red:</strong> {{ online() ? 'conectada' : 'sin conexión' }}</p>
+        <p class="mt-1">
+          <strong>Reloj offline:</strong> {{ clockTrusted() ? 'fiable' : 'bloqueado' }}
+        </p>
+        <p class="mt-1"><strong>Cola:</strong> {{ queue().length }} / 10.000</p>
+        <p class="mt-1">
+          <strong>Caché:</strong> revisión {{ cacheRevision() }} · {{ cache().length }} tags
+        </p>
+      </div>
+    </aside>
+  </div>
+</div>

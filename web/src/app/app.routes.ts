@@ -1,3 +1,4 @@
+import { isDevMode } from '@angular/core';
 import { Routes } from '@angular/router';
 import {
   adminGuard,
@@ -8,6 +9,18 @@ import {
 } from './core/auth.guard';
 
 export const routes: Routes = [
+  ...(isDevMode()
+    ? [
+        {
+          path: 'terminal-simulator',
+          canMatch: [() => isDevMode()],
+          loadComponent: () =>
+            import('./features/terminal-simulator/terminal-simulator.component').then(
+              (component) => component.TerminalSimulatorComponent,
+            ),
+        },
+      ]
+    : []),
   {
     path: 'invitacion/:token',
     loadComponent: () =>
