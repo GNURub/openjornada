@@ -35,6 +35,23 @@ enum class CacheError {
   Unsupported,
 };
 
+enum class CacheSlot { None, A, B };
+enum class CacheSelector { Missing, A, B, Corrupt };
+
+struct CacheSlotCandidate {
+  bool valid;
+  uint32_t revision;
+};
+
+struct CacheSelection {
+  CacheSlot slot;
+  bool repairSelector;
+};
+
+CacheSelection selectCacheSlot(CacheSelector selector,
+                               CacheSlotCandidate slotA,
+                               CacheSlotCandidate slotB);
+
 class CacheCodec {
  public:
   static constexpr size_t kCapacity = 30;
@@ -52,7 +69,10 @@ class CacheCodec {
 
 class CacheStore {
  public:
+  // Mounts an existing filesystem and never formats on failure.
   bool begin();
+  // Destructive operation reserved for explicit first-use or factory reset.
+  bool formatAndInitialize();
   CacheError load(CacheSnapshot& output);
   CacheError replaceAtomically(const CacheSnapshot& snapshot);
   bool clear();

@@ -143,7 +143,8 @@ bool validPath(std::string_view path) {
         if (high < 0 || low < 0) return false;
         decoded = static_cast<unsigned char>((high << 4) | low);
         index += 2;
-        if (decoded == '/' || decoded == '\\' || decoded <= 0x20U ||
+        if (decoded == '%' || decoded == '/' || decoded == '\\' ||
+            decoded <= 0x20U ||
             decoded == 0x7FU) {
           return false;
         }

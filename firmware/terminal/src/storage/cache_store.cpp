@@ -24,7 +24,6 @@ constexpr const char* kSlotAPath = "/cache-a.bin";
 constexpr const char* kSlotBPath = "/cache-b.bin";
 constexpr const char* kPreferencesNamespace = "openjornada";
 constexpr const char* kSlotKey = "cache_slot";
-constexpr const char* kFilesystemReadyKey = "fs_ready";
 constexpr uint8_t kSlotA = 1;
 constexpr uint8_t kSlotB = 2;
 
@@ -140,18 +139,19 @@ bool takeString(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
 }
 
 #ifdef ARDUINO
-bool readActiveSlot(uint8_t& slot) {
+bool readSelector(CacheSelector& selector) {
   Preferences preferences;
   if (!preferences.begin(kPreferencesNamespace, true)) return false;
   if (!preferences.isKey(kSlotKey)) {
-    slot = 0;
+    selector = CacheSelector::Missing;
     preferences.end();
     return true;
   }
   const uint8_t stored = preferences.getUChar(kSlotKey, 0);
   preferences.end();
-  if (stored != kSlotA && stored != kSlotB) return false;
-  slot = stored;
+  selector = stored == kSlotA   ? CacheSelector::A
+             : stored == kSlotB ? CacheSelector::B
+                                : CacheSelector::Corrupt;
   return true;
 }
 
@@ -183,9 +183,78 @@ CacheError readSlot(uint8_t slot, CacheSnapshot& output) {
   if (read != length) return CacheError::Io;
   return CacheCodec::decode(bytes, output);
 }
+
+uint8_t storedSlot(CacheSlot slot) {
+  return slot == CacheSlot::A ? kSlotA : kSlotB;
+}
+
+CacheSlot selectorSlot(CacheSelector selector) {
+  if (selector == CacheSelector::A) return CacheSlot::A;
+  if (selector == CacheSelector::B) return CacheSlot::B;
+  return CacheSlot::None;
+}
+
+struct CacheInspection {
+  CacheSelector selector = CacheSelector::Missing;
+  CacheSnapshot slotA;
+  CacheSnapshot slotB;
+  CacheError errorA = CacheError::NotFound;
+  CacheError errorB = CacheError::NotFound;
+  CacheSelection selection{CacheSlot::None, false};
+};
+
+CacheError inspectCache(CacheInspection& inspection) {
+  if (!readSelector(inspection.selector)) return CacheError::Io;
+  inspection.errorA = readSlot(kSlotA, inspection.slotA);
+  inspection.errorB = readSlot(kSlotB, inspection.slotB);
+  inspection.selection = selectCacheSlot(
+      inspection.selector,
+      {inspection.errorA == CacheError::None, inspection.slotA.revision},
+      {inspection.errorB == CacheError::None, inspection.slotB.revision});
+  return CacheError::None;
+}
+
+CacheError noValidSnapshotError(const CacheInspection& inspection) {
+  const CacheSlot selected = selectorSlot(inspection.selector);
+  if (selected == CacheSlot::A && inspection.errorA != CacheError::NotFound) {
+    return inspection.errorA;
+  }
+  if (selected == CacheSlot::B && inspection.errorB != CacheError::NotFound) {
+    return inspection.errorB;
+  }
+  if (inspection.errorA != CacheError::NotFound) return inspection.errorA;
+  if (inspection.errorB != CacheError::NotFound) return inspection.errorB;
+  return CacheError::NotFound;
+}
 #endif
 
 }  // namespace
+
+CacheSelection selectCacheSlot(CacheSelector selector,
+                               CacheSlotCandidate slotA,
+                               CacheSlotCandidate slotB) {
+  CacheSlot selected = CacheSlot::None;
+  if (slotA.valid && slotB.valid) {
+    if (slotA.revision > slotB.revision) {
+      selected = CacheSlot::A;
+    } else if (slotB.revision > slotA.revision) {
+      selected = CacheSlot::B;
+    } else if (selector == CacheSelector::B) {
+      selected = CacheSlot::B;
+    } else {
+      selected = CacheSlot::A;
+    }
+  } else if (slotA.valid) {
+    selected = CacheSlot::A;
+  } else if (slotB.valid) {
+    selected = CacheSlot::B;
+  }
+
+  const CacheSlot pointed = selector == CacheSelector::A   ? CacheSlot::A
+                            : selector == CacheSelector::B ? CacheSlot::B
+                                                           : CacheSlot::None;
+  return {selected, selected != CacheSlot::None && selected != pointed};
+}
 
 CacheError CacheCodec::encode(const CacheSnapshot& snapshot,
                               std::vector<uint8_t>& output) {
@@ -283,31 +352,17 @@ CacheError CacheCodec::decode(const std::vector<uint8_t>& input,
 
 bool CacheStore::begin() {
 #ifdef ARDUINO
-  if (LittleFS.begin(false)) {
-    Preferences preferences;
-    if (!preferences.begin(kPreferencesNamespace, false)) return false;
-    const bool markedReady =
-        preferences.getBool(kFilesystemReadyKey, false) ||
-        preferences.putBool(kFilesystemReadyKey, true) == 1;
-    preferences.end();
-    return markedReady;
-  }
+  return LittleFS.begin(false);
+#else
+  return false;
+#endif
+}
 
-  Preferences preferences;
-  if (!preferences.begin(kPreferencesNamespace, false)) return false;
-  const bool previouslyInitialized =
-      preferences.getBool(kFilesystemReadyKey, false);
-  if (previouslyInitialized) {
-    preferences.end();
-    return false;
-  }
-  if (!LittleFS.begin(true)) {
-    preferences.end();
-    return false;
-  }
-  const bool markedReady = preferences.putBool(kFilesystemReadyKey, true) == 1;
-  preferences.end();
-  return markedReady;
+bool CacheStore::formatAndInitialize() {
+#ifdef ARDUINO
+  LittleFS.end();
+  if (!LittleFS.format()) return false;
+  return LittleFS.begin(false);
 #else
   return false;
 #endif
@@ -315,18 +370,19 @@ bool CacheStore::begin() {
 
 CacheError CacheStore::load(CacheSnapshot& output) {
 #ifdef ARDUINO
-  uint8_t selected = 0;
-  if (!readActiveSlot(selected)) return CacheError::Io;
-  if (selected == 0) return CacheError::NotFound;
-  CacheError result = readSlot(selected, output);
-  if (result == CacheError::None) return result;
-
-  const uint8_t fallback = selected == kSlotA ? kSlotB : kSlotA;
-  CacheSnapshot recovered;
-  const CacheError fallbackResult = readSlot(fallback, recovered);
-  if (fallbackResult != CacheError::None) return result;
-  if (!selectSlot(fallback)) return CacheError::Io;
-  output = std::move(recovered);
+  CacheInspection inspection;
+  const CacheError inspectResult = inspectCache(inspection);
+  if (inspectResult != CacheError::None) return inspectResult;
+  if (inspection.selection.slot == CacheSlot::None) {
+    return noValidSnapshotError(inspection);
+  }
+  if (inspection.selection.repairSelector &&
+      !selectSlot(storedSlot(inspection.selection.slot))) {
+    return CacheError::Io;
+  }
+  output = inspection.selection.slot == CacheSlot::A
+               ? std::move(inspection.slotA)
+               : std::move(inspection.slotB);
   return CacheError::None;
 #else
   (void)output;
@@ -339,10 +395,29 @@ CacheError CacheStore::replaceAtomically(const CacheSnapshot& snapshot) {
   const CacheError encodeResult = CacheCodec::encode(snapshot, encoded);
   if (encodeResult != CacheError::None) return encodeResult;
 #ifdef ARDUINO
-  uint8_t selected = 0;
-  if (!readActiveSlot(selected)) return CacheError::Io;
-  const uint8_t target = selected == kSlotA ? kSlotB : kSlotA;
-  const char* path = slotPath(target);
+  CacheInspection inspection;
+  const CacheError inspectResult = inspectCache(inspection);
+  if (inspectResult != CacheError::None) return inspectResult;
+  if (inspection.selection.repairSelector &&
+      !selectSlot(storedSlot(inspection.selection.slot))) {
+    return CacheError::Io;
+  }
+
+  CacheSlot active = inspection.selection.slot;
+  if (active == CacheSlot::None) active = selectorSlot(inspection.selector);
+  CacheSlot target = CacheSlot::A;
+  if (active == CacheSlot::A) {
+    target = CacheSlot::B;
+  } else if (active == CacheSlot::None &&
+             inspection.errorA != CacheError::NotFound) {
+    if (inspection.errorB != CacheError::NotFound) {
+      return noValidSnapshotError(inspection);
+    }
+    target = CacheSlot::B;
+  }
+
+  const uint8_t targetValue = storedSlot(target);
+  const char* path = slotPath(targetValue);
   File file = LittleFS.open(path, "w");
   if (!file) return CacheError::Io;
   const size_t written = file.write(encoded.data(), encoded.size());
@@ -354,12 +429,12 @@ CacheError CacheStore::replaceAtomically(const CacheSnapshot& snapshot) {
   }
 
   CacheSnapshot verified;
-  const CacheError verifyResult = readSlot(target, verified);
+  const CacheError verifyResult = readSlot(targetValue, verified);
   if (verifyResult != CacheError::None) {
     LittleFS.remove(path);
     return verifyResult;
   }
-  if (!selectSlot(target)) return CacheError::Io;
+  if (!selectSlot(targetValue)) return CacheError::Io;
   return CacheError::None;
 #else
   (void)snapshot;

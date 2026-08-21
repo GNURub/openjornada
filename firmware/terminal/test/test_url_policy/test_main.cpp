@@ -92,6 +92,13 @@ void test_rejects_path_traversal_query_whitespace_and_backslash() {
       validateBaseUrl("https://example.com/a%2fb", BuildProfile::Release)
           .allowed);
   TEST_ASSERT_FALSE(
+      validateBaseUrl("https://example.com/%252e%252e/", BuildProfile::Release)
+          .allowed);
+  TEST_ASSERT_FALSE(validateBaseUrl(
+                        "https://example.com/%252e%252e%252fadmin",
+                        BuildProfile::Release)
+                        .allowed);
+  TEST_ASSERT_FALSE(
       validateBaseUrl("https://example.com?token=x", BuildProfile::Release)
           .allowed);
   TEST_ASSERT_FALSE(
