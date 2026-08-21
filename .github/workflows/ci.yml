@@ -1,0 +1,72 @@
+name: Verificar código
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Pruebas y firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v7
+
+      - name: Preparar Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Probar backend
+        run: go test ./...
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Activar pnpm
+        run: corepack enable
+
+      - name: Instalar frontend
+        run: pnpm install --frozen-lockfile
+        working-directory: web
+
+      - name: Probar frontend
+        run: pnpm run test:ci
+        working-directory: web
+
+      - name: Preparar uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Restaurar caché de PlatformIO
+        uses: actions/cache@v5
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('firmware/terminal/platformio.ini') }}
+          restore-keys: |
+            platformio-${{ runner.os }}-
+
+      - name: Probar dominio del firmware
+        run: uv tool run --from platformio platformio test -e native
+        working-directory: firmware/terminal
+
+      - name: Compilar firmware de desarrollo
+        run: uv tool run --from platformio platformio run -e m5stack_dev
+        working-directory: firmware/terminal
+
+      - name: Compilar firmware de producción
+        run: uv tool run --from platformio platformio run -e m5stack_release
+        working-directory: firmware/terminal
