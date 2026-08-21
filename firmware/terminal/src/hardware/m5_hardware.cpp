@@ -5,6 +5,8 @@
 #include <MFRC522_I2C.h>
 #include <Wire.h>
 
+#include "openjornada/assets/spanish_font.hpp"
+
 namespace openjornada {
 namespace {
 
@@ -50,6 +52,7 @@ bool Hardware::begin() {
   M5.begin(config);
 
   M5.Display.setRotation(1);
+  M5.Display.setFont(&assets::OpenJornadaSpanish12);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.fillScreen(TFT_BLACK);
 

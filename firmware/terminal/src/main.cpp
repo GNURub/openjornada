@@ -157,9 +157,11 @@ bool initializeFirstUseStorage(CacheStore& cacheStore) {
 
 bool performFactoryReset(ConfigStore& configStore, CacheStore& cacheStore) {
   // The 10 s + 5 s physical gesture is the explicit destructive confirmation.
-  if (!configStore.clear()) return false;
   if (!cacheStore.formatAndInitialize()) return false;
-  return cacheStore.clear();
+  if (!cacheStore.clear()) return false;
+  // Clear the API key last. If storage preparation fails, the credentials stay
+  // intact and any recoverable outbox remains usable on the next boot.
+  return configStore.clear();
 }
 
 void showFactoryResetResult(bool success) {
@@ -299,6 +301,7 @@ void setup() {
 
   const BootChoice choice = detectBootChoice(pendingCount);
   if (choice == BootChoice::FactoryReset) {
+    outboxStorage.end();
     const bool reset = performFactoryReset(configStore, cacheStore);
     showFactoryResetResult(reset);
     delay(1200);

@@ -103,6 +103,7 @@ class LittleFsOutboxStorage final : public OutboxStorage {
  public:
   ~LittleFsOutboxStorage() override;
   bool begin();
+  void end();
   bool exists(const char* path) const override;
   bool size(const char* path, size_t& output) const override;
   bool read(const char* path, size_t offset, uint8_t* output,

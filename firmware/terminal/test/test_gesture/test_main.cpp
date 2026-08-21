@@ -112,7 +112,8 @@ void test_token_change_is_refused_only_while_actions_are_pending() {
   TEST_ASSERT_TRUE(canApplyProvisioningCandidate(active, candidate, 0));
   candidate.terminalToken = active.terminalToken;
   TEST_ASSERT_TRUE(canApplyProvisioningCandidate(active, candidate, 20));
-  TEST_ASSERT_TRUE(canApplyProvisioningCandidate(std::nullopt, candidate, 20));
+  TEST_ASSERT_FALSE(canApplyProvisioningCandidate(std::nullopt, candidate, 20));
+  TEST_ASSERT_TRUE(canApplyProvisioningCandidate(std::nullopt, candidate, 0));
 }
 
 int main(int, char**) {

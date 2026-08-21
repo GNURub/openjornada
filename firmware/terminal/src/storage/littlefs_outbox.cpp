@@ -64,6 +64,11 @@ bool LittleFsOutboxStorage::begin() {
                         kLittleFsPartitionLabel);
 }
 
+void LittleFsOutboxStorage::end() {
+  closeReadSessions();
+  LittleFS.end();
+}
+
 bool LittleFsOutboxStorage::exists(const char* path) const {
   return LittleFS.exists(path);
 }

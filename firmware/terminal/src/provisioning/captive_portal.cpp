@@ -20,8 +20,9 @@ namespace openjornada {
 bool canApplyProvisioningCandidate(
     const std::optional<DeviceConfig>& activeConfig,
     const DeviceConfig& candidate, size_t pendingCount) {
-  return pendingCount == 0 || !activeConfig.has_value() ||
-         activeConfig->terminalToken == candidate.terminalToken;
+  return pendingCount == 0 ||
+         (activeConfig.has_value() &&
+          activeConfig->terminalToken == candidate.terminalToken);
 }
 
 ProvisioningPortal::ProvisioningPortal(
