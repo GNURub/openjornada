@@ -2,6 +2,48 @@
 
 Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 
+## [0.6.0] - 2026-08-21
+
+### Añadido
+
+- API versionada para terminales RFID con credenciales independientes,
+  asignación y sustitución de tags, sincronización idempotente e incidencias
+  administrables desde la interfaz.
+- Simulador web del M5Stack y gestión de terminales, permisos y tags desde
+  Integraciones y Equipo.
+- Firmware para M5Stack Basic Core v2.7 y Unit RFID2 con diagnóstico de
+  hardware, aprovisionamiento Wi-Fi mediante QR y portal cautivo, y fichaje
+  conectado para iniciar o terminar jornada y gestionar pausas.
+- Persistencia local de configuración y caché, cola durable firmada de acciones
+  y cliente de red con límites de memoria y tiempos de espera.
+
+### Cambiado
+
+- El flujo de cierre desde una pausa permite indicar la hora real de fin de la
+  pausa y confirmar después si también se desea terminar la jornada.
+- La pantalla del terminal usa textos españoles con acentos, eñes y signos de
+  apertura, y ajusta el QR de configuración para mejorar su lectura.
+- Las pruebas físicas por HTTP quedan limitadas a compilaciones de desarrollo,
+  redes privadas y una autorización explícita del servidor; producción exige
+  HTTPS.
+
+### Corregido
+
+- La combinación administrativa puede mantenerse con el ratón en el simulador
+  y no interfiere con los demás gestos de botones.
+- El lector conserva lecturas distintas durante el antirrebote y usa el flujo
+  de sondeo recomendado para el Unit RFID2.
+- La recuperación de caché, cola y aprovisionamiento rechaza datos truncados o
+  ambiguos sin perder el último estado recuperable.
+
+### Seguridad y cumplimiento
+
+- Los tags sólo aportan su identificador operativo: no se escriben datos
+  personales en ellos y su presentación no se considera autenticación fuerte.
+- Las acciones conservan identidad idempotente, encadenado e integridad local;
+  los tokens y UID completos no se incluyen en registros, y la credencial del
+  terminal sólo se muestra al crearla o rotarla.
+
 ## [0.5.0] - 2026-08-03
 
 ### Añadido
@@ -113,6 +155,7 @@ Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 - Las preservaciones legales excluyen los registros afectados de cualquier
   futura depuración; no se incorpora una purga automática.
 
+[0.6.0]: https://github.com/GNURub/openjornada/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/GNURub/openjornada/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/GNURub/openjornada/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/GNURub/openjornada/compare/v0.2.0...v0.3.0
