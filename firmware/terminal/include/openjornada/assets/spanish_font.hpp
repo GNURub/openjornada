@@ -8,6 +8,7 @@
  * Original font: https://dejavu-fonts.github.io/
  * Original license: https://dejavu-fonts.github.io/License.html
  * This generated bitmap data is distributed under that DejaVu Fonts license.
+ * Full license text: firmware/terminal/LICENSES/DejaVu-Fonts.txt
  */
 
 namespace openjornada::assets {

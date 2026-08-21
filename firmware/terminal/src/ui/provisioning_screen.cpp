@@ -49,7 +49,7 @@ void drawProvisioningAccess(const std::string& ssid,
 
   const std::string qr = "WIFI:T:WPA;S:" + wifiQrEscape(ssid) +
                          ";P:" + wifiQrEscape(password) + ";H:false;;";
-  display.qrcode(qr.c_str(), 220, 34, 94, 3, true);
+  display.qrcode(qr.c_str(), 220, 65, 94, 3, true);
 }
 
 void drawProvisioningStatus(const std::string& title,

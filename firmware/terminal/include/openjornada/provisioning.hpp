@@ -9,6 +9,61 @@
 
 namespace openjornada {
 
+inline constexpr size_t kMaxProvisioningHeaderBytes = 1024;
+inline constexpr size_t kMaxProvisioningRequestTargetBytes = 128;
+inline constexpr size_t kMaxProvisioningFormBodyBytes =
+    kMaxSsidBytes * 3U + kMaxWifiPasswordBytes * 3U +
+    kMaxBaseUrlBytes * 3U + kMaxTerminalTokenBytes * 3U + 256U;
+
+enum class CaptiveHttpParseStatus {
+  NeedMore,
+  Complete,
+  HeaderTooLarge,
+  BodyTooLarge,
+  Invalid,
+};
+
+struct CaptiveHttpRequest {
+  std::string method;
+  std::string target;
+  std::string host;
+  std::string origin;
+  std::string contentType;
+  std::string body;
+};
+
+class BoundedCaptiveHttpParser {
+ public:
+  CaptiveHttpParseStatus consume(char byte);
+  CaptiveHttpParseStatus status() const;
+  const CaptiveHttpRequest& request() const;
+  size_t bodyBytesConsumed() const;
+
+ private:
+  CaptiveHttpParseStatus parseHeaders();
+
+  CaptiveHttpParseStatus status_ = CaptiveHttpParseStatus::NeedMore;
+  CaptiveHttpRequest request_;
+  std::string headers_;
+  size_t contentLength_ = 0;
+  size_t bodyBytesConsumed_ = 0;
+  bool readingBody_ = false;
+};
+
+struct ProvisioningFormFields {
+  std::string csrf;
+  std::string ssid;
+  std::string wifiPassword;
+  std::string baseUrl;
+  std::string terminalToken;
+};
+
+bool decodeProvisioningForm(const std::string& body,
+                            ProvisioningFormFields& output);
+bool decodeProvisioningFormRequest(const CaptiveHttpRequest& request,
+                                   const std::string& expectedCsrf,
+                                   ProvisioningFormFields& output);
+
 struct ProvisioningResult {
   bool saved = false;
   DeviceConfig config;
