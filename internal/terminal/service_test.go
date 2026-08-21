@@ -52,3 +52,13 @@ func TestOfflineSignatureIsBoundToTerminalAndChain(t *testing.T) {
 		t.Fatal("canonical payload must include the previous local hash")
 	}
 }
+
+func TestFirmwareSignatureVector(t *testing.T) {
+	const token = "ojterm_abcdefghijkl_secret0123456789012345678901234567890123456789"
+	const canonical = "terminal-a|req-1|04A1B2C3|clock_in|2026-08-21T08:00:00.000Z||2026-08-21T07:59:59.000Z|1|boot-1|"
+	const expected = "f6d92375cab26283b16c1174a19c60cdaff19ac4c646f6e34f6748a90fc6b118"
+
+	if got := signPayload(signingKeyForToken(token), canonical); got != expected {
+		t.Fatalf("firmware signature vector mismatch: got %s", got)
+	}
+}
