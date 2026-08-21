@@ -356,6 +356,157 @@ void test_completion_tail_failures_preserve_recoverable_prefix() {
   }
 }
 
+void test_only_old_truncated_is_promoted_for_actions_and_completions() {
+  {
+    MemoryStorage storage;
+    appendRaw(storage.files[Outbox::kOldPath], action(1, "A"));
+    const auto prefix = storage.files[Outbox::kOldPath];
+    const auto tail = encoded(action(2, "B"));
+    storage.files[Outbox::kOldPath].insert(
+        storage.files[Outbox::kOldPath].end(), tail.begin(), tail.end() - 4);
+    Outbox outbox(storage);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.begin()));
+    TEST_ASSERT_FALSE(storage.exists(Outbox::kOldPath));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(prefix.data(),
+                                  storage.files[Outbox::kCurrentPath].data(),
+                                  prefix.size());
+  }
+  {
+    MemoryStorage storage;
+    appendRaw(storage.files[Outbox::kCurrentPath], action(1, "A"));
+    appendRaw(storage.files[Outbox::kCurrentPath], action(2, "B"));
+    appendCompletion(storage.files[Outbox::kCompletionOldPath], "A");
+    const auto prefix = storage.files[Outbox::kCompletionOldPath];
+    const auto tail = completionRecord("B");
+    storage.files[Outbox::kCompletionOldPath].insert(
+        storage.files[Outbox::kCompletionOldPath].end(), tail.begin(),
+        tail.end() - 2);
+    Outbox outbox(storage);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.begin()));
+    std::vector<QueuedAction> pending;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.list(pending)));
+    assertIds(pending, {"B"});
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(
+        prefix.data(), storage.files[Outbox::kCompletionPath].data(),
+        prefix.size());
+  }
+}
+
+void test_invalid_current_and_truncated_old_converge_to_old_prefix() {
+  {
+    MemoryStorage storage;
+    storage.files[Outbox::kCurrentPath] = encoded(action(9, "corrupt"));
+    storage.files[Outbox::kCurrentPath][OutboxCodec::kHeaderSize] ^= 0x01U;
+    appendRaw(storage.files[Outbox::kOldPath], action(1, "A"));
+    const auto prefix = storage.files[Outbox::kOldPath];
+    const auto tail = encoded(action(2, "B"));
+    storage.files[Outbox::kOldPath].insert(
+        storage.files[Outbox::kOldPath].end(), tail.begin(), tail.end() - 3);
+    Outbox outbox(storage);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.begin()));
+    std::vector<QueuedAction> pending;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.list(pending)));
+    assertIds(pending, {"A"});
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(prefix.data(),
+                                  storage.files[Outbox::kCurrentPath].data(),
+                                  prefix.size());
+  }
+  {
+    MemoryStorage storage;
+    appendRaw(storage.files[Outbox::kCurrentPath], action(1, "A"));
+    appendRaw(storage.files[Outbox::kCurrentPath], action(2, "B"));
+    storage.files[Outbox::kCompletionPath] = completionRecord("A");
+    storage.files[Outbox::kCompletionPath][OutboxCodec::kHeaderSize] ^= 0x01U;
+    appendCompletion(storage.files[Outbox::kCompletionOldPath], "A");
+    const auto prefix = storage.files[Outbox::kCompletionOldPath];
+    const auto tail = completionRecord("B");
+    storage.files[Outbox::kCompletionOldPath].insert(
+        storage.files[Outbox::kCompletionOldPath].end(), tail.begin(),
+        tail.end() - 2);
+    Outbox outbox(storage);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.begin()));
+    std::vector<QueuedAction> pending;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(outbox.list(pending)));
+    assertIds(pending, {"B"});
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(
+        prefix.data(), storage.files[Outbox::kCompletionPath].data(),
+        prefix.size());
+  }
+}
+
+void test_cuts_while_promoting_truncated_old_always_recover() {
+  for (size_t failure = 1; failure <= 4; ++failure) {
+    MemoryStorage storage;
+    appendRaw(storage.files[Outbox::kOldPath], action(1, "A"));
+    const auto prefix = storage.files[Outbox::kOldPath];
+    const auto tail = encoded(action(2, "B"));
+    storage.files[Outbox::kOldPath].insert(
+        storage.files[Outbox::kOldPath].end(), tail.begin(), tail.end() - 3);
+    if (failure == 1) storage.failWrites = true;
+    if (failure == 2) storage.corruptAppendPath = Outbox::kNewPath;
+    if (failure == 3) storage.failRenameCall = 1;
+    if (failure == 4) storage.corruptRenameCall = 1;
+    Outbox failed(storage);
+    TEST_ASSERT_NOT_EQUAL(static_cast<int>(OutboxError::None),
+                          static_cast<int>(failed.begin()));
+    storage.failWrites = false;
+    storage.failRenameCall = 0;
+    storage.corruptRenameCall = 0;
+    storage.corruptAppendPath.clear();
+    Outbox recovered(storage);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(recovered.begin()));
+    std::vector<QueuedAction> pending;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(recovered.list(pending)));
+    assertIds(pending, {"A"});
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(prefix.data(),
+                                  storage.files[Outbox::kCurrentPath].data(),
+                                  prefix.size());
+  }
+  for (size_t failure = 1; failure <= 4; ++failure) {
+    MemoryStorage storage;
+    appendRaw(storage.files[Outbox::kCurrentPath], action(1, "A"));
+    appendRaw(storage.files[Outbox::kCurrentPath], action(2, "B"));
+    appendCompletion(storage.files[Outbox::kCompletionOldPath], "A");
+    const auto prefix = storage.files[Outbox::kCompletionOldPath];
+    const auto tail = completionRecord("B");
+    storage.files[Outbox::kCompletionOldPath].insert(
+        storage.files[Outbox::kCompletionOldPath].end(), tail.begin(),
+        tail.end() - 2);
+    if (failure == 1) storage.failWrites = true;
+    if (failure == 2) {
+      storage.corruptAppendPath = Outbox::kCompletionNewPath;
+    }
+    if (failure == 3) storage.failRenameCall = 1;
+    if (failure == 4) storage.corruptRenameCall = 1;
+    Outbox failed(storage);
+    TEST_ASSERT_NOT_EQUAL(static_cast<int>(OutboxError::None),
+                          static_cast<int>(failed.begin()));
+    storage.failWrites = false;
+    storage.failRenameCall = 0;
+    storage.corruptRenameCall = 0;
+    storage.corruptAppendPath.clear();
+    Outbox recovered(storage);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(recovered.begin()));
+    std::vector<QueuedAction> pending;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                          static_cast<int>(recovered.list(pending)));
+    assertIds(pending, {"B"});
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(
+        prefix.data(), storage.files[Outbox::kCompletionPath].data(),
+        prefix.size());
+  }
+}
+
 void test_crc_corruption_inside_journal_is_rejected() {
   MemoryStorage storage;
   appendRaw(storage.files[Outbox::kCurrentPath], action(1, "req-1"));
@@ -402,8 +553,17 @@ void test_bounds_capacity_and_batch_are_streaming_at_ten_thousand() {
                         static_cast<int>(outbox.begin()));
   std::vector<QueuedAction> batch;
   TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
-                        static_cast<int>(outbox.list(batch, 5000)));
-  TEST_ASSERT_EQUAL_UINT(Outbox::kMaximumBatchSize, batch.size());
+                        static_cast<int>(outbox.list(
+                            batch, Outbox::kProtocolBatchLimit)));
+  TEST_ASSERT_EQUAL_UINT(Outbox::kMaxInMemoryBatch, batch.size());
+  constexpr size_t maximumTextBytes = 64 + 20 + 35 * 3 + 64 + 64 + 64;
+  constexpr size_t conservativeAllocatorOverhead = 16 * 9;
+  constexpr size_t estimatedBatchBytes =
+      Outbox::kMaxInMemoryBatch *
+      (sizeof(QueuedAction) + maximumTextBytes +
+       conservativeAllocatorOverhead);
+  TEST_ASSERT_LESS_OR_EQUAL_UINT(64 * 1024, estimatedBatchBytes);
+  TEST_ASSERT_EQUAL_UINT(500, Outbox::kProtocolBatchLimit);
   batch.clear();
   TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
                         static_cast<int>(outbox.list(batch)));
@@ -599,6 +759,9 @@ int main(int, char**) {
   RUN_TEST(test_truncated_completion_tail_repairs_with_done_new_old);
   RUN_TEST(test_tail_repair_failures_preserve_recoverable_prefix);
   RUN_TEST(test_completion_tail_failures_preserve_recoverable_prefix);
+  RUN_TEST(test_only_old_truncated_is_promoted_for_actions_and_completions);
+  RUN_TEST(test_invalid_current_and_truncated_old_converge_to_old_prefix);
+  RUN_TEST(test_cuts_while_promoting_truncated_old_always_recover);
   RUN_TEST(test_crc_corruption_inside_journal_is_rejected);
   RUN_TEST(test_inflated_inner_length_does_not_truncate_a_later_valid_frame);
   RUN_TEST(test_bounds_capacity_and_batch_are_streaming_at_ten_thousand);

@@ -1,9 +1,14 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#ifdef ARDUINO
+#include <FS.h>
+#endif
 
 #include "openjornada/domain.hpp"
 
@@ -74,8 +79,9 @@ class Outbox {
   static constexpr const char* kCompletionPath = "/outbox.done";
   static constexpr const char* kCompletionNewPath = "/outbox.done.new";
   static constexpr const char* kCompletionOldPath = "/outbox.done.old";
-  static constexpr size_t kMaximumBatchSize = 500;
-  static constexpr size_t kDefaultBatchSize = 50;
+  static constexpr size_t kProtocolBatchLimit = 500;
+  static constexpr size_t kMaxInMemoryBatch = 50;
+  static constexpr size_t kDefaultBatchSize = kMaxInMemoryBatch;
 
   explicit Outbox(OutboxStorage& storage) : storage_(storage) {}
 
@@ -94,6 +100,7 @@ class Outbox {
 #ifdef ARDUINO
 class LittleFsOutboxStorage final : public OutboxStorage {
  public:
+  ~LittleFsOutboxStorage() override;
   bool begin();
   bool exists(const char* path) const override;
   bool size(const char* path, size_t& output) const override;
@@ -105,6 +112,14 @@ class LittleFsOutboxStorage final : public OutboxStorage {
                      const std::vector<uint8_t>& bytes) override;
   bool remove(const char* path) override;
   bool rename(const char* from, const char* to) override;
+
+ private:
+  File* openReadSession(const char* path) const;
+  void closeReadSession(const char* path) const;
+  void closeReadSessions() const;
+  mutable std::array<File, 2> readFiles_;
+  mutable std::array<std::string, 2> readPaths_;
+  mutable size_t nextReadSlot_ = 0;
 };
 #endif
 

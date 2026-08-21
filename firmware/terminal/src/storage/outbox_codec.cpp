@@ -515,6 +515,39 @@ OutboxError atomicRepairPrefix(OutboxStorage& storage, const char* current,
   return removeIfPresent(storage, old) ? OutboxError::None : OutboxError::Io;
 }
 
+OutboxError promoteTruncatedOld(OutboxStorage& storage, const char* current,
+                                const char* fresh, const char* old,
+                                JournalKind kind, size_t validPrefix,
+                                size_t expectedCount) {
+  if (!removeIfPresent(storage, fresh) ||
+      !storage.writeAndFlush(fresh, {})) {
+    return OutboxError::Io;
+  }
+  std::array<uint8_t, kCopyChunkSize> buffer{};
+  for (size_t offset = 0; offset < validPrefix;) {
+    const size_t length = std::min(buffer.size(), validPrefix - offset);
+    if (!storage.read(old, offset, buffer.data(), length)) {
+      return OutboxError::Io;
+    }
+    const std::vector<uint8_t> chunk(buffer.begin(), buffer.begin() + length);
+    if (!storage.appendAndFlush(fresh, chunk)) return OutboxError::Io;
+    offset += length;
+  }
+  OutboxError result = verifyJournal(storage, fresh, kind, expectedCount);
+  if (result != OutboxError::None) return result;
+  if (!removeIfPresent(storage, current) ||
+      !storage.rename(fresh, current)) {
+    return OutboxError::Io;
+  }
+  result = verifyJournal(storage, current, kind, expectedCount);
+  if (result != OutboxError::None) {
+    // Keep both the failed activation and the truncated old journal. A later
+    // boot deterministically rebuilds current from old again.
+    return result;
+  }
+  return removeIfPresent(storage, old) ? OutboxError::None : OutboxError::Io;
+}
+
 OutboxError recoverJournal(OutboxStorage& storage, const char* current,
                            const char* fresh, const char* old,
                            JournalKind kind) {
@@ -548,6 +581,10 @@ OutboxError recoverJournal(OutboxStorage& storage, const char* current,
   if (freshState.error == OutboxError::None) {
     return activateCandidate(storage, fresh, current, old, kind,
                              freshState.count);
+  }
+  if (oldState.error == OutboxError::Truncated) {
+    return promoteTruncatedOld(storage, current, fresh, old, kind,
+                               oldState.validPrefix, oldState.count);
   }
   if (!currentState.exists && !freshState.exists && !oldState.exists) {
     return OutboxError::None;
@@ -734,7 +771,7 @@ OutboxError Outbox::list(std::vector<QueuedAction>& output,
                          size_t limit) const {
   output.clear();
   if (!begun_) return OutboxError::Unsupported;
-  const size_t boundedLimit = std::min(limit, kMaximumBatchSize);
+  const size_t boundedLimit = std::min(limit, kMaxInMemoryBatch);
   QueueStats stats;
   return scanQueue(
       storage_,
