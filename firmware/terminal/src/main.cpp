@@ -13,6 +13,7 @@ namespace {
 
 using openjornada::Button;
 using openjornada::Hardware;
+using openjornada::RfidPollStatus;
 using openjornada::UidGate;
 
 Hardware hardware;
@@ -21,8 +22,11 @@ bool rfidReady = false;
 uint32_t tagCount = 0;
 uint32_t buttonCount[3]{};
 std::string maskedUid = "esperando";
+std::string scanMessage = "esperando tag";
 size_t uidBytes = 0;
-bool lastTagPresent = false;
+RfidPollStatus lastLoggedRfidStatus = RfidPollStatus::Unavailable;
+bool rfidFailureLogged = false;
+uint32_t lastRfidFailureLogMs = 0;
 
 size_t buttonIndex(Button button) {
   return static_cast<size_t>(button);
@@ -69,8 +73,7 @@ void drawDynamicScreen() {
            static_cast<unsigned long>(buttonCount[2]));
   display.drawString(line, 12, 145);
 
-  snprintf(line, sizeof(line), "Tag: %s   Lecturas: %lu",
-           lastTagPresent ? "presente" : "retirado",
+  snprintf(line, sizeof(line), "Tag: %s   Lecturas: %lu", scanMessage.c_str(),
            static_cast<unsigned long>(tagCount));
   display.drawString(line, 12, 165);
 
@@ -90,6 +93,29 @@ void handleButton(Button button, char label) {
   Serial.printf("[OJ-DIAG] button=%c count=%lu\n", label,
                 static_cast<unsigned long>(buttonCount[buttonIndex(button)]));
   drawDynamicScreen();
+}
+
+void logRfidDiagnostic(RfidPollStatus status,
+                       const std::optional<std::string>& uid) {
+  if (status == lastLoggedRfidStatus) {
+    return;
+  }
+  lastLoggedRfidStatus = status;
+
+  if (status == RfidPollStatus::ReadFailed) {
+    if (rfidFailureLogged && millis() - lastRfidFailureLogMs < 2000) {
+      return;
+    }
+    rfidFailureLogged = true;
+    lastRfidFailureLogMs = millis();
+    Serial.println("[OJ-DIAG] RFID scan=card_detected result=read_failed");
+    scanMessage = "detectado / fallo lectura";
+    drawDynamicScreen();
+  } else if (status == RfidPollStatus::ReadSuccess && uid.has_value()) {
+    Serial.printf("[OJ-DIAG] RFID scan=card_detected result=read_ok uid_bytes=%u\n",
+                  static_cast<unsigned>(uid->size() / 2U));
+    scanMessage = "leido correctamente";
+  }
 }
 
 }  // namespace
@@ -117,8 +143,8 @@ void loop() {
 
   const auto uid = hardware.pollUid();
   const bool present = hardware.tagPresent();
-  bool redraw = present != lastTagPresent;
-  lastTagPresent = present;
+  logRfidDiagnostic(hardware.rfidPollStatus(), uid);
+  bool redraw = false;
 
   if (uid.has_value() && uidGate.accept(*uid, present, millis())) {
     ++tagCount;
