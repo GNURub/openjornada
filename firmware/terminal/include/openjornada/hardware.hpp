@@ -14,6 +14,7 @@ class Hardware {
   bool begin();
   void update();
   bool pressed(Button button) const;
+  bool down(Button button) const;
   bool held(Button button, uint32_t milliseconds) const;
   std::optional<std::string> pollUid();
   bool tagPresent() const;

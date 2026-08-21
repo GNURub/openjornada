@@ -73,6 +73,10 @@ bool Hardware::pressed(Button button) const {
   return m5Button(button).wasPressed();
 }
 
+bool Hardware::down(Button button) const {
+  return m5Button(button).isPressed();
+}
+
 bool Hardware::held(Button button, uint32_t milliseconds) const {
   return m5Button(button).pressedFor(milliseconds);
 }

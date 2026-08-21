@@ -89,6 +89,7 @@ class Outbox {
   OutboxError append(const QueuedAction& action);
   OutboxError list(std::vector<QueuedAction>& output,
                    size_t limit = kDefaultBatchSize) const;
+  OutboxError pendingCount(size_t& output) const;
   OutboxError complete(const std::string& clientRequestId);
   OutboxError compact();
 

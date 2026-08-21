@@ -751,6 +751,28 @@ void test_completion_clear_failures_preserve_completed_prefix() {
   }
 }
 
+void test_pending_count_scans_beyond_the_in_memory_batch() {
+  MemoryStorage storage;
+  Outbox outbox(storage);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                        static_cast<int>(outbox.begin()));
+  for (uint32_t index = 1; index <= 75; ++index) {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(OutboxError::None),
+        static_cast<int>(outbox.append(
+            action(index, "pending-" + std::to_string(index)))));
+  }
+  for (uint32_t index = 1; index <= 12; ++index) {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(OutboxError::None),
+        static_cast<int>(outbox.complete("pending-" + std::to_string(index))));
+  }
+  size_t pending = 0;
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(OutboxError::None),
+                        static_cast<int>(outbox.pendingCount(pending)));
+  TEST_ASSERT_EQUAL_UINT(63, pending);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_codec_round_trip_preserves_retry_identity);
@@ -770,5 +792,6 @@ int main(int, char**) {
   RUN_TEST(test_action_and_completion_compaction_cut_windows_recover);
   RUN_TEST(test_compaction_write_rename_and_verify_failures_preserve_actions);
   RUN_TEST(test_completion_clear_failures_preserve_completed_prefix);
+  RUN_TEST(test_pending_count_scans_beyond_the_in_memory_batch);
   return UNITY_END();
 }

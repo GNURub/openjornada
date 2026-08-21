@@ -783,6 +783,21 @@ OutboxError Outbox::list(std::vector<QueuedAction>& output,
       stats);
 }
 
+OutboxError Outbox::pendingCount(size_t& output) const {
+  output = 0;
+  if (!begun_) return OutboxError::Unsupported;
+  QueueStats stats;
+  const OutboxError result = scanQueue(
+      storage_,
+      [](const QueuedAction&, const std::vector<uint8_t>&, bool) {
+        return OutboxError::None;
+      },
+      stats);
+  if (result != OutboxError::None) return result;
+  output = stats.actions - stats.completed;
+  return OutboxError::None;
+}
+
 OutboxError Outbox::append(const QueuedAction& action) {
   if (!begun_) return OutboxError::Unsupported;
   std::vector<uint8_t> encoded;

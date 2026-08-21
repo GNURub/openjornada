@@ -1,5 +1,7 @@
 #include "openjornada/outbox.hpp"
 
+#include "openjornada/storage_layout.hpp"
+
 #ifdef ARDUINO
 #include <LittleFS.h>
 
@@ -58,7 +60,8 @@ void LittleFsOutboxStorage::closeReadSession(const char* path) const {
 
 bool LittleFsOutboxStorage::begin() {
   closeReadSessions();
-  return LittleFS.begin(false);
+  return LittleFS.begin(false, kLittleFsMountPoint, kLittleFsMaxOpenFiles,
+                        kLittleFsPartitionLabel);
 }
 
 bool LittleFsOutboxStorage::exists(const char* path) const {

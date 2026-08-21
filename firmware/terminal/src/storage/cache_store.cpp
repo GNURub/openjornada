@@ -1,5 +1,7 @@
 #include "openjornada/cache_store.hpp"
 
+#include "openjornada/storage_layout.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -352,7 +354,8 @@ CacheError CacheCodec::decode(const std::vector<uint8_t>& input,
 
 bool CacheStore::begin() {
 #ifdef ARDUINO
-  return LittleFS.begin(false);
+  return LittleFS.begin(false, kLittleFsMountPoint, kLittleFsMaxOpenFiles,
+                        kLittleFsPartitionLabel);
 #else
   return false;
 #endif
@@ -361,8 +364,14 @@ bool CacheStore::begin() {
 bool CacheStore::formatAndInitialize() {
 #ifdef ARDUINO
   LittleFS.end();
+  // begin(false) sets the partition label without ever formatting. A valid
+  // existing filesystem must also be unmounted before the explicit format.
+  (void)LittleFS.begin(false, kLittleFsMountPoint, kLittleFsMaxOpenFiles,
+                       kLittleFsPartitionLabel);
+  LittleFS.end();
   if (!LittleFS.format()) return false;
-  return LittleFS.begin(false);
+  return LittleFS.begin(false, kLittleFsMountPoint, kLittleFsMaxOpenFiles,
+                        kLittleFsPartitionLabel);
 #else
   return false;
 #endif
