@@ -680,6 +680,18 @@ OutboxError atomicallyClearCompletions(OutboxStorage& storage) {
 
 }  // namespace
 
+OutboxReadiness assessOutboxReadiness(bool storageMounted,
+                                      OutboxError beginResult,
+                                      OutboxError pendingResult,
+                                      size_t pendingCount) {
+  if (!storageMounted || beginResult != OutboxError::None ||
+      pendingResult != OutboxError::None ||
+      pendingCount > OutboxCodec::kCapacity) {
+    return {false, OutboxCodec::kCapacity};
+  }
+  return {true, pendingCount};
+}
+
 OutboxError OutboxCodec::encode(const QueuedAction& action,
                                 std::vector<uint8_t>& output) {
   const OutboxError validation = validateAction(action);

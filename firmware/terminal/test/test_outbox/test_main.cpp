@@ -773,6 +773,31 @@ void test_pending_count_scans_beyond_the_in_memory_batch() {
   TEST_ASSERT_EQUAL_UINT(63, pending);
 }
 
+void test_startup_readiness_blocks_any_mount_begin_or_count_failure() {
+  const auto missing = assessOutboxReadiness(
+      false, OutboxError::Unsupported, OutboxError::Unsupported, 0);
+  TEST_ASSERT_FALSE(missing.operational);
+  TEST_ASSERT_EQUAL_UINT32(OutboxCodec::kCapacity,
+                           missing.pendingForSafety);
+
+  const auto corrupt = assessOutboxReadiness(
+      true, OutboxError::Checksum, OutboxError::Unsupported, 0);
+  TEST_ASSERT_FALSE(corrupt.operational);
+  TEST_ASSERT_EQUAL_UINT32(OutboxCodec::kCapacity,
+                           corrupt.pendingForSafety);
+
+  const auto unreadable = assessOutboxReadiness(
+      true, OutboxError::None, OutboxError::Io, 0);
+  TEST_ASSERT_FALSE(unreadable.operational);
+  TEST_ASSERT_EQUAL_UINT32(OutboxCodec::kCapacity,
+                           unreadable.pendingForSafety);
+
+  const auto ready = assessOutboxReadiness(
+      true, OutboxError::None, OutboxError::None, 37);
+  TEST_ASSERT_TRUE(ready.operational);
+  TEST_ASSERT_EQUAL_UINT32(37, ready.pendingForSafety);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_codec_round_trip_preserves_retry_identity);
@@ -793,5 +818,6 @@ int main(int, char**) {
   RUN_TEST(test_compaction_write_rename_and_verify_failures_preserve_actions);
   RUN_TEST(test_completion_clear_failures_preserve_completed_prefix);
   RUN_TEST(test_pending_count_scans_beyond_the_in_memory_batch);
+  RUN_TEST(test_startup_readiness_blocks_any_mount_begin_or_count_failure);
   return UNITY_END();
 }

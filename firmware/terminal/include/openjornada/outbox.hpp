@@ -54,6 +54,16 @@ class OutboxCodec {
                             QueuedAction& output);
 };
 
+struct OutboxReadiness {
+  bool operational = false;
+  size_t pendingForSafety = OutboxCodec::kCapacity;
+};
+
+OutboxReadiness assessOutboxReadiness(bool storageMounted,
+                                      OutboxError beginResult,
+                                      OutboxError pendingResult,
+                                      size_t pendingCount);
+
 class OutboxStorage {
  public:
   virtual ~OutboxStorage() = default;
