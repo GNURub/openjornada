@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <limits>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 
 namespace openjornada {
@@ -20,6 +19,9 @@ constexpr size_t kMaxUid = 20;
 constexpr size_t kMaxTimestamp = 35;
 constexpr size_t kMaxRebootId = 64;
 constexpr size_t kHashHexLength = 64;
+constexpr size_t kCopyChunkSize = OutboxCodec::kMaxRecordSize;
+
+enum class JournalKind { Action, Completion };
 
 void appendU16(std::vector<uint8_t>& output, uint16_t value) {
   output.push_back(static_cast<uint8_t>(value & 0xFFU));
@@ -32,15 +34,15 @@ void appendU32(std::vector<uint8_t>& output, uint32_t value) {
   }
 }
 
-uint16_t readU16(const std::vector<uint8_t>& input, size_t offset) {
-  return static_cast<uint16_t>(input[offset]) |
-         static_cast<uint16_t>(input[offset + 1]) << 8U;
+uint16_t readU16(const uint8_t* input) {
+  return static_cast<uint16_t>(input[0]) |
+         static_cast<uint16_t>(input[1]) << 8U;
 }
 
-uint32_t readU32(const std::vector<uint8_t>& input, size_t offset) {
+uint32_t readU32(const uint8_t* input) {
   uint32_t value = 0;
   for (unsigned shift = 0; shift < 32; shift += 8) {
-    value |= static_cast<uint32_t>(input[offset + shift / 8]) << shift;
+    value |= static_cast<uint32_t>(input[shift / 8]) << shift;
   }
   return value;
 }
@@ -84,8 +86,8 @@ bool validLowerHex(std::string_view value, bool allowEmpty) {
 }
 
 bool validCommand(Command command) {
-  const auto value = static_cast<unsigned>(command);
-  return value <= static_cast<unsigned>(Command::ClockOut);
+  return static_cast<unsigned>(command) <=
+         static_cast<unsigned>(Command::ClockOut);
 }
 
 OutboxError validateAction(const QueuedAction& action) {
@@ -109,8 +111,8 @@ void appendString(std::vector<uint8_t>& output, std::string_view value) {
   output.insert(output.end(), value.begin(), value.end());
 }
 
-bool takeU8(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
-            uint8_t& output) {
+bool takeByte(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
+              uint8_t& output) {
   if (cursor >= end) return false;
   output = input[cursor++];
   return true;
@@ -119,7 +121,7 @@ bool takeU8(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
 bool takeU32(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
              uint32_t& output) {
   if (cursor > end || end - cursor < 4) return false;
-  output = readU32(input, cursor);
+  output = readU32(input.data() + cursor);
   cursor += 4;
   return true;
 }
@@ -127,12 +129,16 @@ bool takeU32(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
 bool takeString(const std::vector<uint8_t>& input, size_t end, size_t& cursor,
                 size_t maximum, std::string& output) {
   if (cursor > end || end - cursor < 2) return false;
-  const size_t length = readU16(input, cursor);
+  const size_t length = readU16(input.data() + cursor);
   cursor += 2;
   if (length > maximum || cursor > end || end - cursor < length) return false;
   output.assign(reinterpret_cast<const char*>(input.data() + cursor), length);
   cursor += length;
   return true;
+}
+
+const std::array<uint8_t, 4>& magicFor(JournalKind kind) {
+  return kind == JournalKind::Action ? kActionMagic : kCompletionMagic;
 }
 
 OutboxError framePayload(const std::array<uint8_t, 4>& magic,
@@ -154,34 +160,6 @@ OutboxError framePayload(const std::array<uint8_t, 4>& magic,
   return OutboxError::None;
 }
 
-OutboxError inspectFrame(const std::vector<uint8_t>& input, size_t offset,
-                         const std::array<uint8_t, 4>& magic,
-                         size_t& frameLength) {
-  frameLength = 0;
-  if (offset > input.size() || input.size() - offset < OutboxCodec::kHeaderSize) {
-    return OutboxError::Truncated;
-  }
-  for (size_t index = 0; index < magic.size(); ++index) {
-    if (input[offset + index] != magic[index]) return OutboxError::Magic;
-  }
-  if (input[offset + 4] != kFormatVersion) return OutboxError::Version;
-  const uint32_t payloadLength = readU32(input, offset + 5);
-  if (payloadLength > OutboxCodec::kMaxRecordSize - OutboxCodec::kHeaderSize -
-                          OutboxCodec::kCrcSize) {
-    return OutboxError::Length;
-  }
-  frameLength = OutboxCodec::kHeaderSize +
-                static_cast<size_t>(payloadLength) + OutboxCodec::kCrcSize;
-  if (frameLength > input.size() - offset) return OutboxError::Truncated;
-  const uint32_t expected =
-      readU32(input, offset + frameLength - OutboxCodec::kCrcSize);
-  if (crc32(input.data() + offset, frameLength - OutboxCodec::kCrcSize) !=
-      expected) {
-    return OutboxError::Checksum;
-  }
-  return OutboxError::None;
-}
-
 OutboxError encodeCompletion(const std::string& id,
                              std::vector<uint8_t>& output) {
   if (!validText(id, kMaxClientRequestId, false)) {
@@ -192,32 +170,20 @@ OutboxError encodeCompletion(const std::string& id,
   return framePayload(kCompletionMagic, payload, output);
 }
 
-OutboxError decodeCompletions(const std::vector<uint8_t>& journal,
-                              std::vector<std::string>& output,
-                              size_t* validPrefix = nullptr) {
-  output.clear();
-  size_t cursor = 0;
-  while (cursor < journal.size()) {
-    size_t frameLength = 0;
-    const OutboxError frame =
-        inspectFrame(journal, cursor, kCompletionMagic, frameLength);
-    if (frame != OutboxError::None) {
-      if (validPrefix != nullptr) *validPrefix = cursor;
-      return frame;
-    }
-    const size_t payloadEnd = cursor + frameLength - OutboxCodec::kCrcSize;
-    size_t payloadCursor = cursor + OutboxCodec::kHeaderSize;
-    std::string id;
-    if (!takeString(journal, payloadEnd, payloadCursor, kMaxClientRequestId, id) ||
-        payloadCursor != payloadEnd ||
-        !validText(id, kMaxClientRequestId, false)) {
-      return OutboxError::InvalidData;
-    }
-    if (output.size() >= OutboxCodec::kCapacity) return OutboxError::Capacity;
-    output.push_back(std::move(id));
-    cursor += frameLength;
+OutboxError decodeCompletion(const std::vector<uint8_t>& frame,
+                             std::string& output) {
+  if (frame.size() < OutboxCodec::kHeaderSize + OutboxCodec::kCrcSize) {
+    return OutboxError::Truncated;
   }
-  if (validPrefix != nullptr) *validPrefix = cursor;
+  const size_t payloadEnd = frame.size() - OutboxCodec::kCrcSize;
+  size_t cursor = OutboxCodec::kHeaderSize;
+  std::string candidate;
+  if (!takeString(frame, payloadEnd, cursor, kMaxClientRequestId, candidate) ||
+      cursor != payloadEnd ||
+      !validText(candidate, kMaxClientRequestId, false)) {
+    return OutboxError::InvalidData;
+  }
+  output = std::move(candidate);
   return OutboxError::None;
 }
 
@@ -233,60 +199,446 @@ bool sameAction(const QueuedAction& left, const QueuedAction& right) {
          left.signature == right.signature;
 }
 
-bool sameActions(const std::vector<QueuedAction>& left,
-                 const std::vector<QueuedAction>& right) {
-  if (left.size() != right.size()) return false;
-  for (size_t index = 0; index < left.size(); ++index) {
-    if (!sameAction(left[index], right[index])) return false;
-  }
-  return true;
-}
+struct FrameHeader {
+  uint32_t payloadLength = 0;
+  size_t frameLength = 0;
+};
 
-OutboxError readActionFile(OutboxStorage& storage, const char* path,
-                           std::vector<QueuedAction>& actions,
-                           bool recoverTruncated) {
-  if (!storage.exists(path)) {
-    actions.clear();
-    return OutboxError::NotFound;
+OutboxError readHeader(const OutboxStorage& storage, const char* path,
+                       size_t fileSize, size_t offset, JournalKind kind,
+                       FrameHeader& output) {
+  if (offset > fileSize || fileSize - offset < OutboxCodec::kHeaderSize) {
+    return OutboxError::Truncated;
   }
-  std::vector<uint8_t> bytes;
-  if (!storage.read(path, bytes)) return OutboxError::Io;
-  size_t validPrefix = 0;
-  bool truncated = false;
-  const OutboxError decoded =
-      OutboxCodec::decodeJournal(bytes, actions, &validPrefix, &truncated);
-  if (decoded != OutboxError::Truncated || !recoverTruncated) return decoded;
-  bytes.resize(validPrefix);
-  if (!storage.writeAndFlush(path, bytes)) return OutboxError::Io;
-  return OutboxError::None;
-}
-
-OutboxError readCompletionFile(OutboxStorage& storage,
-                               std::vector<std::string>& completed,
-                               bool recoverTruncated) {
-  if (!storage.exists(Outbox::kCompletionPath)) {
-    completed.clear();
-    return OutboxError::NotFound;
-  }
-  std::vector<uint8_t> bytes;
-  if (!storage.read(Outbox::kCompletionPath, bytes)) return OutboxError::Io;
-  size_t validPrefix = 0;
-  const OutboxError decoded = decodeCompletions(bytes, completed, &validPrefix);
-  if (decoded != OutboxError::Truncated || !recoverTruncated) return decoded;
-  bytes.resize(validPrefix);
-  if (!storage.writeAndFlush(Outbox::kCompletionPath, bytes)) {
+  std::array<uint8_t, OutboxCodec::kHeaderSize> header{};
+  if (!storage.read(path, offset, header.data(), header.size())) {
     return OutboxError::Io;
   }
+  const auto& magic = magicFor(kind);
+  for (size_t index = 0; index < magic.size(); ++index) {
+    if (header[index] != magic[index]) return OutboxError::Magic;
+  }
+  if (header[4] != kFormatVersion) return OutboxError::Version;
+  output.payloadLength = readU32(header.data() + 5);
+  const size_t maximumPayload = OutboxCodec::kMaxRecordSize -
+                                OutboxCodec::kHeaderSize -
+                                OutboxCodec::kCrcSize;
+  if (output.payloadLength > maximumPayload) return OutboxError::Length;
+  output.frameLength = OutboxCodec::kHeaderSize +
+                       static_cast<size_t>(output.payloadLength) +
+                       OutboxCodec::kCrcSize;
   return OutboxError::None;
+}
+
+OutboxError readCompleteFrame(const OutboxStorage& storage, const char* path,
+                              size_t fileSize, size_t offset, JournalKind kind,
+                              std::vector<uint8_t>& frame) {
+  FrameHeader header;
+  OutboxError result = readHeader(storage, path, fileSize, offset, kind, header);
+  if (result != OutboxError::None) return result;
+  if (header.frameLength > fileSize - offset) return OutboxError::Truncated;
+  frame.resize(header.frameLength);
+  if (!storage.read(path, offset, frame.data(), frame.size())) {
+    return OutboxError::Io;
+  }
+  const uint32_t expected =
+      readU32(frame.data() + frame.size() - OutboxCodec::kCrcSize);
+  if (crc32(frame.data(), frame.size() - OutboxCodec::kCrcSize) != expected) {
+    return OutboxError::Checksum;
+  }
+  return OutboxError::None;
+}
+
+OutboxError validFrameAt(const OutboxStorage& storage, const char* path,
+                         size_t fileSize, size_t offset, JournalKind kind,
+                         bool& valid) {
+  valid = false;
+  std::vector<uint8_t> frame;
+  const OutboxError result =
+      readCompleteFrame(storage, path, fileSize, offset, kind, frame);
+  if (result == OutboxError::Io) return result;
+  if (result != OutboxError::None) return OutboxError::None;
+  if (kind == JournalKind::Action) {
+    QueuedAction action;
+    valid = OutboxCodec::decode(frame, action) == OutboxError::None;
+  } else {
+    std::string id;
+    valid = decodeCompletion(frame, id) == OutboxError::None;
+  }
+  return OutboxError::None;
+}
+
+OutboxError hasValidLaterFrame(const OutboxStorage& storage, const char* path,
+                               size_t fileSize, size_t after, JournalKind kind,
+                               bool& found) {
+  found = false;
+  if (fileSize < OutboxCodec::kHeaderSize || after >= fileSize) {
+    return OutboxError::None;
+  }
+  const size_t last = fileSize - OutboxCodec::kHeaderSize;
+  for (size_t offset = after; offset <= last; ++offset) {
+    std::array<uint8_t, 4> prefix{};
+    if (!storage.read(path, offset, prefix.data(), prefix.size())) {
+      return OutboxError::Io;
+    }
+    if (prefix == magicFor(kind)) {
+      bool valid = false;
+      const OutboxError result = validFrameAt(storage, path, fileSize, offset,
+                                              kind, valid);
+      if (result != OutboxError::None) return result;
+      if (valid) {
+        found = true;
+        return OutboxError::None;
+      }
+    }
+  }
+  return OutboxError::None;
+}
+
+class ActionReader {
+ public:
+  ActionReader(const OutboxStorage& storage, const char* path)
+      : storage_(storage), path_(path), exists_(storage.exists(path)) {
+    if (exists_ && !storage_.size(path_, size_)) error_ = OutboxError::Io;
+  }
+
+  OutboxError next(QueuedAction& action, std::vector<uint8_t>& frame,
+                   bool& available) {
+    available = false;
+    if (error_ != OutboxError::None) return error_;
+    if (!exists_ || offset_ == size_) return OutboxError::None;
+    FrameHeader header;
+    OutboxError result = readHeader(storage_, path_, size_, offset_,
+                                    JournalKind::Action, header);
+    if (result != OutboxError::None) return error_ = result;
+    if (header.frameLength > size_ - offset_) {
+      bool laterFrame = false;
+      result = hasValidLaterFrame(storage_, path_, size_, offset_ + 1,
+                                  JournalKind::Action, laterFrame);
+      if (result != OutboxError::None) return error_ = result;
+      return error_ = laterFrame ? OutboxError::Length
+                                 : OutboxError::Truncated;
+    }
+    result = readCompleteFrame(storage_, path_, size_, offset_,
+                               JournalKind::Action, frame);
+    if (result != OutboxError::None) return error_ = result;
+    result = OutboxCodec::decode(frame, action);
+    if (result != OutboxError::None) return error_ = result;
+    if (count_ >= OutboxCodec::kCapacity) {
+      return error_ = OutboxError::Capacity;
+    }
+    ++count_;
+    offset_ += frame.size();
+    available = true;
+    return OutboxError::None;
+  }
+
+  size_t offset() const { return offset_; }
+  size_t count() const { return count_; }
+
+ private:
+  const OutboxStorage& storage_;
+  const char* path_;
+  bool exists_ = false;
+  size_t size_ = 0;
+  size_t offset_ = 0;
+  size_t count_ = 0;
+  OutboxError error_ = OutboxError::None;
+};
+
+class CompletionReader {
+ public:
+  CompletionReader(const OutboxStorage& storage, const char* path)
+      : storage_(storage), path_(path), exists_(storage.exists(path)) {
+    if (exists_ && !storage_.size(path_, size_)) error_ = OutboxError::Io;
+  }
+
+  OutboxError next(std::string& id, std::vector<uint8_t>& frame,
+                   bool& available) {
+    available = false;
+    if (error_ != OutboxError::None) return error_;
+    if (!exists_ || offset_ == size_) return OutboxError::None;
+    FrameHeader header;
+    OutboxError result = readHeader(storage_, path_, size_, offset_,
+                                    JournalKind::Completion, header);
+    if (result != OutboxError::None) return error_ = result;
+    if (header.frameLength > size_ - offset_) {
+      bool laterFrame = false;
+      result = hasValidLaterFrame(storage_, path_, size_, offset_ + 1,
+                                  JournalKind::Completion, laterFrame);
+      if (result != OutboxError::None) return error_ = result;
+      return error_ = laterFrame ? OutboxError::Length
+                                 : OutboxError::Truncated;
+    }
+    result = readCompleteFrame(storage_, path_, size_, offset_,
+                               JournalKind::Completion, frame);
+    if (result != OutboxError::None) return error_ = result;
+    result = decodeCompletion(frame, id);
+    if (result != OutboxError::None) return error_ = result;
+    if (count_ >= OutboxCodec::kCapacity) {
+      return error_ = OutboxError::Capacity;
+    }
+    ++count_;
+    offset_ += frame.size();
+    available = true;
+    return OutboxError::None;
+  }
+
+  size_t offset() const { return offset_; }
+  size_t count() const { return count_; }
+
+ private:
+  const OutboxStorage& storage_;
+  const char* path_;
+  bool exists_ = false;
+  size_t size_ = 0;
+  size_t offset_ = 0;
+  size_t count_ = 0;
+  OutboxError error_ = OutboxError::None;
+};
+
+struct JournalInspection {
+  bool exists = false;
+  OutboxError error = OutboxError::NotFound;
+  size_t validPrefix = 0;
+  size_t count = 0;
+};
+
+JournalInspection inspectJournal(const OutboxStorage& storage, const char* path,
+                                 JournalKind kind) {
+  JournalInspection inspection;
+  inspection.exists = storage.exists(path);
+  if (!inspection.exists) return inspection;
+  std::vector<uint8_t> frame;
+  bool available = false;
+  if (kind == JournalKind::Action) {
+    ActionReader reader(storage, path);
+    QueuedAction action;
+    while (true) {
+      const OutboxError result = reader.next(action, frame, available);
+      if (result != OutboxError::None) {
+        inspection.error = result;
+        inspection.validPrefix = reader.offset();
+        inspection.count = reader.count();
+        return inspection;
+      }
+      if (!available) break;
+    }
+    inspection.validPrefix = reader.offset();
+    inspection.count = reader.count();
+  } else {
+    CompletionReader reader(storage, path);
+    std::string id;
+    while (true) {
+      const OutboxError result = reader.next(id, frame, available);
+      if (result != OutboxError::None) {
+        inspection.error = result;
+        inspection.validPrefix = reader.offset();
+        inspection.count = reader.count();
+        return inspection;
+      }
+      if (!available) break;
+    }
+    inspection.validPrefix = reader.offset();
+    inspection.count = reader.count();
+  }
+  inspection.error = OutboxError::None;
+  return inspection;
 }
 
 bool removeIfPresent(OutboxStorage& storage, const char* path) {
   return !storage.exists(path) || storage.remove(path);
 }
 
-OutboxError verifyExact(OutboxStorage& storage, const char* path,
-                        std::vector<QueuedAction>& actions) {
-  return readActionFile(storage, path, actions, false);
+OutboxError verifyJournal(const OutboxStorage& storage, const char* path,
+                          JournalKind kind, size_t expectedCount) {
+  const JournalInspection inspection = inspectJournal(storage, path, kind);
+  if (inspection.error != OutboxError::None) return inspection.error;
+  return inspection.count == expectedCount ? OutboxError::None
+                                            : OutboxError::InvalidData;
+}
+
+OutboxError restoreOld(OutboxStorage& storage, const char* current,
+                       const char* old, JournalKind kind,
+                       size_t expectedCount) {
+  if (!removeIfPresent(storage, current) || !storage.rename(old, current)) {
+    return OutboxError::Io;
+  }
+  return verifyJournal(storage, current, kind, expectedCount);
+}
+
+OutboxError activateCandidate(OutboxStorage& storage, const char* candidate,
+                              const char* current, const char* other,
+                              JournalKind kind, size_t expectedCount) {
+  if (!removeIfPresent(storage, current) ||
+      !storage.rename(candidate, current)) {
+    return OutboxError::Io;
+  }
+  const OutboxError verified =
+      verifyJournal(storage, current, kind, expectedCount);
+  if (verified != OutboxError::None) return verified;
+  if (!removeIfPresent(storage, other)) return OutboxError::Io;
+  return OutboxError::None;
+}
+
+OutboxError atomicRepairPrefix(OutboxStorage& storage, const char* current,
+                               const char* fresh, const char* old,
+                               JournalKind kind, size_t validPrefix,
+                               size_t expectedCount) {
+  if (!removeIfPresent(storage, fresh) || !removeIfPresent(storage, old) ||
+      !storage.writeAndFlush(fresh, {})) {
+    return OutboxError::Io;
+  }
+  std::array<uint8_t, kCopyChunkSize> buffer{};
+  for (size_t offset = 0; offset < validPrefix;) {
+    const size_t length = std::min(buffer.size(), validPrefix - offset);
+    if (!storage.read(current, offset, buffer.data(), length)) {
+      return OutboxError::Io;
+    }
+    const std::vector<uint8_t> chunk(buffer.begin(), buffer.begin() + length);
+    if (!storage.appendAndFlush(fresh, chunk)) return OutboxError::Io;
+    offset += length;
+  }
+  OutboxError result = verifyJournal(storage, fresh, kind, expectedCount);
+  if (result != OutboxError::None) return result;
+  if (!storage.rename(current, old)) return OutboxError::Io;
+  if (!storage.rename(fresh, current)) {
+    storage.rename(old, current);
+    return OutboxError::Io;
+  }
+  result = verifyJournal(storage, current, kind, expectedCount);
+  if (result != OutboxError::None) {
+    removeIfPresent(storage, current);
+    storage.rename(old, current);
+    return result;
+  }
+  return removeIfPresent(storage, old) ? OutboxError::None : OutboxError::Io;
+}
+
+OutboxError recoverJournal(OutboxStorage& storage, const char* current,
+                           const char* fresh, const char* old,
+                           JournalKind kind) {
+  const JournalInspection currentState = inspectJournal(storage, current, kind);
+  if (currentState.error == OutboxError::None) {
+    if (!removeIfPresent(storage, fresh) || !removeIfPresent(storage, old)) {
+      return OutboxError::Io;
+    }
+    return OutboxError::None;
+  }
+  const JournalInspection freshState = inspectJournal(storage, fresh, kind);
+  const JournalInspection oldState = inspectJournal(storage, old, kind);
+
+  if (currentState.error == OutboxError::Truncated &&
+      oldState.error != OutboxError::None) {
+    return atomicRepairPrefix(storage, current, fresh, old, kind,
+                              currentState.validPrefix, currentState.count);
+  }
+  if (!currentState.exists && freshState.error == OutboxError::None) {
+    return activateCandidate(storage, fresh, current, old, kind,
+                             freshState.count);
+  }
+  if (oldState.error == OutboxError::None) {
+    if (!removeIfPresent(storage, current)) return OutboxError::Io;
+    const OutboxError result =
+        restoreOld(storage, current, old, kind, oldState.count);
+    if (result != OutboxError::None) return result;
+    return removeIfPresent(storage, fresh) ? OutboxError::None
+                                           : OutboxError::Io;
+  }
+  if (freshState.error == OutboxError::None) {
+    return activateCandidate(storage, fresh, current, old, kind,
+                             freshState.count);
+  }
+  if (!currentState.exists && !freshState.exists && !oldState.exists) {
+    return OutboxError::None;
+  }
+  if (currentState.exists) return currentState.error;
+  if (oldState.exists) return oldState.error;
+  return freshState.error;
+}
+
+struct QueueStats {
+  size_t actions = 0;
+  size_t completed = 0;
+};
+
+template <typename Visitor>
+OutboxError scanQueue(const OutboxStorage& storage, Visitor&& visitor,
+                      QueueStats& stats) {
+  stats = {};
+  ActionReader actions(storage, Outbox::kCurrentPath);
+  CompletionReader completions(storage, Outbox::kCompletionPath);
+  std::vector<uint8_t> actionFrame;
+  std::vector<uint8_t> completionFrame;
+  bool actionAvailable = false;
+  bool completionAvailable = false;
+
+  while (true) {
+    std::string completedId;
+    OutboxError result =
+        completions.next(completedId, completionFrame, completionAvailable);
+    if (result != OutboxError::None) return result;
+    if (!completionAvailable) break;
+    QueuedAction action;
+    result = actions.next(action, actionFrame, actionAvailable);
+    if (result != OutboxError::None) return result;
+    if (!actionAvailable || action.clientRequestId != completedId) {
+      return OutboxError::InvalidData;
+    }
+    ++stats.actions;
+    ++stats.completed;
+    result = visitor(action, actionFrame, true);
+    if (result != OutboxError::None) return result;
+  }
+
+  while (true) {
+    QueuedAction action;
+    const OutboxError result =
+        actions.next(action, actionFrame, actionAvailable);
+    if (result != OutboxError::None) return result;
+    if (!actionAvailable) break;
+    ++stats.actions;
+    const OutboxError visited = visitor(action, actionFrame, false);
+    if (visited != OutboxError::None) return visited;
+  }
+  return OutboxError::None;
+}
+
+OutboxError atomicallyClearCompletions(OutboxStorage& storage) {
+  if (!removeIfPresent(storage, Outbox::kCompletionNewPath) ||
+      !storage.writeAndFlush(Outbox::kCompletionNewPath, {})) {
+    return OutboxError::Io;
+  }
+  OutboxError result = verifyJournal(storage, Outbox::kCompletionNewPath,
+                                     JournalKind::Completion, 0);
+  if (result != OutboxError::None) return result;
+  if (!removeIfPresent(storage, Outbox::kCompletionOldPath)) {
+    return OutboxError::Io;
+  }
+  const bool hadCurrent = storage.exists(Outbox::kCompletionPath);
+  if (hadCurrent &&
+      !storage.rename(Outbox::kCompletionPath, Outbox::kCompletionOldPath)) {
+    return OutboxError::Io;
+  }
+  if (!storage.rename(Outbox::kCompletionNewPath,
+                      Outbox::kCompletionPath)) {
+    if (hadCurrent) {
+      storage.rename(Outbox::kCompletionOldPath, Outbox::kCompletionPath);
+    }
+    return OutboxError::Io;
+  }
+  result = verifyJournal(storage, Outbox::kCompletionPath,
+                         JournalKind::Completion, 0);
+  if (result != OutboxError::None) {
+    removeIfPresent(storage, Outbox::kCompletionPath);
+    if (hadCurrent) {
+      storage.rename(Outbox::kCompletionOldPath, Outbox::kCompletionPath);
+    }
+    return result;
+  }
+  return removeIfPresent(storage, Outbox::kCompletionOldPath)
+             ? OutboxError::None
+             : OutboxError::Io;
 }
 
 }  // namespace
@@ -311,18 +663,33 @@ OutboxError OutboxCodec::encode(const QueuedAction& action,
 
 OutboxError OutboxCodec::decode(const std::vector<uint8_t>& record,
                                 QueuedAction& output) {
-  size_t frameLength = 0;
-  const OutboxError frame = inspectFrame(record, 0, kActionMagic, frameLength);
-  if (frame != OutboxError::None) return frame;
-  if (frameLength != record.size()) return OutboxError::Length;
-  const size_t payloadEnd = frameLength - kCrcSize;
+  if (record.size() < kHeaderSize + kCrcSize ||
+      record.size() > kMaxRecordSize) {
+    return OutboxError::Length;
+  }
+  for (size_t index = 0; index < kActionMagic.size(); ++index) {
+    if (record[index] != kActionMagic[index]) return OutboxError::Magic;
+  }
+  if (record[4] != kFormatVersion) return OutboxError::Version;
+  const size_t payloadLength = readU32(record.data() + 5);
+  if (payloadLength > kMaxRecordSize - kHeaderSize - kCrcSize) {
+    return OutboxError::Length;
+  }
+  if (kHeaderSize + payloadLength + kCrcSize != record.size()) {
+    return OutboxError::Length;
+  }
+  const uint32_t expected = readU32(record.data() + record.size() - kCrcSize);
+  if (crc32(record.data(), record.size() - kCrcSize) != expected) {
+    return OutboxError::Checksum;
+  }
+  const size_t payloadEnd = record.size() - kCrcSize;
   size_t cursor = kHeaderSize;
   uint8_t command = 0;
   QueuedAction candidate;
   if (!takeString(record, payloadEnd, cursor, kMaxClientRequestId,
                   candidate.clientRequestId) ||
       !takeString(record, payloadEnd, cursor, kMaxUid, candidate.uid) ||
-      !takeU8(record, payloadEnd, cursor, command) ||
+      !takeByte(record, payloadEnd, cursor, command) ||
       !takeString(record, payloadEnd, cursor, kMaxTimestamp,
                   candidate.deviceCapturedAt) ||
       !takeString(record, payloadEnd, cursor, kMaxTimestamp,
@@ -346,136 +713,37 @@ OutboxError OutboxCodec::decode(const std::vector<uint8_t>& record,
   return OutboxError::None;
 }
 
-OutboxError OutboxCodec::decodeJournal(const std::vector<uint8_t>& journal,
-                                       std::vector<QueuedAction>& output,
-                                       size_t* validPrefix,
-                                       bool* truncatedTail) {
-  output.clear();
-  if (validPrefix != nullptr) *validPrefix = 0;
-  if (truncatedTail != nullptr) *truncatedTail = false;
-  size_t cursor = 0;
-  while (cursor < journal.size()) {
-    size_t frameLength = 0;
-    const OutboxError frame =
-        inspectFrame(journal, cursor, kActionMagic, frameLength);
-    if (frame != OutboxError::None) {
-      if (validPrefix != nullptr) *validPrefix = cursor;
-      if (truncatedTail != nullptr) {
-        *truncatedTail = frame == OutboxError::Truncated;
-      }
-      return frame;
-    }
-    std::vector<uint8_t> record(journal.begin() + cursor,
-                                journal.begin() + cursor + frameLength);
-    QueuedAction action;
-    const OutboxError decoded = decode(record, action);
-    if (decoded != OutboxError::None) return decoded;
-    if (output.size() >= kCapacity) return OutboxError::Capacity;
-    output.push_back(std::move(action));
-    cursor += frameLength;
-  }
-  if (validPrefix != nullptr) *validPrefix = cursor;
-  return OutboxError::None;
-}
-
 OutboxError Outbox::begin() {
-  std::vector<QueuedAction> current;
-  std::vector<QueuedAction> candidate;
-  const bool hasCurrent = storage_.exists(kCurrentPath);
-  OutboxError currentResult = hasCurrent
-                                  ? readActionFile(storage_, kCurrentPath,
-                                                   current, false)
-                                  : OutboxError::NotFound;
-
-  if (currentResult == OutboxError::None) {
-    if (!removeIfPresent(storage_, kNewPath) ||
-        !removeIfPresent(storage_, kOldPath)) {
-      return OutboxError::Io;
-    }
-  } else {
-    const bool hasNew = storage_.exists(kNewPath);
-    const bool hasOld = storage_.exists(kOldPath);
-    std::vector<QueuedAction> fresh;
-    std::vector<QueuedAction> old;
-    const OutboxError newResult =
-        hasNew ? verifyExact(storage_, kNewPath, fresh) : OutboxError::NotFound;
-    const OutboxError oldResult =
-        hasOld ? verifyExact(storage_, kOldPath, old) : OutboxError::NotFound;
-
-    const char* recovery = nullptr;
-    if (currentResult == OutboxError::Truncated &&
-        oldResult != OutboxError::None) {
-      currentResult =
-          readActionFile(storage_, kCurrentPath, current, true);
-      if (currentResult != OutboxError::None) return currentResult;
-      if (!removeIfPresent(storage_, kNewPath) ||
-          !removeIfPresent(storage_, kOldPath)) {
-        return OutboxError::Io;
-      }
-    } else if (!hasCurrent && newResult == OutboxError::None) {
-      recovery = kNewPath;
-    } else if (oldResult == OutboxError::None) {
-      recovery = kOldPath;
-    } else if (newResult == OutboxError::None) {
-      recovery = kNewPath;
-    } else if (!hasCurrent && !hasNew && !hasOld) {
-      currentResult = OutboxError::None;
-    } else if (hasCurrent) {
-      return currentResult;
-    } else if (hasOld) {
-      return oldResult;
-    } else {
-      return newResult;
-    }
-
-    if (recovery != nullptr) {
-      if (!removeIfPresent(storage_, kCurrentPath) ||
-          !storage_.rename(recovery, kCurrentPath)) {
-        return OutboxError::Io;
-      }
-      if (verifyExact(storage_, kCurrentPath, candidate) != OutboxError::None) {
-        return OutboxError::Io;
-      }
-      if (!removeIfPresent(storage_, kNewPath) ||
-          !removeIfPresent(storage_, kOldPath)) {
-        return OutboxError::Io;
-      }
-    }
-  }
-
-  std::vector<std::string> completed;
-  const OutboxError completionResult =
-      readCompletionFile(storage_, completed, true);
-  if (completionResult != OutboxError::None &&
-      completionResult != OutboxError::NotFound) {
-    return completionResult;
-  }
+  OutboxError result = recoverJournal(storage_, kCurrentPath, kNewPath,
+                                      kOldPath, JournalKind::Action);
+  if (result != OutboxError::None) return result;
+  result = recoverJournal(storage_, kCompletionPath, kCompletionNewPath,
+                          kCompletionOldPath, JournalKind::Completion);
+  if (result != OutboxError::None) return result;
+  QueueStats stats;
+  result = scanQueue(storage_, [](const QueuedAction&,
+                                  const std::vector<uint8_t>&, bool) {
+    return OutboxError::None;
+  }, stats);
+  if (result != OutboxError::None) return result;
   begun_ = true;
   return OutboxError::None;
 }
 
-OutboxError Outbox::list(std::vector<QueuedAction>& output) const {
+OutboxError Outbox::list(std::vector<QueuedAction>& output,
+                         size_t limit) const {
   output.clear();
   if (!begun_) return OutboxError::Unsupported;
-  std::vector<QueuedAction> actions;
-  OutboxError result =
-      readActionFile(storage_, kCurrentPath, actions, false);
-  if (result == OutboxError::NotFound) return OutboxError::None;
-  if (result != OutboxError::None) return result;
-  std::vector<std::string> completions;
-  result = readCompletionFile(storage_, completions, false);
-  if (result != OutboxError::None && result != OutboxError::NotFound) {
-    return result;
-  }
-  const std::unordered_set<std::string> completed(completions.begin(),
-                                                   completions.end());
-  output.reserve(actions.size());
-  for (auto& action : actions) {
-    if (completed.find(action.clientRequestId) == completed.end()) {
-      output.push_back(std::move(action));
-    }
-  }
-  return OutboxError::None;
+  const size_t boundedLimit = std::min(limit, kMaximumBatchSize);
+  QueueStats stats;
+  return scanQueue(
+      storage_,
+      [&](const QueuedAction& action, const std::vector<uint8_t>&,
+          bool completed) {
+        if (!completed && output.size() < boundedLimit) output.push_back(action);
+        return OutboxError::None;
+      },
+      stats);
 }
 
 OutboxError Outbox::append(const QueuedAction& action) {
@@ -483,32 +751,27 @@ OutboxError Outbox::append(const QueuedAction& action) {
   std::vector<uint8_t> encoded;
   OutboxError result = OutboxCodec::encode(action, encoded);
   if (result != OutboxError::None) return result;
-
-  std::vector<QueuedAction> all;
-  result = readActionFile(storage_, kCurrentPath, all, false);
-  if (result != OutboxError::None && result != OutboxError::NotFound) {
-    return result;
-  }
-  for (const auto& existing : all) {
-    if (existing.clientRequestId == action.clientRequestId) {
-      return sameAction(existing, action) ? OutboxError::None
-                                          : OutboxError::InvalidData;
-    }
-  }
-  std::vector<std::string> completions;
-  result = readCompletionFile(storage_, completions, false);
-  if (result != OutboxError::None && result != OutboxError::NotFound) {
-    return result;
-  }
-  if (std::find(completions.begin(), completions.end(), action.clientRequestId) !=
-      completions.end()) {
-    return OutboxError::None;
-  }
-  std::vector<QueuedAction> pending;
-  result = list(pending);
+  bool exactDuplicate = false;
+  bool conflictingDuplicate = false;
+  QueueStats stats;
+  result = scanQueue(
+      storage_,
+      [&](const QueuedAction& existing, const std::vector<uint8_t>&, bool) {
+        if (existing.clientRequestId == action.clientRequestId) {
+          if (sameAction(existing, action)) {
+            exactDuplicate = true;
+          } else {
+            conflictingDuplicate = true;
+          }
+        }
+        return OutboxError::None;
+      },
+      stats);
   if (result != OutboxError::None) return result;
-  if (pending.size() >= OutboxCodec::kCapacity) return OutboxError::Capacity;
-  if (all.size() >= OutboxCodec::kCapacity) {
+  if (conflictingDuplicate) return OutboxError::InvalidData;
+  if (exactDuplicate) return OutboxError::None;
+  if (stats.actions >= OutboxCodec::kCapacity) {
+    if (stats.completed == 0) return OutboxError::Capacity;
     result = compact();
     if (result != OutboxError::None) return result;
   }
@@ -521,75 +784,78 @@ OutboxError Outbox::complete(const std::string& clientRequestId) {
   if (!validText(clientRequestId, kMaxClientRequestId, false)) {
     return OutboxError::InvalidData;
   }
-  std::vector<std::string> completions;
-  OutboxError result = readCompletionFile(storage_, completions, false);
-  if (result != OutboxError::None && result != OutboxError::NotFound) {
-    return result;
-  }
-  if (std::find(completions.begin(), completions.end(), clientRequestId) !=
-      completions.end()) {
-    return OutboxError::None;
-  }
-  std::vector<QueuedAction> actions;
-  result = readActionFile(storage_, kCurrentPath, actions, false);
+  bool alreadyCompleted = false;
+  std::string firstPending;
+  QueueStats stats;
+  OutboxError result = scanQueue(
+      storage_,
+      [&](const QueuedAction& action, const std::vector<uint8_t>&,
+          bool completed) {
+        if (completed && action.clientRequestId == clientRequestId) {
+          alreadyCompleted = true;
+        }
+        if (!completed && firstPending.empty()) {
+          firstPending = action.clientRequestId;
+        }
+        return OutboxError::None;
+      },
+      stats);
   if (result != OutboxError::None) return result;
-  const bool found = std::any_of(actions.begin(), actions.end(),
-                                 [&](const QueuedAction& action) {
-                                   return action.clientRequestId ==
-                                          clientRequestId;
-                                 });
-  if (!found) return OutboxError::NotFound;
-  std::vector<uint8_t> encoded;
-  result = encodeCompletion(clientRequestId, encoded);
+  if (alreadyCompleted) return OutboxError::None;
+  if (firstPending.empty()) return OutboxError::NotFound;
+  if (firstPending != clientRequestId) return OutboxError::InvalidData;
+  std::vector<uint8_t> completion;
+  result = encodeCompletion(clientRequestId, completion);
   if (result != OutboxError::None) return result;
-  return storage_.appendAndFlush(kCompletionPath, encoded) ? OutboxError::None
-                                                          : OutboxError::Io;
+  return storage_.appendAndFlush(kCompletionPath, completion)
+             ? OutboxError::None
+             : OutboxError::Io;
 }
 
 OutboxError Outbox::compact() {
   if (!begun_) return OutboxError::Unsupported;
-  std::vector<QueuedAction> pending;
-  OutboxError result = list(pending);
-  if (result != OutboxError::None) return result;
-
-  std::vector<uint8_t> compacted;
-  for (const auto& action : pending) {
-    std::vector<uint8_t> record;
-    result = OutboxCodec::encode(action, record);
-    if (result != OutboxError::None) return result;
-    compacted.insert(compacted.end(), record.begin(), record.end());
-  }
   if (!removeIfPresent(storage_, kNewPath) ||
-      !storage_.writeAndFlush(kNewPath, compacted)) {
+      !storage_.writeAndFlush(kNewPath, {})) {
     return OutboxError::Io;
   }
-  std::vector<QueuedAction> verified;
-  if (verifyExact(storage_, kNewPath, verified) != OutboxError::None ||
-      !sameActions(verified, pending)) {
-    removeIfPresent(storage_, kNewPath);
-    return OutboxError::Checksum;
-  }
+  QueueStats stats;
+  size_t copied = 0;
+  OutboxError result = scanQueue(
+      storage_,
+      [&](const QueuedAction&, const std::vector<uint8_t>& frame,
+          bool completed) {
+        if (completed) return OutboxError::None;
+        if (!storage_.appendAndFlush(kNewPath, frame)) return OutboxError::Io;
+        ++copied;
+        return OutboxError::None;
+      },
+      stats);
+  if (result != OutboxError::None) return result;
+  result = verifyJournal(storage_, kNewPath, JournalKind::Action, copied);
+  if (result != OutboxError::None) return result;
 
-  const bool hadCurrent = storage_.exists(kCurrentPath);
+  // Clearing completions first can only cause idempotent re-sends if power is
+  // lost before the action journal swap; it can never create a chain hole.
+  result = atomicallyClearCompletions(storage_);
+  if (result != OutboxError::None) return result;
+
   if (!removeIfPresent(storage_, kOldPath)) return OutboxError::Io;
+  const bool hadCurrent = storage_.exists(kCurrentPath);
   if (hadCurrent && !storage_.rename(kCurrentPath, kOldPath)) {
-    removeIfPresent(storage_, kNewPath);
     return OutboxError::Io;
   }
   if (!storage_.rename(kNewPath, kCurrentPath)) {
     if (hadCurrent) storage_.rename(kOldPath, kCurrentPath);
     return OutboxError::Io;
   }
-  verified.clear();
-  result = verifyExact(storage_, kCurrentPath, verified);
-  if (result != OutboxError::None || !sameActions(verified, pending)) {
+  result = verifyJournal(storage_, kCurrentPath, JournalKind::Action, copied);
+  if (result != OutboxError::None) {
     removeIfPresent(storage_, kCurrentPath);
     if (hadCurrent) storage_.rename(kOldPath, kCurrentPath);
-    return result == OutboxError::None ? OutboxError::Checksum : result;
+    return result;
   }
-  if (!removeIfPresent(storage_, kCompletionPath)) return OutboxError::Io;
-  if (!removeIfPresent(storage_, kOldPath)) return OutboxError::Io;
-  return OutboxError::None;
+  return removeIfPresent(storage_, kOldPath) ? OutboxError::None
+                                             : OutboxError::Io;
 }
 
 }  // namespace openjornada

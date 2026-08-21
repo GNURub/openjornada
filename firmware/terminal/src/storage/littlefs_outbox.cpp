@@ -11,16 +11,25 @@ bool LittleFsOutboxStorage::exists(const char* path) const {
   return LittleFS.exists(path);
 }
 
-bool LittleFsOutboxStorage::read(const char* path,
-                                 std::vector<uint8_t>& output) const {
+bool LittleFsOutboxStorage::size(const char* path, size_t& output) const {
   File file = LittleFS.open(path, "r");
   if (!file || file.isDirectory()) {
     if (file) file.close();
     return false;
   }
-  const size_t length = file.size();
-  output.resize(length);
-  const size_t read = length == 0 ? 0 : file.read(output.data(), length);
+  output = file.size();
+  file.close();
+  return true;
+}
+
+bool LittleFsOutboxStorage::read(const char* path, size_t offset,
+                                 uint8_t* output, size_t length) const {
+  File file = LittleFS.open(path, "r");
+  if (!file || file.isDirectory() || !file.seek(offset, SeekSet)) {
+    if (file) file.close();
+    return false;
+  }
+  const size_t read = length == 0 ? 0 : file.read(output, length);
   file.close();
   return read == length;
 }

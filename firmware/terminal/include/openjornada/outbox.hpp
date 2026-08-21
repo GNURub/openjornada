@@ -47,17 +47,16 @@ class OutboxCodec {
                             std::vector<uint8_t>& output);
   static OutboxError decode(const std::vector<uint8_t>& record,
                             QueuedAction& output);
-  static OutboxError decodeJournal(const std::vector<uint8_t>& journal,
-                                   std::vector<QueuedAction>& output,
-                                   size_t* validPrefix = nullptr,
-                                   bool* truncatedTail = nullptr);
 };
 
 class OutboxStorage {
  public:
   virtual ~OutboxStorage() = default;
   virtual bool exists(const char* path) const = 0;
-  virtual bool read(const char* path, std::vector<uint8_t>& output) const = 0;
+  virtual bool size(const char* path, size_t& output) const = 0;
+  // Reads exactly length bytes. Production callers never request >1 frame.
+  virtual bool read(const char* path, size_t offset, uint8_t* output,
+                    size_t length) const = 0;
   // Implementations must durably flush bytes before reporting success.
   virtual bool appendAndFlush(const char* path,
                               const std::vector<uint8_t>& bytes) = 0;
@@ -73,12 +72,17 @@ class Outbox {
   static constexpr const char* kNewPath = "/outbox.new";
   static constexpr const char* kOldPath = "/outbox.old";
   static constexpr const char* kCompletionPath = "/outbox.done";
+  static constexpr const char* kCompletionNewPath = "/outbox.done.new";
+  static constexpr const char* kCompletionOldPath = "/outbox.done.old";
+  static constexpr size_t kMaximumBatchSize = 500;
+  static constexpr size_t kDefaultBatchSize = 50;
 
   explicit Outbox(OutboxStorage& storage) : storage_(storage) {}
 
   OutboxError begin();
   OutboxError append(const QueuedAction& action);
-  OutboxError list(std::vector<QueuedAction>& output) const;
+  OutboxError list(std::vector<QueuedAction>& output,
+                   size_t limit = kDefaultBatchSize) const;
   OutboxError complete(const std::string& clientRequestId);
   OutboxError compact();
 
@@ -92,7 +96,9 @@ class LittleFsOutboxStorage final : public OutboxStorage {
  public:
   bool begin();
   bool exists(const char* path) const override;
-  bool read(const char* path, std::vector<uint8_t>& output) const override;
+  bool size(const char* path, size_t& output) const override;
+  bool read(const char* path, size_t offset, uint8_t* output,
+            size_t length) const override;
   bool appendAndFlush(const char* path,
                       const std::vector<uint8_t>& bytes) override;
   bool writeAndFlush(const char* path,

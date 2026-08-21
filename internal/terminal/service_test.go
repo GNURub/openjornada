@@ -55,8 +55,21 @@ func TestOfflineSignatureIsBoundToTerminalAndChain(t *testing.T) {
 
 func TestFirmwareSignatureVector(t *testing.T) {
 	const token = "ojterm_abcdefghijkl_secret0123456789012345678901234567890123456789"
-	const canonical = "terminal-a|req-1|04A1B2C3|clock_in|2026-08-21T08:00:00.000Z||2026-08-21T07:59:59.000Z|1|boot-1|"
+	const expectedCanonical = "terminal-a|req-1|04A1B2C3|clock_in|2026-08-21T08:00:00.000Z||2026-08-21T07:59:59.000Z|1|boot-1|"
 	const expected = "f6d92375cab26283b16c1174a19c60cdaff19ac4c646f6e34f6748a90fc6b118"
+	action := queuedAction{
+		ClientRequestID:  "req-1",
+		UID:              "04A1B2C3",
+		Command:          CommandClockIn,
+		DeviceCapturedAt: "2026-08-21T08:00:00.000Z",
+		ClockSyncedAt:    "2026-08-21T07:59:59.000Z",
+		DeviceSequence:   1,
+		RebootID:         "boot-1",
+	}
+	canonical := canonicalQueuedAction("terminal-a", action)
+	if canonical != expectedCanonical {
+		t.Fatal("firmware canonical vector mismatch")
+	}
 
 	if got := signPayload(signingKeyForToken(token), canonical); got != expected {
 		t.Fatalf("firmware signature vector mismatch: got %s", got)
