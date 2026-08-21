@@ -101,17 +101,9 @@ std::optional<std::string> Hardware::pollUid() {
       return std::nullopt;
     }
 
-    const bool removedLongEnough =
-        absenceTimerRunning_ && millis() - absentSinceMs_ >= kRemovalMs;
     absenceTimerRunning_ = false;
     if (!reader.PICC_ReadCardSerial()) {
       rfidPollStatus_ = RfidPollStatus::ReadFailed;
-      return std::nullopt;
-    }
-
-    if (!removedLongEnough) {
-      reader.PICC_HaltA();
-      rfidPollStatus_ = RfidPollStatus::CardHeld;
       return std::nullopt;
     }
 

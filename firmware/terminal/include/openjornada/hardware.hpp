@@ -5,16 +5,9 @@
 #include <string>
 
 #include "openjornada/domain.hpp"
+#include "openjornada/rfid_diagnostic.hpp"
 
 namespace openjornada {
-
-enum class RfidPollStatus {
-  Unavailable,
-  NoNewCard,
-  CardHeld,
-  ReadFailed,
-  ReadSuccess
-};
 
 class Hardware {
  public:

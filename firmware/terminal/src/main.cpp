@@ -13,20 +13,19 @@ namespace {
 
 using openjornada::Button;
 using openjornada::Hardware;
+using openjornada::RfidDiagnosticGate;
 using openjornada::RfidPollStatus;
 using openjornada::UidGate;
 
 Hardware hardware;
 UidGate uidGate{300};
+RfidDiagnosticGate rfidDiagnosticGate{2000};
 bool rfidReady = false;
 uint32_t tagCount = 0;
 uint32_t buttonCount[3]{};
 std::string maskedUid = "esperando";
 std::string scanMessage = "esperando tag";
 size_t uidBytes = 0;
-RfidPollStatus lastLoggedRfidStatus = RfidPollStatus::Unavailable;
-bool rfidFailureLogged = false;
-uint32_t lastRfidFailureLogMs = 0;
 
 size_t buttonIndex(Button button) {
   return static_cast<size_t>(button);
@@ -97,17 +96,11 @@ void handleButton(Button button, char label) {
 
 void logRfidDiagnostic(RfidPollStatus status,
                        const std::optional<std::string>& uid) {
-  if (status == lastLoggedRfidStatus) {
+  if (!rfidDiagnosticGate.shouldLog(status, millis())) {
     return;
   }
-  lastLoggedRfidStatus = status;
 
   if (status == RfidPollStatus::ReadFailed) {
-    if (rfidFailureLogged && millis() - lastRfidFailureLogMs < 2000) {
-      return;
-    }
-    rfidFailureLogged = true;
-    lastRfidFailureLogMs = millis();
     Serial.println("[OJ-DIAG] RFID scan=card_detected result=read_failed");
     scanMessage = "detectado / fallo lectura";
     drawDynamicScreen();
