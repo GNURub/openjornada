@@ -5,9 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <ctime>
+#include <new>
 #include <optional>
 #include <string>
 
+#include "openjornada/api_client.hpp"
 #include "openjornada/cache_store.hpp"
 #include "openjornada/config.hpp"
 #include "openjornada/domain.hpp"
@@ -164,6 +167,26 @@ bool performFactoryReset(ConfigStore& configStore, CacheStore& cacheStore) {
   return configStore.clear();
 }
 
+bool prepareTlsClock(const DeviceConfig& candidate,
+                     std::string& displayError) {
+  if (candidate.baseUrl.rfind("https://", 0) != 0) return true;
+  constexpr std::time_t kEarliestTrustedTime = 1704067200;  // 2024-01-01 UTC
+  if (std::time(nullptr) >= kEarliestTrustedTime) return true;
+  configTime(0, 0, "pool.ntp.org", "time.google.com");
+  const uint32_t startedMs = millis();
+  while (std::time(nullptr) < kEarliestTrustedTime &&
+         millis() - startedMs < 10000U) {
+    M5.update();
+    delay(25);
+  }
+  if (std::time(nullptr) < kEarliestTrustedTime) {
+    displayError =
+        "No se pudo sincronizar la hora para comprobar el certificado.";
+    return false;
+  }
+  return true;
+}
+
 void showFactoryResetResult(bool success) {
   openjornada::drawProvisioningStatus(
       success ? "Datos borrados" : "No se pudo borrar",
@@ -176,14 +199,38 @@ bool runProvisioning(ConfigStore& store, BuildProfile profile,
                      const std::optional<DeviceConfig>& active,
                      size_t pendingCount) {
   ProvisioningPortal portal(store, profile, active, pendingCount);
+  openjornada::Esp32ApiClient apiClient(profile);
   const auto result = portal.run(
-      [](const DeviceConfig&, std::string& displayError) {
-        // Task 7 injects the protocol-v1 bootstrap transport here. Refusing the
-        // candidate is safer than persisting credentials that the server has
-        // not authenticated.
-        displayError = "La comprobación del servidor aún no está disponible "
-                       "en esta versión.";
-        return false;
+      [&](const DeviceConfig& candidate, std::string& displayError) {
+        if (!prepareTlsClock(candidate, displayError)) return false;
+        openjornada::BootstrapResponse response;
+        const openjornada::ApiCredentials credentials{
+            candidate.baseUrl, candidate.terminalToken};
+        const openjornada::BootstrapRequest request{
+            openjornada::kTerminalProtocolVersion, "m5stack-1.0.0",
+            static_cast<uint32_t>(
+                std::min(pendingCount, openjornada::OutboxCodec::kCapacity))};
+        openjornada::ApiCallResult call;
+        try {
+          call = apiClient.bootstrap(credentials, request, response, 10000);
+        } catch (const std::bad_alloc&) {
+          displayError = "El terminal no tiene memoria suficiente para "
+                         "comprobar el servidor.";
+          return false;
+        }
+        if (!call.ok) {
+          displayError = call.failure.safeMessage.empty()
+                             ? "No se pudo comprobar OpenJornada."
+                             : call.failure.safeMessage;
+          return false;
+        }
+        Serial.printf(
+            "[OJ-NET] bootstrap=ok protocol=%u cache_revision=%lu "
+            "server_time=%s\n",
+            static_cast<unsigned>(response.protocol.current),
+            static_cast<unsigned long>(response.cacheRevision),
+            response.serverTime.c_str());
+        return true;
       });
   return result.saved;
 }
