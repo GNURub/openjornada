@@ -59,6 +59,26 @@ visibilidad y el acceso heredado del repositorio. Para producción fija una
 versión exacta o un digest `sha256`; no dependas de `latest` para despliegues
 reproducibles.
 
+## Prueba local de un terminal RFID físico
+
+El firmware debe usar la IP LAN del ordenador que ejecuta OpenJornada, por
+ejemplo `http://192.168.1.20:8090`. No configures `127.0.0.1`: desde el M5Stack
+esa dirección apunta al propio dispositivo, no al ordenador.
+
+El backend sólo admite HTTP por LAN cuando las dos variables siguientes valen
+`true`, el host solicitado es una dirección RFC1918 y el peer remoto también es
+privado o local:
+
+```dotenv
+PB_DEMO_ENABLED=true
+PB_TERMINAL_DEV_INSECURE_HTTP=true
+```
+
+Esta excepción está prohibida en producción. En cualquier despliegue real usa
+HTTPS y fija ambas variables en `false`. La excepción no publica ni autoriza el
+panel PocketBase `/_/`; mantenlo sin exposición pública y restringido a
+administración.
+
 ## Despliegue en proveedores gestionados
 
 OpenJornada necesita una única instancia con almacenamiento persistente montado
@@ -73,9 +93,9 @@ Antes de desplegar prepara:
 - una URL HTTPS pública que se usará como `PB_PUBLIC_URL`;
 - un destino externo para copias cifradas del volumen.
 
-Mantén `PB_DEMO_ENABLED=false`. Configura SMTP después del primer acceso si no
-quieres introducir las credenciales durante el alta. En todos los proveedores,
-comprueba al terminar:
+Mantén `PB_DEMO_ENABLED=false` y `PB_TERMINAL_DEV_INSECURE_HTTP=false`.
+Configura SMTP después del primer acceso si no quieres introducir las
+credenciales durante el alta. En todos los proveedores, comprueba al terminar:
 
 ```text
 GET https://tu-dominio.example/api/health
@@ -243,6 +263,7 @@ PB_TIMEZONE=Europe/Madrid
 PB_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 PB_BOOTSTRAP_ADMIN_PASSWORD=una-contrasena-larga-y-unica
 PB_DEMO_ENABLED=false
+PB_TERMINAL_DEV_INSECURE_HTTP=false
 
 PB_MAIL_SENDER_NAME=OpenJornada
 PB_MAIL_SENDER_ADDRESS=no-reply@example.com
@@ -479,6 +500,7 @@ la interfaz.
 ## Lista de comprobación
 
 - `PB_DEMO_ENABLED=false`.
+- `PB_TERMINAL_DEV_INSECURE_HTTP=false`.
 - URL pública HTTPS correcta.
 - Clave de cifrado respaldada y no incluida en Git.
 - Contraseñas únicas y SMTP funcional.

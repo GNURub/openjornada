@@ -157,13 +157,14 @@ curl -fsS http://127.0.0.1:8090/api/health
 En producción:
 
 1. Mantén `PB_DEMO_ENABLED=false`.
-2. Usa una `PB_ENCRYPTION_KEY` única de 32 caracteres y guárdala fuera del servidor.
-3. Publica PocketBase mediante un proxy HTTPS; el compose de producción sólo
+2. Mantén `PB_TERMINAL_DEV_INSECURE_HTTP=false`.
+3. Usa una `PB_ENCRYPTION_KEY` única de 32 caracteres y guárdala fuera del servidor.
+4. Publica PocketBase mediante un proxy HTTPS; el compose de producción sólo
    escucha en `127.0.0.1:8090`.
-4. Restringe el panel `/_/` a administradores o a una red privada.
-5. Configura SMTP para verificación y recuperación de cuentas.
-6. Conserva el volumen `pocketbase_data` y programa copias cifradas.
-7. Revisa [docs/COMPLIANCE_ES.md](docs/COMPLIANCE_ES.md) antes de tratar datos reales.
+5. Restringe el panel `/_/` a administradores o a una red privada.
+6. Configura SMTP para verificación y recuperación de cuentas.
+7. Conserva el volumen `pocketbase_data` y programa copias cifradas.
+8. Revisa [docs/COMPLIANCE_ES.md](docs/COMPLIANCE_ES.md) antes de tratar datos reales.
 
 ### Imágenes Docker de release
 
@@ -234,6 +235,7 @@ instancia. Consulta la
 | `PB_SMTP_PASSWORD`            | Según proveedor | Contraseña de aplicación o secreto SMTP. Nunca debe añadirse a Git.           |
 | `PB_SMTP_TLS`                 | Para correo     | `true` obliga TLS; `false` intenta STARTTLS y deja la decisión al servidor.   |
 | `PB_DEMO_ENABLED`             | No              | Crea una empleada de ejemplo cuando vale `true`.                              |
+| `PB_TERMINAL_DEV_INSECURE_HTTP` | No            | Permite HTTP RFID sólo en demo y red privada; debe ser `false` en producción. |
 | `PB_DEMO_EMAIL`               | Demo            | Correo de la empleada de ejemplo.                                             |
 | `PB_DEMO_PASSWORD`            | Demo            | Contraseña de la empleada de ejemplo.                                         |
 
@@ -308,6 +310,13 @@ online usa hora de servidor y contexto firmado; la cola offline se firma en el
 terminal, conserva hora y secuencia del dispositivo y sólo se acepta si el reloj
 tuvo una sincronización fiable en las últimas 24 horas. Usa siempre HTTPS,
 custodia físicamente las claves y revoca cualquier terminal perdido.
+
+Para probar un M5Stack físico en una red local sin HTTPS, activa a la vez
+`PB_DEMO_ENABLED=true` y `PB_TERMINAL_DEV_INSECURE_HTTP=true`. El terminal debe
+usar como URL la IP LAN del ordenador, por ejemplo `http://192.168.1.20:8090`:
+`127.0.0.1` apunta al propio M5Stack y no al servidor. La excepción sólo acepta
+hosts RFC1918 y peers privados o locales. Es exclusivamente de desarrollo;
+`PB_TERMINAL_DEV_INSECURE_HTTP` debe permanecer en `false` en producción.
 
 Con `pnpm start` está disponible `/terminal-simulator`. La ruta sólo existe en
 desarrollo y permite simular lector, botones A/B/C, reloj, reinicio, pérdida de

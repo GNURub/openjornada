@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +22,9 @@ const (
 )
 
 type Service struct {
-	app core.App
+	app              core.App
+	demoEnabled      bool
+	allowPrivateHTTP bool
 }
 
 type terminalPrincipal struct {
@@ -30,7 +34,15 @@ type terminalPrincipal struct {
 }
 
 func New(app core.App) *Service {
-	return &Service{app: app}
+	return &Service{
+		app:              app,
+		demoEnabled:      enabledEnvironmentVariable("PB_DEMO_ENABLED"),
+		allowPrivateHTTP: enabledEnvironmentVariable("PB_TERMINAL_DEV_INSECURE_HTTP"),
+	}
+}
+
+func enabledEnvironmentVariable(name string) bool {
+	return strings.TrimSpace(os.Getenv(name)) == "true"
 }
 
 func (s *Service) Register(e *core.ServeEvent) {
@@ -59,7 +71,7 @@ func (s *Service) Register(e *core.ServeEvent) {
 }
 
 func (s *Service) authenticateTerminal(e *core.RequestEvent) (*terminalPrincipal, error) {
-	if !secureTerminalRequest(e.Request) {
+	if !secureTerminalRequest(e.Request, s.demoEnabled, s.allowPrivateHTTP) {
 		return nil, errors.New("insecure terminal request")
 	}
 	header := strings.TrimSpace(e.Request.Header.Get("Authorization"))
@@ -86,25 +98,62 @@ func (s *Service) authenticateTerminal(e *core.RequestEvent) (*terminalPrincipal
 	return &terminalPrincipal{Terminal: terminal, Organization: organization, SigningKey: signingKey}, nil
 }
 
-func secureTerminalRequest(request *http.Request) bool {
+func secureTerminalRequest(request *http.Request, demoEnabled, allowPrivateHTTP bool) bool {
 	if request.TLS != nil {
 		return true
 	}
-	host := request.Host
-	if parsed, _, err := net.SplitHostPort(host); err == nil {
-		host = parsed
+	host, validHost := hostWithoutOptionalPort(request.Host)
+	if !validHost {
+		return false
 	}
-	host = strings.Trim(host, "[]")
-	if strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback() {
+	hostIP := net.ParseIP(host)
+	if strings.EqualFold(host, "localhost") || hostIP != nil && hostIP.IsLoopback() {
 		return true
 	}
-	remoteHost, _, err := net.SplitHostPort(request.RemoteAddr)
-	if err != nil {
-		remoteHost = request.RemoteAddr
+	remoteHost, validRemote := hostWithoutOptionalPort(request.RemoteAddr)
+	if !validRemote {
+		return false
 	}
-	remoteIP := net.ParseIP(strings.Trim(remoteHost, "[]"))
+	remoteIP := net.ParseIP(remoteHost)
+	trustedPeer := remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate())
 	forwardedHTTPS := strings.EqualFold(strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-Proto"), ",")[0]), "https")
-	return forwardedHTTPS && remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate())
+	if forwardedHTTPS && trustedPeer {
+		return true
+	}
+	return demoEnabled && allowPrivateHTTP && isRFC1918(hostIP) && trustedPeer
+}
+
+func hostWithoutOptionalPort(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"), true
+	}
+	if !strings.Contains(value, ":") {
+		return value, true
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil || host == "" || !validPort(port) {
+		return "", false
+	}
+	return host, true
+}
+
+func validPort(port string) bool {
+	parsed, err := strconv.ParseUint(port, 10, 16)
+	return err == nil && parsed > 0
+}
+
+func isRFC1918(ip net.IP) bool {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return false
+	}
+	return ipv4[0] == 10 ||
+		ipv4[0] == 172 && ipv4[1] >= 16 && ipv4[1] <= 31 ||
+		ipv4[0] == 192 && ipv4[1] == 168
 }
 
 func (s *Service) terminalOrUnauthorized(e *core.RequestEvent) (*terminalPrincipal, error) {

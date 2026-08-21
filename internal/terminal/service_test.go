@@ -1,35 +1,87 @@
 package terminal
 
 import (
+	"crypto/tls"
 	"net/http/httptest"
 	"testing"
 )
 
 func TestSecureTerminalRequest(t *testing.T) {
-	local := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/openjornada/terminal/v1/bootstrap", nil)
-	if !secureTerminalRequest(local) {
-		t.Fatal("localhost must remain available for development")
+	tests := []struct {
+		name             string
+		host             string
+		remoteAddr       string
+		tls              bool
+		forwardedProto   string
+		demoEnabled      bool
+		allowPrivateHTTP bool
+		want             bool
+	}{
+		{name: "TLS public host", host: "jornada.example.com", remoteAddr: "203.0.113.8:43210", tls: true, want: true},
+		{name: "HTTP localhost", host: "localhost:8090", remoteAddr: "203.0.113.8:43210", want: true},
+		{name: "HTTP loopback IPv4", host: "127.0.0.1:8090", remoteAddr: "203.0.113.8:43210", want: true},
+		{name: "HTTP loopback IPv6", host: "[::1]:8090", remoteAddr: "203.0.113.8:43210", want: true},
+		{name: "private HTTP with both flags", host: "192.168.1.20:8090", remoteAddr: "192.168.1.40:43210", demoEnabled: true, allowPrivateHTTP: true, want: true},
+		{name: "private HTTP without demo", host: "192.168.1.20:8090", remoteAddr: "192.168.1.40:43210", allowPrivateHTTP: true, want: false},
+		{name: "private HTTP without explicit allowance", host: "192.168.1.20:8090", remoteAddr: "192.168.1.40:43210", demoEnabled: true, want: false},
+		{name: "public host with both flags", host: "jornada.example.com", remoteAddr: "192.168.1.40:43210", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "private host with public peer", host: "192.168.1.20:8090", remoteAddr: "203.0.113.8:43210", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "trusted proxy HTTPS", host: "jornada.example.com", remoteAddr: "172.18.0.2:43210", forwardedProto: "https", want: true},
+		{name: "proxy HTTPS from loopback", host: "jornada.example.com", remoteAddr: "127.0.0.1:43210", forwardedProto: "https", want: true},
+		{name: "spoofed proxy HTTPS from public peer", host: "jornada.example.com", remoteAddr: "203.0.113.8:43210", forwardedProto: "https", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "first forwarded protocol must be HTTPS", host: "jornada.example.com", remoteAddr: "172.18.0.2:43210", forwardedProto: "http, https", want: false},
+		{name: "RFC1918 10 range without port", host: "10.20.30.40", remoteAddr: "127.0.0.1:43210", demoEnabled: true, allowPrivateHTTP: true, want: true},
+		{name: "RFC1918 172 range", host: "172.16.0.1:8090", remoteAddr: "10.0.0.2:43210", demoEnabled: true, allowPrivateHTTP: true, want: true},
+		{name: "outside RFC1918 172 range", host: "172.15.255.255:8090", remoteAddr: "10.0.0.2:43210", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "link local host is not RFC1918", host: "169.254.1.20:8090", remoteAddr: "10.0.0.2:43210", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "IPv6 ULA host is not RFC1918", host: "[fd00::20]:8090", remoteAddr: "[fd00::40]:43210", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "malformed host port", host: "192.168.1.20:not-a-port", remoteAddr: "192.168.1.40:43210", demoEnabled: true, allowPrivateHTTP: true, want: false},
+		{name: "missing remote peer", host: "192.168.1.20:8090", remoteAddr: "", demoEnabled: true, allowPrivateHTTP: true, want: false},
 	}
 
-	proxied := httptest.NewRequest("POST", "http://openjornada.internal/api/openjornada/terminal/v1/bootstrap", nil)
-	proxied.Host = "jornada.example.com"
-	proxied.RemoteAddr = "172.18.0.2:43210"
-	proxied.Header.Set("X-Forwarded-Proto", "https")
-	if !secureTerminalRequest(proxied) {
-		t.Fatal("HTTPS forwarded by the production proxy must be accepted")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest("POST", "http://openjornada.invalid/api/openjornada/terminal/v1/bootstrap", nil)
+			request.Host = test.host
+			request.RemoteAddr = test.remoteAddr
+			request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
+			if test.tls {
+				request.TLS = &tls.ConnectionState{}
+			}
+			if got := secureTerminalRequest(request, test.demoEnabled, test.allowPrivateHTTP); got != test.want {
+				t.Fatalf("secureTerminalRequest() = %t, want %t", got, test.want)
+			}
+		})
 	}
+}
 
-	insecure := httptest.NewRequest("POST", "http://jornada.example.com/api/openjornada/terminal/v1/bootstrap", nil)
-	if secureTerminalRequest(insecure) {
-		t.Fatal("plain HTTP on a public host must be rejected")
-	}
+func TestNewServiceReadsTerminalHTTPPolicy(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv("PB_DEMO_ENABLED", "")
+		t.Setenv("PB_TERMINAL_DEV_INSECURE_HTTP", "")
+		service := New(nil)
+		if service.demoEnabled || service.allowPrivateHTTP {
+			t.Fatal("private HTTP policy must be disabled by default")
+		}
+	})
 
-	spoofed := httptest.NewRequest("POST", "http://jornada.example.com/api/openjornada/terminal/v1/bootstrap", nil)
-	spoofed.Header.Set("X-Forwarded-Proto", "https")
-	spoofed.RemoteAddr = "203.0.113.8:43210"
-	if secureTerminalRequest(spoofed) {
-		t.Fatal("a public client must not be able to spoof the proxy protocol header")
-	}
+	t.Run("both flags enabled", func(t *testing.T) {
+		t.Setenv("PB_DEMO_ENABLED", "true")
+		t.Setenv("PB_TERMINAL_DEV_INSECURE_HTTP", "true")
+		service := New(nil)
+		if !service.demoEnabled || !service.allowPrivateHTTP {
+			t.Fatal("service must inject both explicit environment flags")
+		}
+	})
+
+	t.Run("other values remain disabled", func(t *testing.T) {
+		t.Setenv("PB_DEMO_ENABLED", "TRUE")
+		t.Setenv("PB_TERMINAL_DEV_INSECURE_HTTP", "yes")
+		service := New(nil)
+		if service.demoEnabled || service.allowPrivateHTTP {
+			t.Fatal("only the explicit true value may enable private HTTP")
+		}
+	})
 }
 
 func TestOfflineSignatureIsBoundToTerminalAndChain(t *testing.T) {
