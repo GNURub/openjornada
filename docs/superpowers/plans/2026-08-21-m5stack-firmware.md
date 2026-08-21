@@ -10,6 +10,50 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-21-m5stack-firmware-design.md`
 
+## Progreso actual — 2026-08-21
+
+Este resumen refleja el estado real de la implementación. Las casillas de los
+apartados inferiores conservan el procedimiento original del plan y no deben
+interpretarse como el estado actualizado.
+
+| Tarea | Estado | Resultado |
+| --- | --- | --- |
+| 1. Proyecto PlatformIO y dominio portable | Completada | Entornos `native`, `m5stack_dev` y `m5stack_release`, particiones y dominio base. |
+| 2. Hardware y diagnóstico RFID | Implementada; validación parcial | Pantalla, botones, altavoz y Unit RFID2 por I²C, con antirrebote basado en retirada del tag. Falta validar un tag compatible real. |
+| 3. Configuración y caché | Completada | Validación de URL, configuración persistente y caché A/B recuperable. |
+| 4. Cola durable y firma | Completada | Outbox LittleFS con append-before-send, HMAC, recuperación y límite de 10.000 acciones. |
+| 5. HTTP privado de desarrollo | Completada | Excepción limitada a compilación de desarrollo, autorización explícita y red RFC1918. |
+| 6. Aprovisionamiento móvil | Completada | Portal cautivo WPA2, QR, recuperación segura y textos españoles UTF-8. |
+| 7. API y worker de red | Completada | Cliente HTTP/HTTPS acotado, contratos v1, colas FreeRTOS y bootstrap real. |
+| 8. Fichaje conectado | Implementada; validación física RFID pendiente | Inicio y fin de jornada, pausas, selector de hora, cierre desde pausa y conservación durable ante respuestas ambiguas para su futura sincronización. |
+| 9. Offline, reloj y sincronización | Pendiente | Falta `ClockTrust`, `SyncEngine`, replay tras reinicio, refresco de caché y sincronización automática ordenada. |
+| 10. Administración local | Pendiente | Falta el flujo físico con PIN, listado de personas, asignación/sustitución de tags y expiración de sesión. |
+| 11. Endurecimiento y entrega final | Pendiente | Falta la matriz E2E/física completa, documentación operativa final y artefacto USB de producción. |
+
+### Estado verificable
+
+- `116/116` pruebas nativas superadas.
+- Compilaciones `m5stack_dev` y `m5stack_release` superadas localmente y en
+  GitHub Actions.
+- Firmware de desarrollo flasheado por USB en la placa hasta el commit
+  `9260344` (`fix: lower M5Stack provisioning QR`). El commit posterior
+  `b977c48` sólo actualiza versión y changelog, por lo que no cambia el binario
+  funcional instalado.
+- Botones físicos, portal desde móvil, QR y caracteres españoles comprobados
+  en la placa.
+- La lectura completa con credencial de personal sigue pendiente de probar con
+  un tag ISO/IEC 14443A de 13,56 MHz. Los llaveros disponibles de 125 kHz no son
+  compatibles con el Unit RFID2.
+- Release estable `v0.6.0` publicada. El workflow de la imagen Docker
+  multi-arquitectura continúa en ejecución en el momento de esta actualización.
+
+### Próximo hito
+
+Implementar la tarea 9 antes de considerar el firmware apto para uso sin red:
+confianza NTP por arranque, avance local sólo después de persistir, replay de la
+cola, sincronización automática por lotes y preservación estricta del orden por
+persona ante respuestas ambiguas.
+
 ## Global Constraints
 
 - Target hardware is M5Stack Basic Core v2.7 plus Unit RFID2 on Grove A, I²C address `0x28`, SDA GPIO 21 and SCL GPIO 22.
