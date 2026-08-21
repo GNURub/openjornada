@@ -48,7 +48,8 @@ Los componentes son:
 2. Rutas administrativas autenticadas con el usuario de la SPA.
 3. Rutas de dispositivo autenticadas con una API key del terminal.
 4. Simulador Angular disponible solo en desarrollo.
-5. SQLite en microSD para la futura caché y cola del firmware.
+5. Firmware físico definido en
+   `2026-08-21-m5stack-firmware-design.md`, con caché y cola en LittleFS.
 
 ## Modelo de datos
 
@@ -104,7 +105,8 @@ marca offline.
 - La key viaja como `Authorization: Bearer ojterm_<prefix>_<secret>`.
 - La capacidad administrativa viaja separada en
   `X-Terminal-Admin-Session`; nunca sustituye la autenticación del terminal.
-- Las rutas de dispositivo requieren HTTPS salvo localhost.
+- Las rutas de dispositivo requieren HTTPS salvo localhost y el modo privado
+  de desarrollo definido en `2026-08-21-m5stack-firmware-design.md`.
 - El PIN nunca se devuelve ni se descarga al terminal; el servidor compara su
   hash.
 - Los intentos 1 y 2 son inmediatos. Tras el tercero se esperan 3 minutos y
@@ -163,8 +165,11 @@ Los comandos v1 son `clock_in`, `break_start`, `break_end` y `clock_out`.
 Un conflicto devuelve `409 state_conflict` junto al estado autoritativo.
 
 Las acciones offline incluyen `uid`, `deviceSequence`, `previousLocalHash` y
-`signature`. El UID solo existe en el cuerpo HTTPS y en la base local cifrada;
-los filtros, recibos, incidencias y logs utilizan referencias o huellas.
+`signature`. El UID solo existe en el transporte del dispositivo —HTTPS salvo
+el modo privado de desarrollo— y en el almacenamiento local del firmware; los
+filtros, recibos, incidencias y logs utilizan referencias o huellas. La
+primera placa de desarrollo no cifra ese almacenamiento por la decisión
+documentada en el diseño del firmware.
 
 ## Máquina de estados
 
@@ -212,9 +217,9 @@ Si la pausa cruza medianoche, el selector muestra también la fecha.
 
 ## Offline y recuperación
 
-- SQLite en microSD conserva caché y cola.
-- Los campos sensibles se cifran con AES-GCM mediante una clave protegida en
-  NVS.
+- LittleFS en la flash interna conserva caché y cola; no se requiere microSD.
+- La primera placa se trata como unidad de desarrollo y no cifra la
+  configuración local. El endurecimiento físico queda para producción.
 - Las acciones se encadenan y firman con HMAC-SHA256.
 - No se elimina una acción hasta recibir un estado definitivo.
 - La capacidad máxima es 10.000 acciones; al llenarse se bloquean fichajes.
