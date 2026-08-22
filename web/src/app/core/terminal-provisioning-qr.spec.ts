@@ -47,6 +47,7 @@ describe('terminal provisioning QR v1', () => {
     [{ baseUrl: 'https://jornada.example.com/#secret' }, 'base_url_invalid'],
     [{ baseUrl: `https://example.com/${'x'.repeat(236)}` }, 'base_url_too_long'],
     [{ terminalToken: '' }, 'terminal_token_required'],
+    [{ terminalToken: 'ojterm_' }, 'terminal_token_invalid'],
     [{ terminalToken: 'incorrecta' }, 'terminal_token_invalid'],
     [{ terminalToken: `ojterm_${'x'.repeat(90)}` }, 'terminal_token_too_long'],
     [{ ssid: 'Red\nDemo' }, 'invalid_text'],

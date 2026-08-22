@@ -93,7 +93,11 @@ export function buildTerminalProvisioningUrl(
   if (byteLength(input.terminalToken) > 96) {
     return { ok: false, error: 'terminal_token_too_long' };
   }
-  if (!isVisibleAscii(input.terminalToken) || !input.terminalToken.startsWith('ojterm_')) {
+  if (
+    input.terminalToken.length <= 7 ||
+    !isVisibleAscii(input.terminalToken) ||
+    !input.terminalToken.startsWith('ojterm_')
+  ) {
     return { ok: false, error: 'terminal_token_invalid' };
   }
   if ([input.ssid, input.wifiPassword, input.baseUrl, input.terminalToken].some(hasForbiddenText)) {
