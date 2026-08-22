@@ -469,3 +469,111 @@ test('administración aprovisiona por QR sin persistir secretos ni perder el flu
     throw new AggregateError(cleanupFailures, 'Falló la limpieza del terminal E2E');
   }
 });
+
+test('pagehide elimina el aprovisionamiento antes de una restauración del historial', async ({
+  page,
+  request,
+}, testInfo) => {
+  await signIn(page);
+  await page.goto('/integraciones');
+  await page.waitForLoadState('networkidle');
+
+  const name = `QR BFCache ${testInfo.project.name} ${Date.now()}`;
+  let primaryFailure: unknown;
+  const cleanupFailures: unknown[] = [];
+  try {
+    await page.getByLabel('Nombre del nuevo terminal').fill(name);
+    await page.getByRole('button', { name: 'Crear terminal' }).click();
+
+    const card = page.getByRole('region', { name: 'Aprovisionar terminal con QR' });
+    await expect(card).toBeVisible();
+    expect(
+      (await terminalTokenFingerprint(card.getByLabel('API key del terminal recién emitida')))
+        .valid,
+    ).toBe(true);
+    await card.getByLabel('Nombre de la red Wi-Fi').fill('Red BFCache efímera');
+    await card.getByLabel('Contraseña de la red Wi-Fi').fill('Clave BFCache efímera 123!');
+    await card.getByLabel('URL de OpenJornada').fill('https://jornada.example.com');
+    await card.getByRole('button', { name: 'Generar QR' }).click();
+    await expect
+      .poll(() =>
+        locatorHasSvgDataUrl(
+          card.getByAltText('Código QR para configurar el terminal OpenJornada'),
+        ),
+      )
+      .toBe(true);
+
+    await page.evaluate(() => {
+      window.addEventListener(
+        'pagehide',
+        () => {
+          localStorage.setItem('openjornada:e2e:pagehide', '1');
+        },
+        { once: true },
+      );
+    });
+    await page.goto(`/manifest.json?terminal-bfcache=${Date.now()}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    expect(
+      await page.evaluate(() => localStorage.getItem('openjornada:e2e:pagehide') === '1'),
+    ).toBe(true);
+    await page.evaluate(() => localStorage.removeItem('openjornada:e2e:pagehide'));
+
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(/\/integraciones$/u);
+    await expect(page.getByRole('heading', { name: 'Integraciones', level: 1 })).toBeVisible();
+
+    const restored = await page.evaluate(() => {
+      const inputValues = Array.from(
+        document.querySelectorAll<HTMLInputElement>('input'),
+        (input) => input.value,
+      );
+      const result = {
+        hasProvisioningCard: document.querySelector('app-terminal-provisioning-card') !== null,
+        hasFullTerminalToken:
+          inputValues.some((value) => /ojterm_[A-Za-z0-9_-]{40,}/u.test(value)) ||
+          /ojterm_[A-Za-z0-9_-]{40,}/u.test(document.body.textContent ?? ''),
+        hasWifiPassword: inputValues.includes('Clave BFCache efímera 123!'),
+        hasSsid: inputValues.includes('Red BFCache efímera'),
+        hasProvisioningQr:
+          document.querySelector('img[alt="Código QR para configurar el terminal OpenJornada"]') !==
+          null,
+      };
+      return result;
+    });
+    expect(restored).toEqual({
+      hasProvisioningCard: false,
+      hasFullTerminalToken: false,
+      hasWifiPassword: false,
+      hasSsid: false,
+      hasProvisioningQr: false,
+    });
+  } catch (error) {
+    primaryFailure = error;
+  } finally {
+    await page
+      .evaluate(() => localStorage.removeItem('openjornada:e2e:pagehide'))
+      .catch(() => undefined);
+    try {
+      await dismissProvisioningIfVisible(page);
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+    try {
+      await revokeActiveTerminalsByName(request, name);
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+  }
+  if (primaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures],
+      'Fallaron la navegación segura y la limpieza del terminal E2E',
+    );
+  }
+  if (primaryFailure) throw primaryFailure;
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, 'Falló la limpieza del terminal E2E');
+  }
+});
