@@ -39,6 +39,29 @@ describe('terminal provisioning QR v1', () => {
   });
 
   it.each([
+    { ssid: 'Red\ud800Demo' },
+    { wifiPassword: 'Clave\udc00WiFi' },
+    { baseUrl: 'https://jornada.example.com/\ud800' },
+    { terminalToken: 'ojterm_demo\udc00' },
+  ])('rejects malformed UTF-16 before encoding: %o', (patch) => {
+    expect(
+      buildTerminalProvisioningUrl({
+        ...TERMINAL_PROVISIONING_V1_VECTOR.input,
+        ...patch,
+      }),
+    ).toEqual({ ok: false, error: 'invalid_text' });
+  });
+
+  it('accepts a well-formed UTF-16 surrogate pair', () => {
+    expect(
+      buildTerminalProvisioningUrl({
+        ...TERMINAL_PROVISIONING_V1_VECTOR.input,
+        ssid: 'Red \ud83d\ude00',
+      }).ok,
+    ).toBe(true);
+  });
+
+  it.each([
     [{ ssid: '' }, 'ssid_required'],
     [{ baseUrl: '' }, 'base_url_required'],
     [{ baseUrl: 'ftp://jornada.example.com' }, 'base_url_invalid'],

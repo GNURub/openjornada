@@ -36,6 +36,22 @@ function hasForbiddenText(value: string): boolean {
   return value.includes('\0') || value.includes('\r') || value.includes('\n');
 }
 
+function isWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      if (index + 1 >= value.length) return false;
+      const lowSurrogate = value.charCodeAt(index + 1);
+      if (lowSurrogate < 0xdc00 || lowSurrogate > 0xdfff) return false;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function isVisibleAscii(value: string): boolean {
   return [...value].every((character) => {
     const code = character.codePointAt(0) ?? 0;
@@ -79,6 +95,9 @@ export function isProvisioningQrUrlWithinLimit(value: string): boolean {
 export function buildTerminalProvisioningUrl(
   input: TerminalProvisioningInput,
 ): TerminalProvisioningQrResult {
+  const values = [input.ssid, input.wifiPassword, input.baseUrl, input.terminalToken];
+  if (!values.every(isWellFormedUtf16)) return { ok: false, error: 'invalid_text' };
+
   if (input.ssid.length === 0) return { ok: false, error: 'ssid_required' };
   if (byteLength(input.ssid) > 32) return { ok: false, error: 'ssid_too_long' };
   if (byteLength(input.wifiPassword) > 63) {
@@ -100,7 +119,7 @@ export function buildTerminalProvisioningUrl(
   ) {
     return { ok: false, error: 'terminal_token_invalid' };
   }
-  if ([input.ssid, input.wifiPassword, input.baseUrl, input.terminalToken].some(hasForbiddenText)) {
+  if (values.some(hasForbiddenText)) {
     return { ok: false, error: 'invalid_text' };
   }
 
