@@ -129,10 +129,10 @@ describe('TerminalProvisioningCardComponent', () => {
     const expandButton = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
       '[data-testid="expand-provisioning-qr"]',
     )!;
+    fixture.autoDetectChanges();
     expandButton.focus();
     expandButton.click();
-    fixture.detectChanges();
-    await Promise.resolve();
+    await fixture.whenStable();
 
     const dialog = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
       '[role="dialog"]',
@@ -224,12 +224,10 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
         {
           provide: TerminalService,
           useValue: {
-            listTerminals: vi
-              .fn()
-              .mockResolvedValue({
-                items: [terminalRecord('terminal-1')],
-                adminPinConfigured: true,
-              }),
+            listTerminals: vi.fn().mockResolvedValue({
+              items: [terminalRecord('terminal-1')],
+              adminPinConfigured: true,
+            }),
             createTerminal,
             rotateTerminalKey,
           },

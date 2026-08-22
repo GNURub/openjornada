@@ -47,6 +47,10 @@ export class TerminalProvisioningCardComponent implements OnDestroy {
       if (previousToken && previousToken !== nextToken) this.clearEphemeralState();
       previousToken = nextToken;
     });
+    effect(() => {
+      const closeButton = this.closeExpandedButton();
+      if (this.expanded() && closeButton) closeButton.nativeElement.focus();
+    });
   }
 
   setSsid(value: string): void {
@@ -104,7 +108,6 @@ export class TerminalProvisioningCardComponent implements OnDestroy {
   openExpanded(): void {
     if (!this.qrDataUrl()) return;
     this.expanded.set(true);
-    queueMicrotask(() => this.closeExpandedButton()?.nativeElement.focus());
   }
 
   closeExpanded(): void {
