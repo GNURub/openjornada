@@ -55,6 +55,7 @@
           [type]="wifiPasswordVisible() ? 'text' : 'password'"
           maxlength="63"
           autocomplete="new-password"
+          aria-describedby="provisioning_wifi_password_hint"
           [ngModel]="wifiPassword()"
           (ngModelChange)="setWifiPassword($event)"
         />
@@ -71,6 +72,9 @@
           <span aria-hidden="true">&#128065;</span>
         </button>
       </div>
+      <p id="provisioning_wifi_password_hint" class="mt-2 text-xs text-stone-500">
+        Déjala vacía sólo si la red Wi-Fi es abierta.
+      </p>
     </div>
     <div>
       <label for="provisioning_terminal_token" class="field-label">

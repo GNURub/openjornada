@@ -98,6 +98,60 @@ describe('TerminalProvisioningCardComponent', () => {
     expect(component.expanded()).toBe(false);
   });
 
+  it('explains open networks and never reuses a previous Wi-Fi password', async () => {
+    const component = fixture.componentInstance;
+    const host = fixture.nativeElement as HTMLElement;
+    const password = host.querySelector<HTMLInputElement>('#provisioning_wifi_password')!;
+    const hint = host.querySelector<HTMLElement>('#provisioning_wifi_password_hint')!;
+    component.setSsid('Red Demo');
+    component.setWifiPassword('Clave WiFi 123!');
+    component.setBaseUrl('https://jornada.example.com');
+    await component.generateQr();
+    const passwordQr = component.qrDataUrl();
+
+    expect(password.getAttribute('aria-describedby')).toBe(hint.id);
+    expect(hint.textContent).toContain('Déjala vacía sólo si la red Wi-Fi es abierta.');
+
+    component.setWifiPassword('');
+    expect(component.qrDataUrl()).toBe('');
+    await component.generateQr();
+
+    expect(component.wifiPassword()).toBe('');
+    expect(component.qrDataUrl()).not.toBe('');
+    expect(component.qrDataUrl()).not.toBe(passwordQr);
+  });
+
+  it('removes every secret from state and DOM synchronously on pagehide', async () => {
+    const component = fixture.componentInstance;
+    const host = fixture.nativeElement as HTMLElement;
+    component.setSsid('Red BFCache');
+    component.setBaseUrl('https://jornada.example.com');
+    const password = host.querySelector<HTMLInputElement>('#provisioning_wifi_password')!;
+    password.value = 'Clave BFCache 123!';
+    password.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.generateQr();
+    component.toggleWifiPassword();
+    component.toggleToken();
+    fixture.detectChanges();
+
+    expect(host.querySelector<HTMLInputElement>('#provisioning_terminal_token')?.value).toBe(
+      'ojterm_test_1234567890',
+    );
+    expect(password.value).toBe('Clave BFCache 123!');
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(component.ssid()).toBe('');
+    expect(component.wifiPassword()).toBe('');
+    expect(component.qrDataUrl()).toBe('');
+    expect(component.wifiPasswordVisible()).toBe(false);
+    expect(component.tokenVisible()).toBe(false);
+    expect(host.childElementCount).toBe(0);
+    expect(host.textContent).not.toContain('Red BFCache');
+    expect(host.textContent).not.toContain('Clave BFCache 123!');
+    expect(host.textContent).not.toContain('ojterm_test_1234567890');
+  });
+
   it('does not persist or send locally entered provisioning data', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const xhrOpenSpy = vi.spyOn(XMLHttpRequest.prototype, 'open');
@@ -188,7 +242,7 @@ interface TestableIntegrationsComponent {
 }
 
 function terminalRecord(id: string, token?: string): TerminalRecord {
-  return {
+  const record = {
     id,
     organization: 'organization-1',
     name: 'Recepción',
@@ -200,8 +254,8 @@ function terminalRecord(id: string, token?: string): TerminalRecord {
     lastPendingCount: 0,
     revokedAt: '',
     createdBy: 'admin-1',
-    token,
   } as TerminalRecord;
+  return token ? { ...record, token } : record;
 }
 
 describe('IntegrationsComponent terminal credential lifecycle', () => {
@@ -252,6 +306,76 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
     await component.createTerminal();
 
     expect(component.generatedTerminalToken()).toBe('ojterm_created_1234567890');
+    expect(component.terminals()[0]).not.toHaveProperty('token');
+  });
+
+  it('removes the one-time token and child secrets synchronously on pagehide', async () => {
+    createTerminal.mockResolvedValue(terminalRecord('terminal-2', 'ojterm_bfcache_1234567890'));
+    component.terminalName = 'Almacén';
+    await component.createTerminal();
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const child = fixture.debugElement.query(By.directive(TerminalProvisioningCardComponent))
+      .componentInstance as TerminalProvisioningCardComponent;
+    child.setSsid('Red padre BFCache');
+    child.setWifiPassword('Clave padre BFCache 123!');
+    child.toggleWifiPassword();
+    child.toggleToken();
+    await child.generateQr();
+    fixture.detectChanges();
+
+    expect(component.generatedTerminalToken()).toBe('ojterm_bfcache_1234567890');
+    expect(host.querySelector<HTMLInputElement>('#provisioning_terminal_token')?.value).toBe(
+      'ojterm_bfcache_1234567890',
+    );
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(component.generatedTerminalToken()).toBe('');
+    expect(child.ssid()).toBe('');
+    expect(child.wifiPassword()).toBe('');
+    expect(child.qrDataUrl()).toBe('');
+    expect(child.wifiPasswordVisible()).toBe(false);
+    expect(child.tokenVisible()).toBe(false);
+    expect(host.querySelector('#provisioning_terminal_token')).toBeNull();
+    expect(host.querySelector('#provisioning_wifi_password')).toBeNull();
+    expect(host.textContent).not.toContain('ojterm_bfcache_1234567890');
+    expect(host.textContent).not.toContain('Clave padre BFCache 123!');
+  });
+
+  it('discards a terminal credential when creation resolves after pagehide', async () => {
+    let finishCreation!: (terminal: TerminalRecord) => void;
+    createTerminal.mockReturnValue(
+      new Promise<TerminalRecord>((resolve) => {
+        finishCreation = resolve;
+      }),
+    );
+    component.terminalName = 'Almacén';
+
+    const creation = component.createTerminal();
+    window.dispatchEvent(new Event('pagehide'));
+    finishCreation(terminalRecord('terminal-2', 'ojterm_late_create_1234567890'));
+    await creation;
+
+    expect(component.generatedTerminalToken()).toBe('');
+    expect(component.terminals()).not.toContainEqual(expect.objectContaining({ id: 'terminal-2' }));
+  });
+
+  it('discards a terminal credential when rotation resolves after pagehide', async () => {
+    let finishRotation!: (terminal: TerminalRecord) => void;
+    rotateTerminalKey.mockReturnValue(
+      new Promise<TerminalRecord>((resolve) => {
+        finishRotation = resolve;
+      }),
+    );
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+
+    const rotation = component.rotateTerminal(component.terminals()[0]);
+    window.dispatchEvent(new Event('pagehide'));
+    finishRotation(terminalRecord('terminal-1', 'ojterm_late_rotate_1234567890'));
+    await rotation;
+
+    expect(component.generatedTerminalToken()).toBe('');
     expect(component.terminals()[0]).not.toHaveProperty('token');
   });
 

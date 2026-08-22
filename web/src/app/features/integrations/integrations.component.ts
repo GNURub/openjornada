@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth.service';
 import { McpTokenRecord } from '../../core/models';
@@ -33,6 +33,7 @@ export class IntegrationsComponent implements OnDestroy {
   protected readonly terminalSaving = signal(false);
   protected readonly generatedTerminalToken = signal('');
   protected readonly adminPinConfigured = signal(false);
+  private terminalCredentialGeneration = 0;
   protected readonly mcpUrl = signal('https://tu-dominio.example/mcp');
   protected readonly codexConfig = computed(
     () => `[mcp_servers.openjornada]
@@ -76,10 +77,12 @@ default_tools_approval_mode = "writes"`,
     const name = this.terminalName.trim();
     if (name.length < 3 || this.terminalSaving()) return;
     this.dismissTerminalProvisioning();
+    const credentialGeneration = ++this.terminalCredentialGeneration;
     this.terminalSaving.set(true);
     this.error.set('');
     try {
       const terminal = await this.terminalService.createTerminal(name);
+      if (credentialGeneration !== this.terminalCredentialGeneration) return;
       const { token, ...storedTerminal } = terminal;
       this.terminals.update((items) => [storedTerminal, ...items]);
       this.generatedTerminalToken.set(token ?? '');
@@ -105,9 +108,11 @@ default_tools_approval_mode = "writes"`,
     if (!confirm(`¿Rotar la API key de “${terminal.name}”? La anterior dejará de funcionar.`))
       return;
     this.dismissTerminalProvisioning();
+    const credentialGeneration = ++this.terminalCredentialGeneration;
     this.terminalSaving.set(true);
     try {
       const updated = await this.terminalService.rotateTerminalKey(terminal.id);
+      if (credentialGeneration !== this.terminalCredentialGeneration) return;
       const { token, ...storedTerminal } = updated;
       this.terminals.update((items) =>
         items.map((item) => (item.id === terminal.id ? storedTerminal : item)),
@@ -182,8 +187,13 @@ default_tools_approval_mode = "writes"`,
     this.generatedTerminalToken.set('');
   }
 
+  @HostListener('window:pagehide')
+  onPageHide(): void {
+    this.invalidateTerminalCredentialOperations();
+  }
+
   ngOnDestroy(): void {
-    this.dismissTerminalProvisioning();
+    this.invalidateTerminalCredentialOperations();
   }
 
   protected formatTerminalDate(value: string): string {
@@ -315,5 +325,10 @@ default_tools_approval_mode = "writes"`,
       return String(error.response.message);
     }
     return fallback;
+  }
+
+  private invalidateTerminalCredentialOperations(): void {
+    this.terminalCredentialGeneration += 1;
+    this.dismissTerminalProvisioning();
   }
 }

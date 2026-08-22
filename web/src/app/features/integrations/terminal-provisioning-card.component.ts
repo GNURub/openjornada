@@ -4,6 +4,7 @@ import {
   HostListener,
   OnDestroy,
   effect,
+  inject,
   input,
   output,
   signal,
@@ -22,6 +23,7 @@ import {
   templateUrl: './terminal-provisioning-card.component.html',
 })
 export class TerminalProvisioningCardComponent implements OnDestroy {
+  private readonly hostElement = inject<ElementRef<HTMLElement>>(ElementRef);
   readonly terminalToken = input.required<string>();
   readonly copyToken = output<void>();
   readonly dismissed = output<void>();
@@ -127,6 +129,12 @@ export class TerminalProvisioningCardComponent implements OnDestroy {
     if (!this.expanded()) return;
     event.preventDefault();
     this.closeExpandedButton()?.nativeElement.focus();
+  }
+
+  @HostListener('window:pagehide')
+  onPageHide(): void {
+    this.clearEphemeralState();
+    this.hostElement.nativeElement.replaceChildren();
   }
 
   dismiss(): void {
