@@ -1,10 +1,11 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth.service';
 import { McpTokenRecord } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
 import { TerminalRecord } from '../../core/terminal.models';
 import { TerminalService } from '../../core/terminal.service';
+import { TerminalProvisioningCardComponent } from './terminal-provisioning-card.component';
 
 interface TokenListResponse {
   items: McpTokenRecord[];
@@ -13,10 +14,10 @@ interface TokenListResponse {
 
 @Component({
   selector: 'app-integrations',
-  imports: [FormsModule],
+  imports: [FormsModule, TerminalProvisioningCardComponent],
   templateUrl: './integrations.component.html',
 })
-export class IntegrationsComponent {
+export class IntegrationsComponent implements OnDestroy {
   private readonly pb = inject(PocketBaseService).client;
   protected readonly auth = inject(AuthService);
   private readonly terminalService = inject(TerminalService);
@@ -74,14 +75,16 @@ default_tools_approval_mode = "writes"`,
   protected async createTerminal(): Promise<void> {
     const name = this.terminalName.trim();
     if (name.length < 3 || this.terminalSaving()) return;
+    this.dismissTerminalProvisioning();
     this.terminalSaving.set(true);
     this.error.set('');
     try {
       const terminal = await this.terminalService.createTerminal(name);
-      this.terminals.update((items) => [terminal, ...items]);
-      this.generatedTerminalToken.set(terminal.token ?? '');
+      const { token, ...storedTerminal } = terminal;
+      this.terminals.update((items) => [storedTerminal, ...items]);
+      this.generatedTerminalToken.set(token ?? '');
       this.terminalName = '';
-      this.success.set('Terminal creado. Copia la API key ahora.');
+      this.success.set('Terminal creado. Copia la API key o genera ahora el QR de configuración.');
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudo crear el terminal.'));
     } finally {
@@ -90,6 +93,7 @@ default_tools_approval_mode = "writes"`,
   }
 
   protected async rotateTerminal(terminal: TerminalRecord): Promise<void> {
+    if (this.terminalSaving()) return;
     if (
       terminal.lastPendingCount > 0 &&
       !confirm(
@@ -100,15 +104,20 @@ default_tools_approval_mode = "writes"`,
     }
     if (!confirm(`¿Rotar la API key de “${terminal.name}”? La anterior dejará de funcionar.`))
       return;
+    this.dismissTerminalProvisioning();
+    this.terminalSaving.set(true);
     try {
       const updated = await this.terminalService.rotateTerminalKey(terminal.id);
+      const { token, ...storedTerminal } = updated;
       this.terminals.update((items) =>
-        items.map((item) => (item.id === terminal.id ? updated : item)),
+        items.map((item) => (item.id === terminal.id ? storedTerminal : item)),
       );
-      this.generatedTerminalToken.set(updated.token ?? '');
-      this.success.set('API key rotada. Copia la nueva credencial ahora.');
+      this.generatedTerminalToken.set(token ?? '');
+      this.success.set('API key rotada. Copia la nueva credencial o genera ahora el QR.');
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudo rotar la API key.'));
+    } finally {
+      this.terminalSaving.set(false);
     }
   }
 
@@ -167,6 +176,14 @@ default_tools_approval_mode = "writes"`,
     } catch {
       this.error.set('No se pudo copiar automáticamente. Selecciona la key y cópiala.');
     }
+  }
+
+  protected dismissTerminalProvisioning(): void {
+    this.generatedTerminalToken.set('');
+  }
+
+  ngOnDestroy(): void {
+    this.dismissTerminalProvisioning();
   }
 
   protected formatTerminalDate(value: string): string {
