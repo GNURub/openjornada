@@ -506,8 +506,28 @@ test('pagehide elimina el aprovisionamiento antes de una restauración del histo
     await page.evaluate(() => {
       window.addEventListener(
         'pagehide',
-        () => {
-          localStorage.setItem('openjornada:e2e:pagehide', '1');
+        (event) => {
+          const inputs = Array.from(
+            document.querySelectorAll<HTMLInputElement>('input'),
+            (input) => input.value,
+          );
+          const card = document.querySelector('app-terminal-provisioning-card');
+          localStorage.setItem(
+            'openjornada:e2e:pagehide-snapshot',
+            JSON.stringify({
+              hasProvisioningCard: card !== null && card.childElementCount > 0,
+              hasFullTerminalToken:
+                inputs.some((value) => /ojterm_[A-Za-z0-9_-]{40,}/u.test(value)) ||
+                /ojterm_[A-Za-z0-9_-]{40,}/u.test(document.body.textContent ?? ''),
+              hasWifiPassword: inputs.includes('Clave BFCache efímera 123!'),
+              hasSsid: inputs.includes('Red BFCache efímera'),
+              hasProvisioningQr:
+                document.querySelector(
+                  'img[alt="Código QR para configurar el terminal OpenJornada"]',
+                ) !== null,
+              persisted: event instanceof PageTransitionEvent && event.persisted,
+            }),
+          );
         },
         { once: true },
       );
@@ -515,10 +535,32 @@ test('pagehide elimina el aprovisionamiento antes de una restauración del histo
     await page.goto(`/manifest.json?terminal-bfcache=${Date.now()}`, {
       waitUntil: 'domcontentloaded',
     });
-    expect(
-      await page.evaluate(() => localStorage.getItem('openjornada:e2e:pagehide') === '1'),
-    ).toBe(true);
-    await page.evaluate(() => localStorage.removeItem('openjornada:e2e:pagehide'));
+    const pagehideSnapshot = await page.evaluate(() => {
+      const key = 'openjornada:e2e:pagehide-snapshot';
+      const serialized = localStorage.getItem(key);
+      localStorage.removeItem(key);
+      if (!serialized) return null;
+      try {
+        const value = JSON.parse(serialized) as Record<string, unknown>;
+        return {
+          hasProvisioningCard: value['hasProvisioningCard'] === true,
+          hasFullTerminalToken: value['hasFullTerminalToken'] === true,
+          hasWifiPassword: value['hasWifiPassword'] === true,
+          hasSsid: value['hasSsid'] === true,
+          hasProvisioningQr: value['hasProvisioningQr'] === true,
+          persisted: value['persisted'] === true,
+        };
+      } catch {
+        return null;
+      }
+    });
+    expect(pagehideSnapshot).toMatchObject({
+      hasProvisioningCard: false,
+      hasFullTerminalToken: false,
+      hasWifiPassword: false,
+      hasSsid: false,
+      hasProvisioningQr: false,
+    });
 
     await page.goBack({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(/\/integraciones$/u);
@@ -553,7 +595,7 @@ test('pagehide elimina el aprovisionamiento antes de una restauración del histo
     primaryFailure = error;
   } finally {
     await page
-      .evaluate(() => localStorage.removeItem('openjornada:e2e:pagehide'))
+      .evaluate(() => localStorage.removeItem('openjornada:e2e:pagehide-snapshot'))
       .catch(() => undefined);
     try {
       await dismissProvisioningIfVisible(page);
