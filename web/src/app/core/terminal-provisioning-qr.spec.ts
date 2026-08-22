@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import QRCode from 'qrcode';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildTerminalProvisioningUrl,
   isProvisioningQrUrlWithinLimit,
@@ -90,19 +91,43 @@ describe('terminal provisioning QR v1', () => {
   });
 
   it('uses URL-safe Base64 without padding', () => {
-    const result = buildTerminalProvisioningUrl(TERMINAL_PROVISIONING_V1_VECTOR.input);
+    const result = buildTerminalProvisioningUrl({
+      ...TERMINAL_PROVISIONING_V1_VECTOR.input,
+      ssid: '௿',
+    });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const payload = result.url.split('#ojp=', 2)[1];
+    expect(payload).toContain('-_');
     expect(payload).toMatch(/^[A-Za-z0-9_-]+$/u);
-    expect(payload).not.toContain('=');
+    expect(payload).not.toMatch(/[+/=]/u);
   });
 
   it('renders an SVG with the fixed production QR options', async () => {
-    const dataUrl = await renderTerminalProvisioningQr(TERMINAL_PROVISIONING_V1_VECTOR.url);
-    expect(dataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
-    const svg = atob(dataUrl.split(',', 2)[1]);
-    expect(svg).toContain('<svg');
-    expect(svg).toContain('width="320"');
+    const realToString = QRCode.toString;
+    const toStringSpy = vi.spyOn(QRCode, 'toString');
+    toStringSpy.mockImplementation((text, options, callback) => {
+      const isolatedOptions = { ...options };
+      return callback
+        ? realToString(text, isolatedOptions, callback)
+        : realToString(text, isolatedOptions);
+    });
+
+    try {
+      const dataUrl = await renderTerminalProvisioningQr(TERMINAL_PROVISIONING_V1_VECTOR.url);
+      expect(toStringSpy).toHaveBeenCalledOnce();
+      expect(toStringSpy).toHaveBeenCalledWith(TERMINAL_PROVISIONING_V1_VECTOR.url, {
+        type: 'svg',
+        errorCorrectionLevel: 'M',
+        margin: 4,
+        width: 320,
+      });
+      expect(dataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+      const svg = atob(dataUrl.split(',', 2)[1]);
+      expect(svg).toContain('<svg');
+      expect(svg).toContain('width="320"');
+    } finally {
+      toStringSpy.mockRestore();
+    }
   });
 });
