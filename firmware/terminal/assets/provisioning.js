@@ -26,6 +26,21 @@
     return value.includes("\0") || value.includes("\r") || value.includes("\n");
   }
 
+  function wellFormedUtf16(value) {
+    for (let index = 0; index < value.length; index += 1) {
+      const codeUnit = value.charCodeAt(index);
+      if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+        index += 1;
+        if (index >= value.length) return false;
+        const lowSurrogate = value.charCodeAt(index);
+        if (lowSurrogate < 0xdc00 || lowSurrogate > 0xdfff) return false;
+      } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function encodeBase64Url(value) {
     let binary = "";
     for (const byte of value) binary += String.fromCharCode(byte);
@@ -103,6 +118,8 @@
     ) {
       throw new Error("invalid");
     }
+    const textValues = [value.s, value.p, value.u, value.t];
+    if (!textValues.every(wellFormedUtf16)) throw new Error("invalid");
 
     const canonical = JSON.stringify({
       v: 1,
@@ -122,7 +139,7 @@
       bytes(value.u) > 255 ||
       value.t.length <= 7 ||
       bytes(value.t) > 96 ||
-      [value.s, value.p, value.u, value.t].some(forbiddenText) ||
+      textValues.some(forbiddenText) ||
       !validUrl(value.u) ||
       !visibleAscii(value.t) ||
       !value.t.startsWith("ojterm_")

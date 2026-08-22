@@ -187,10 +187,7 @@ test('applies the exact vector atomically, clears the fragment and never submits
 });
 
 test('returns to manual password semantics after editing a QR value', async ({ page }) => {
-  const observer = await openPortal(
-    page,
-    new URL(TERMINAL_PROVISIONING_V1_VECTOR.url).hash,
-  );
+  const observer = await openPortal(page, new URL(TERMINAL_PROVISIONING_V1_VECTOR.url).hash);
 
   const password = page.locator('#wifi_password');
   const explicit = page.locator('#wifi_password_explicit');
@@ -239,6 +236,16 @@ const validBoundaryValues = [
     value: {
       v: 1,
       s: 'ñ'.repeat(16),
+      p: '',
+      u: 'https://jornada.example.com',
+      t: 'ojterm_test',
+    },
+  },
+  {
+    name: 'SSID con pares surrogate válidos de 32 bytes',
+    value: {
+      v: 1,
+      s: '🔐'.repeat(8),
       p: '',
       u: 'https://jornada.example.com',
       t: 'ojterm_test',
@@ -484,6 +491,18 @@ const invalidHashes = [
     'texto prohibido',
     hashFromJson(
       '{"v":1,"s":"Red\\nDemo","p":"","u":"https://jornada.example.com","t":"ojterm_test"}',
+    ),
+  ],
+  [
+    'surrogate high aislado',
+    hashFromJson(
+      '{"v":1,"s":"\\ud800","p":"","u":"https://jornada.example.com","t":"ojterm_test"}',
+    ),
+  ],
+  [
+    'surrogate low aislado',
+    hashFromJson(
+      '{"v":1,"s":"\\udc00","p":"","u":"https://jornada.example.com","t":"ojterm_test"}',
     ),
   ],
 ] as const;
