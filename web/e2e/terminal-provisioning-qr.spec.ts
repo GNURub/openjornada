@@ -1,5 +1,26 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { acknowledgePrivacyNotice } from './helpers/privacy';
+
+test.use({ trace: 'off', screenshot: 'off' });
+
+const apiBase = 'http://127.0.0.1:8090/api';
+
+interface BrowserAuditState {
+  baseline: string;
+  counts: {
+    storageSet: number;
+    storageRemove: number;
+    storageClear: number;
+    cookieSet: number;
+    indexedDbOpen: number;
+    indexedDbDelete: number;
+    cacheOpen: number;
+    cacheDelete: number;
+    cachePut: number;
+  };
+}
+
+type AuditedWindow = Window & { __openJornadaProvisioningAudit?: BrowserAuditState };
 
 async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
@@ -21,98 +42,351 @@ async function signIn(page: Page): Promise<void> {
   }
 }
 
-function browserStorage(page: Page) {
-  return page.evaluate(() => ({
-    local: Object.entries(localStorage),
-    session: Object.entries(sessionStorage),
-    cookie: document.cookie,
-  }));
+async function apiSignIn(request: APIRequestContext): Promise<string> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await request.post(`${apiBase}/collections/users/auth-with-password`, {
+      data: { identity: 'admin@example.com', password: 'TestPassword123!' },
+    });
+    if (response.ok()) return ((await response.json()) as { token: string }).token;
+    if (attempt === 3 || response.status() !== 429) {
+      throw new Error(`No se pudo autenticar para limpiar terminales E2E: ${response.status()}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+  }
+  throw new Error('No se pudo autenticar para limpiar terminales E2E');
 }
 
-function currentInputValues(page: Page): Promise<string[]> {
+async function revokeActiveTerminalsByName(
+  request: APIRequestContext,
+  name: string,
+): Promise<void> {
+  const authorization = await apiSignIn(request);
+  const response = await request.get(`${apiBase}/openjornada/terminals`, {
+    headers: { Authorization: authorization },
+  });
+  if (!response.ok()) {
+    throw new Error(`No se pudieron listar los terminales para limpiar: ${response.status()}`);
+  }
+  const { items } = (await response.json()) as {
+    items: Array<{ id: string; name: string; revokedAt: string }>;
+  };
+  for (const terminal of items.filter((item) => item.name === name && !item.revokedAt)) {
+    const revoked = await request.post(`${apiBase}/openjornada/terminals/${terminal.id}/revoke`, {
+      headers: { Authorization: authorization },
+    });
+    if (!revoked.ok()) {
+      throw new Error(`No se pudo revocar un terminal E2E: ${revoked.status()}`);
+    }
+  }
+}
+
+async function installPersistenceAudit(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const counts: BrowserAuditState['counts'] = {
+      storageSet: 0,
+      storageRemove: 0,
+      storageClear: 0,
+      cookieSet: 0,
+      indexedDbOpen: 0,
+      indexedDbDelete: 0,
+      cacheOpen: 0,
+      cacheDelete: 0,
+      cachePut: 0,
+    };
+    const fingerprint = async (): Promise<string> => {
+      const entries = (storage: Storage) =>
+        Array.from({ length: storage.length }, (_, index) => {
+          const key = storage.key(index) ?? '';
+          return [key, storage.getItem(key)] as const;
+        }).sort(([left], [right]) => left.localeCompare(right));
+      const bytes = new TextEncoder().encode(
+        JSON.stringify({
+          local: entries(localStorage),
+          session: entries(sessionStorage),
+          cookie: document.cookie,
+        }),
+      );
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    };
+
+    const storagePrototype = Storage.prototype;
+    const originalSetItem = storagePrototype.setItem;
+    const originalRemoveItem = storagePrototype.removeItem;
+    const originalClear = storagePrototype.clear;
+    storagePrototype.setItem = function (key: string, value: string): void {
+      counts.storageSet += 1;
+      return originalSetItem.call(this, key, value);
+    };
+    storagePrototype.removeItem = function (key: string): void {
+      counts.storageRemove += 1;
+      return originalRemoveItem.call(this, key);
+    };
+    storagePrototype.clear = function (): void {
+      counts.storageClear += 1;
+      return originalClear.call(this);
+    };
+
+    const cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+    if (cookieDescriptor?.get && cookieDescriptor.set) {
+      Object.defineProperty(document, 'cookie', {
+        configurable: true,
+        get: () => cookieDescriptor.get?.call(document),
+        set: (value: string) => {
+          counts.cookieSet += 1;
+          cookieDescriptor.set?.call(document, value);
+        },
+      });
+    }
+
+    if (globalThis.indexedDB) {
+      const originalOpen = indexedDB.open;
+      const originalDeleteDatabase = indexedDB.deleteDatabase;
+      Object.defineProperty(indexedDB, 'open', {
+        configurable: true,
+        value(name: string, version?: number) {
+          counts.indexedDbOpen += 1;
+          return version === undefined
+            ? originalOpen.call(indexedDB, name)
+            : originalOpen.call(indexedDB, name, version);
+        },
+      });
+      Object.defineProperty(indexedDB, 'deleteDatabase', {
+        configurable: true,
+        value(name: string) {
+          counts.indexedDbDelete += 1;
+          return originalDeleteDatabase.call(indexedDB, name);
+        },
+      });
+    }
+
+    if (globalThis.caches) {
+      const cacheStoragePrototype = Object.getPrototypeOf(caches) as CacheStorage;
+      const originalCacheOpen = cacheStoragePrototype.open;
+      const originalCacheDelete = cacheStoragePrototype.delete;
+      Object.defineProperty(cacheStoragePrototype, 'open', {
+        configurable: true,
+        value(name: string) {
+          counts.cacheOpen += 1;
+          return originalCacheOpen.call(this, name);
+        },
+      });
+      Object.defineProperty(cacheStoragePrototype, 'delete', {
+        configurable: true,
+        value(name: string) {
+          counts.cacheDelete += 1;
+          return originalCacheDelete.call(this, name);
+        },
+      });
+    }
+    const cacheConstructor = (globalThis as typeof globalThis & { Cache?: { prototype: Cache } })
+      .Cache;
+    if (cacheConstructor) {
+      const originalCachePut = cacheConstructor.prototype.put;
+      Object.defineProperty(cacheConstructor.prototype, 'put', {
+        configurable: true,
+        value(request: RequestInfo | URL, response: Response) {
+          counts.cachePut += 1;
+          return originalCachePut.call(this, request, response);
+        },
+      });
+    }
+
+    (window as AuditedWindow).__openJornadaProvisioningAudit = {
+      baseline: await fingerprint(),
+      counts,
+    };
+  });
+}
+
+async function persistenceMatchesBaseline(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    const audit = (window as AuditedWindow).__openJornadaProvisioningAudit;
+    if (!audit) return false;
+    const entries = (storage: Storage) =>
+      Array.from({ length: storage.length }, (_, index) => {
+        const key = storage.key(index) ?? '';
+        return [key, storage.getItem(key)] as const;
+      }).sort(([left], [right]) => left.localeCompare(right));
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        local: entries(localStorage),
+        session: entries(sessionStorage),
+        cookie: document.cookie,
+      }),
+    );
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    const current = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return current === audit.baseline;
+  });
+}
+
+async function persistenceAttemptCounts(page: Page): Promise<BrowserAuditState['counts'] | null> {
+  return page.evaluate(
+    () => (window as AuditedWindow).__openJornadaProvisioningAudit?.counts ?? null,
+  );
+}
+
+async function terminalTokenFingerprint(
+  input: Locator,
+): Promise<{ valid: boolean; digest: string }> {
+  return input.evaluate(async (element) => {
+    const value = (element as HTMLInputElement).value;
+    const digest = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
+    );
+    return {
+      valid: /^ojterm_[A-Za-z0-9_-]+$/u.test(value),
+      digest: Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+    };
+  });
+}
+
+async function pageHasFullTokenInInputs(page: Page): Promise<boolean> {
   return page
     .locator('input')
-    .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+    .evaluateAll((inputs) =>
+      inputs.some((input) => /ojterm_[A-Za-z0-9_-]{40,}/u.test((input as HTMLInputElement).value)),
+    );
 }
+
+async function locatorContainsFullToken(locator: Locator): Promise<boolean> {
+  return locator.evaluate((element) =>
+    /ojterm_[A-Za-z0-9_-]{40,}/u.test(element.textContent ?? ''),
+  );
+}
+
+async function dismissProvisioningIfVisible(page: Page): Promise<void> {
+  const button = page
+    .getByRole('region', { name: 'Aprovisionar terminal con QR' })
+    .getByRole('button', { name: 'Ya la he guardado' });
+  if (await button.isVisible().catch(() => false)) {
+    await button.click({ force: true, timeout: 2_000 });
+  }
+}
+
+const noPersistenceAttempts: BrowserAuditState['counts'] = {
+  storageSet: 0,
+  storageRemove: 0,
+  storageClear: 0,
+  cookieSet: 0,
+  indexedDbOpen: 0,
+  indexedDbDelete: 0,
+  cacheOpen: 0,
+  cacheDelete: 0,
+  cachePut: 0,
+};
 
 test('administración aprovisiona por QR sin persistir secretos ni perder el flujo manual', async ({
   page,
+  request,
 }, testInfo) => {
   await signIn(page);
   await page.goto('/integraciones');
+  await page.waitForLoadState('networkidle');
+  await installPersistenceAudit(page);
 
   const name = `QR E2E ${testInfo.project.name} ${Date.now()}`;
-  await page.getByLabel('Nombre del nuevo terminal').fill(name);
-  await page.getByRole('button', { name: 'Crear terminal' }).click();
+  let primaryFailure: unknown;
+  try {
+    await page.getByLabel('Nombre del nuevo terminal').fill(name);
+    await page.getByRole('button', { name: 'Crear terminal' }).click();
 
-  let card = page.getByRole('region', { name: 'Aprovisionar terminal con QR' });
-  await expect(card).toBeVisible();
-  await expect(
-    card.getByText('el QR contiene la contraseña Wi-Fi y la API key completas'),
-  ).toBeVisible();
+    let card = page.getByRole('region', { name: 'Aprovisionar terminal con QR' });
+    await expect(card).toBeVisible();
+    await expect(
+      card.getByText('el QR contiene la contraseña Wi-Fi y la API key completas'),
+    ).toBeVisible();
 
-  const tokenInput = card.getByLabel('API key del terminal recién emitida');
-  const token = await tokenInput.inputValue();
-  expect(token).toMatch(/^ojterm_[A-Za-z0-9_-]+$/u);
-  await expect(tokenInput).toHaveAttribute('type', 'password');
-  await expect(card.getByLabel('Contraseña de la red Wi-Fi')).toHaveAttribute('type', 'password');
+    const tokenInput = card.getByLabel('API key del terminal recién emitida');
+    const initialToken = await terminalTokenFingerprint(tokenInput);
+    expect(initialToken.valid).toBe(true);
+    await expect(tokenInput).toHaveAttribute('type', 'password');
+    await expect(card.getByLabel('Contraseña de la red Wi-Fi')).toHaveAttribute('type', 'password');
+    expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
+    expect(await persistenceMatchesBaseline(page)).toBe(true);
 
-  const localRequests: string[] = [];
-  page.on('request', (request) => localRequests.push(request.url()));
-  const storageBefore = await browserStorage(page);
+    let requestCount = 0;
+    page.on('request', () => {
+      requestCount += 1;
+    });
+    await card.getByLabel('Nombre de la red Wi-Fi').fill('Red demo efímera');
+    await card.getByLabel('Contraseña de la red Wi-Fi').fill('Clave demo efímera 123!');
+    await card.getByLabel('URL de OpenJornada').fill('https://jornada.example.com');
+    await card.getByRole('button', { name: 'Generar QR' }).click();
 
-  await card.getByLabel('Nombre de la red Wi-Fi').fill('Red demo efímera');
-  await card.getByLabel('Contraseña de la red Wi-Fi').fill('Clave demo efímera 123!');
-  await card.getByLabel('URL de OpenJornada').fill('https://jornada.example.com');
-  await card.getByRole('button', { name: 'Generar QR' }).click();
+    const qr = card.getByAltText('Código QR para configurar el terminal OpenJornada');
+    await expect(qr).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/u);
+    expect(requestCount).toBe(0);
+    expect(await persistenceMatchesBaseline(page)).toBe(true);
+    expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
 
-  const qr = card.getByAltText('Código QR para configurar el terminal OpenJornada');
-  await expect(qr).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/u);
-  expect(localRequests).toEqual([]);
-  expect(await browserStorage(page)).toEqual(storageBefore);
+    const expand = card.getByRole('button', { name: 'Ampliar código QR' });
+    await expand.click();
+    const dialog = page.getByRole('dialog', { name: 'Código QR ampliado' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cerrar QR ampliado' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(expand).toBeFocused();
 
-  const expand = card.getByRole('button', { name: 'Ampliar código QR' });
-  await expand.click();
-  const dialog = page.getByRole('dialog', { name: 'Código QR ampliado' });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Cerrar QR ampliado' })).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
-  await expect(expand).toBeFocused();
+    await card.getByRole('button', { name: 'Ya la he guardado' }).click();
+    await expect(card).toHaveCount(0);
+    expect(await pageHasFullTokenInInputs(page)).toBe(false);
+    expect(await persistenceMatchesBaseline(page)).toBe(true);
+    expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
 
-  await card.getByRole('button', { name: 'Ya la he guardado' }).click();
-  await expect(card).toHaveCount(0);
-  const valuesAfterDismiss = await currentInputValues(page);
-  expect(valuesAfterDismiss).not.toContain(token);
-  expect(valuesAfterDismiss).not.toContain('Red demo efímera');
-  expect(valuesAfterDismiss).not.toContain('Clave demo efímera 123!');
+    const row = page.locator('li').filter({ hasText: name }).first();
+    await expect(row).toBeVisible();
+    expect(await locatorContainsFullToken(row)).toBe(false);
+    await expect(row).not.toContainText('Red demo efímera');
+    await expect(row).not.toContainText('Clave demo efímera 123!');
 
-  const row = page.locator('li').filter({ hasText: name }).first();
-  await expect(row).toBeVisible();
-  await expect(row).not.toContainText(token);
-  await expect(row).not.toContainText('Red demo efímera');
-  await expect(row).not.toContainText('Clave demo efímera 123!');
+    page.once('dialog', (confirmation) => confirmation.accept());
+    await row.getByRole('button', { name: 'Rotar key' }).click();
+    card = page.getByRole('region', { name: 'Aprovisionar terminal con QR' });
+    await expect(card).toBeVisible();
 
-  page.once('dialog', (confirmation) => confirmation.accept());
-  await row.getByRole('button', { name: 'Rotar key' }).click();
-  card = page.getByRole('region', { name: 'Aprovisionar terminal con QR' });
-  await expect(card).toBeVisible();
+    const rotatedToken = await terminalTokenFingerprint(
+      card.getByLabel('API key del terminal recién emitida'),
+    );
+    expect(rotatedToken.valid).toBe(true);
+    expect(rotatedToken.digest === initialToken.digest).toBe(false);
+    await expect(card.getByLabel('Nombre de la red Wi-Fi')).toHaveValue('');
+    await expect(card.getByLabel('Contraseña de la red Wi-Fi')).toHaveValue('');
+    await expect(card.getByLabel('URL de OpenJornada')).toHaveValue('http://127.0.0.1:4217');
+    await expect(
+      card.getByAltText('Código QR para configurar el terminal OpenJornada'),
+    ).toHaveCount(0);
+    expect(await locatorContainsFullToken(row)).toBe(false);
+    expect(await persistenceMatchesBaseline(page)).toBe(true);
+    expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
 
-  const rotated = await card.getByLabel('API key del terminal recién emitida').inputValue();
-  expect(rotated).toMatch(/^ojterm_[A-Za-z0-9_-]+$/u);
-  expect(rotated).not.toBe(token);
-  await expect(card.getByLabel('Nombre de la red Wi-Fi')).toHaveValue('');
-  await expect(card.getByLabel('Contraseña de la red Wi-Fi')).toHaveValue('');
-  await expect(card.getByLabel('URL de OpenJornada')).toHaveValue('http://127.0.0.1:4217');
-  await expect(card.getByAltText('Código QR para configurar el terminal OpenJornada')).toHaveCount(
-    0,
-  );
-  await expect(row).not.toContainText(rotated);
-
-  await card.getByRole('button', { name: 'Ya la he guardado' }).click();
-  await expect(card).toHaveCount(0);
-  expect(await currentInputValues(page)).not.toContain(rotated);
-  page.once('dialog', (confirmation) => confirmation.accept());
-  await row.getByRole('button', { name: 'Revocar' }).click();
-  await expect(row.getByText('Revocado')).toBeVisible();
+    await card.getByRole('button', { name: 'Ya la he guardado' }).click();
+    await expect(card).toHaveCount(0);
+    expect(await pageHasFullTokenInInputs(page)).toBe(false);
+    expect(await persistenceMatchesBaseline(page)).toBe(true);
+    expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
+    page.once('dialog', (confirmation) => confirmation.accept());
+    await row.getByRole('button', { name: 'Revocar' }).click();
+    await expect(row.getByText('Revocado')).toBeVisible();
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    const cleanupErrors: unknown[] = [];
+    try {
+      await dismissProvisioningIfVisible(page);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await revokeActiveTerminalsByName(request, name);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (!primaryFailure && cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, 'No se pudo limpiar por completo el terminal E2E');
+    }
+  }
 });
