@@ -279,6 +279,16 @@ for (const { name, value } of validBoundaryValues) {
   });
 }
 
+const canonicalOverLimitHash = hashFromJson(
+  JSON.stringify({
+    v: 1,
+    s: 's',
+    p: 'p'.repeat(60),
+    u: `https://example.com/${'u'.repeat(221)}`,
+    t: `ojterm_${'t'.repeat(89)}`,
+  }),
+);
+
 const invalidHashes = [
   ['payload vacío', '#ojp='],
   ['Base64 inválido', '#ojp=%%%'],
@@ -290,7 +300,7 @@ const invalidHashes = [
     'Base64 no canónico',
     `${TERMINAL_PROVISIONING_V1_VECTOR.url.split('#', 2)[1].slice(0, -1)}1`.replace(/^/, '#'),
   ],
-  ['URL QR excedida', `#ojp=${'A'.repeat(577)}`],
+  ['URL QR excedida', canonicalOverLimitHash],
   ['UTF-8 inválido', `#ojp=${Buffer.from([0xc3, 0x28]).toString('base64url')}`],
   ['JSON inválido', hashFromJson('{')],
   ['JSON array', hashFromJson('[1,2,3]')],
@@ -458,6 +468,9 @@ const invalidHashes = [
 
 for (const [name, hash] of invalidHashes) {
   test(`rejects ${name} without partially changing manual fields`, async ({ page }) => {
+    if (hash === canonicalOverLimitHash) {
+      expect(Buffer.byteLength(`http://192.168.4.1/${hash}`, 'ascii')).toBe(602);
+    }
     const observer = await openPortal(page, hash);
     await expectManualValues(page);
     await expect(page.locator('#qr_status')).toHaveText(
