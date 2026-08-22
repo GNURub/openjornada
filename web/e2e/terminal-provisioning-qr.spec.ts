@@ -14,8 +14,12 @@ interface BrowserAuditState {
     cookieSet: number;
     indexedDbOpen: number;
     indexedDbDelete: number;
+    indexedDbAdd: number;
+    indexedDbPut: number;
     cacheOpen: number;
     cacheDelete: number;
+    cacheAdd: number;
+    cacheAddAll: number;
     cachePut: number;
   };
 }
@@ -89,8 +93,12 @@ async function installPersistenceAudit(page: Page): Promise<void> {
       cookieSet: 0,
       indexedDbOpen: 0,
       indexedDbDelete: 0,
+      indexedDbAdd: 0,
+      indexedDbPut: 0,
       cacheOpen: 0,
       cacheDelete: 0,
+      cacheAdd: 0,
+      cacheAddAll: 0,
       cachePut: 0,
     };
     const fingerprint = async (): Promise<string> => {
@@ -159,6 +167,28 @@ async function installPersistenceAudit(page: Page): Promise<void> {
         },
       });
     }
+    if (globalThis.IDBObjectStore) {
+      const originalAdd = IDBObjectStore.prototype.add;
+      const originalPut = IDBObjectStore.prototype.put;
+      Object.defineProperty(IDBObjectStore.prototype, 'add', {
+        configurable: true,
+        value(value: unknown, key?: IDBValidKey) {
+          counts.indexedDbAdd += 1;
+          return key === undefined
+            ? originalAdd.call(this, value)
+            : originalAdd.call(this, value, key);
+        },
+      });
+      Object.defineProperty(IDBObjectStore.prototype, 'put', {
+        configurable: true,
+        value(value: unknown, key?: IDBValidKey) {
+          counts.indexedDbPut += 1;
+          return key === undefined
+            ? originalPut.call(this, value)
+            : originalPut.call(this, value, key);
+        },
+      });
+    }
 
     if (globalThis.caches) {
       const cacheStoragePrototype = Object.getPrototypeOf(caches) as CacheStorage;
@@ -182,7 +212,23 @@ async function installPersistenceAudit(page: Page): Promise<void> {
     const cacheConstructor = (globalThis as typeof globalThis & { Cache?: { prototype: Cache } })
       .Cache;
     if (cacheConstructor) {
+      const originalCacheAdd = cacheConstructor.prototype.add;
+      const originalCacheAddAll = cacheConstructor.prototype.addAll;
       const originalCachePut = cacheConstructor.prototype.put;
+      Object.defineProperty(cacheConstructor.prototype, 'add', {
+        configurable: true,
+        value(request: RequestInfo | URL) {
+          counts.cacheAdd += 1;
+          return originalCacheAdd.call(this, request);
+        },
+      });
+      Object.defineProperty(cacheConstructor.prototype, 'addAll', {
+        configurable: true,
+        value(requests: RequestInfo[]) {
+          counts.cacheAddAll += 1;
+          return originalCacheAddAll.call(this, requests);
+        },
+      });
       Object.defineProperty(cacheConstructor.prototype, 'put', {
         configurable: true,
         value(request: RequestInfo | URL, response: Response) {
@@ -256,6 +302,13 @@ async function locatorContainsFullToken(locator: Locator): Promise<boolean> {
   );
 }
 
+async function locatorHasSvgDataUrl(locator: Locator): Promise<boolean> {
+  return locator.evaluate(
+    (element) =>
+      element instanceof HTMLImageElement && element.src.startsWith('data:image/svg+xml;base64,'),
+  );
+}
+
 async function dismissProvisioningIfVisible(page: Page): Promise<void> {
   const button = page
     .getByRole('region', { name: 'Aprovisionar terminal con QR' })
@@ -272,8 +325,12 @@ const noPersistenceAttempts: BrowserAuditState['counts'] = {
   cookieSet: 0,
   indexedDbOpen: 0,
   indexedDbDelete: 0,
+  indexedDbAdd: 0,
+  indexedDbPut: 0,
   cacheOpen: 0,
   cacheDelete: 0,
+  cacheAdd: 0,
+  cacheAddAll: 0,
   cachePut: 0,
 };
 
@@ -288,7 +345,23 @@ test('administración aprovisiona por QR sin persistir secretos ni perder el flu
 
   const name = `QR E2E ${testInfo.project.name} ${Date.now()}`;
   let primaryFailure: unknown;
+  const cleanupFailures: unknown[] = [];
   try {
+    let requestCount = 0;
+    let creationRequestCount = 0;
+    let unexpectedRequest = false;
+    const apiOrigin = new URL(apiBase).origin;
+    const requestListener = (browserRequest: import('@playwright/test').Request): void => {
+      requestCount += 1;
+      const requestUrl = new URL(browserRequest.url());
+      const isCreation =
+        browserRequest.method() === 'POST' &&
+        requestUrl.origin === apiOrigin &&
+        requestUrl.pathname === '/api/openjornada/terminals';
+      if (isCreation) creationRequestCount += 1;
+      else unexpectedRequest = true;
+    };
+    page.on('request', requestListener);
     await page.getByLabel('Nombre del nuevo terminal').fill(name);
     await page.getByRole('button', { name: 'Crear terminal' }).click();
 
@@ -305,21 +378,22 @@ test('administración aprovisiona por QR sin persistir secretos ni perder el flu
     await expect(card.getByLabel('Contraseña de la red Wi-Fi')).toHaveAttribute('type', 'password');
     expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
     expect(await persistenceMatchesBaseline(page)).toBe(true);
+    expect(requestCount).toBe(1);
+    expect(creationRequestCount).toBe(1);
+    expect(unexpectedRequest).toBe(false);
 
-    let requestCount = 0;
-    page.on('request', () => {
-      requestCount += 1;
-    });
+    const requestCountAfterCreate = requestCount;
     await card.getByLabel('Nombre de la red Wi-Fi').fill('Red demo efímera');
     await card.getByLabel('Contraseña de la red Wi-Fi').fill('Clave demo efímera 123!');
     await card.getByLabel('URL de OpenJornada').fill('https://jornada.example.com');
     await card.getByRole('button', { name: 'Generar QR' }).click();
 
     const qr = card.getByAltText('Código QR para configurar el terminal OpenJornada');
-    await expect(qr).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/u);
-    expect(requestCount).toBe(0);
+    await expect.poll(() => locatorHasSvgDataUrl(qr)).toBe(true);
+    expect(requestCount).toBe(requestCountAfterCreate);
     expect(await persistenceMatchesBaseline(page)).toBe(true);
     expect(await persistenceAttemptCounts(page)).toEqual(noPersistenceAttempts);
+    page.off('request', requestListener);
 
     const expand = card.getByRole('button', { name: 'Ampliar código QR' });
     await expand.click();
@@ -372,21 +446,26 @@ test('administración aprovisiona por QR sin persistir secretos ni perder el flu
     await expect(row.getByText('Revocado')).toBeVisible();
   } catch (error) {
     primaryFailure = error;
-    throw error;
   } finally {
-    const cleanupErrors: unknown[] = [];
     try {
       await dismissProvisioningIfVisible(page);
     } catch (error) {
-      cleanupErrors.push(error);
+      cleanupFailures.push(error);
     }
     try {
       await revokeActiveTerminalsByName(request, name);
     } catch (error) {
-      cleanupErrors.push(error);
+      cleanupFailures.push(error);
     }
-    if (!primaryFailure && cleanupErrors.length > 0) {
-      throw new AggregateError(cleanupErrors, 'No se pudo limpiar por completo el terminal E2E');
-    }
+  }
+  if (primaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures],
+      'Fallaron el recorrido y la limpieza del terminal E2E',
+    );
+  }
+  if (primaryFailure) throw primaryFailure;
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, 'Falló la limpieza del terminal E2E');
   }
 });
