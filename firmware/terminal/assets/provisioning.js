@@ -9,6 +9,7 @@
     "Configuración leída. Revisa los datos y pulsa Comprobar y guardar.";
   const encoder = new TextEncoder();
   const installedToggles = new WeakSet();
+  const installedPasswordFields = new WeakSet();
 
   function bytes(value) {
     return encoder.encode(value).byteLength;
@@ -140,10 +141,11 @@
   function setStatus(message, error) {
     const status = document.getElementById("qr_status");
     if (!status) return;
-    status.hidden = false;
-    status.textContent = message;
-    status.className = error ? "error" : "success";
     status.setAttribute("role", error ? "alert" : "status");
+    status.setAttribute("aria-live", error ? "assertive" : "polite");
+    status.className = error ? "error" : "success";
+    status.textContent = message;
+    status.hidden = false;
   }
 
   function applyHash() {
@@ -155,6 +157,7 @@
       const fields = [
         "ssid",
         "wifi_password",
+        "wifi_password_explicit",
         "base_url",
         "terminal_token",
       ].map((id) => document.getElementById(id));
@@ -164,8 +167,9 @@
 
       fields[0].value = decoded.ssid;
       fields[1].value = decoded.wifiPassword;
-      fields[2].value = decoded.baseUrl;
-      fields[3].value = decoded.terminalToken;
+      fields[2].value = "1";
+      fields[3].value = decoded.baseUrl;
+      fields[4].value = decoded.terminalToken;
       setStatus(REVIEW, false);
     } catch {
       setStatus(ERROR, true);
@@ -200,6 +204,22 @@
     installedToggles.add(button);
   }
 
+  function installPasswordExplicitReset() {
+    const password = document.getElementById("wifi_password");
+    const explicit = document.getElementById("wifi_password_explicit");
+    if (
+      !(password instanceof HTMLInputElement) ||
+      !(explicit instanceof HTMLInputElement) ||
+      installedPasswordFields.has(password)
+    ) {
+      return;
+    }
+    password.addEventListener("input", () => {
+      explicit.value = "0";
+    });
+    installedPasswordFields.add(password);
+  }
+
   function init() {
     installToggle(
       "toggle_wifi_password",
@@ -211,6 +231,7 @@
       "Mostrar API key del terminal",
       "Ocultar API key del terminal",
     );
+    installPasswordExplicitReset();
     applyHash();
   }
 

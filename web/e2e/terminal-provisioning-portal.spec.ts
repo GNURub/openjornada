@@ -14,13 +14,14 @@ const portalHtml = `<!doctype html><html lang="es"><body>
   <form id="provisioning_form">
     <input id="ssid" value="${manualValues.ssid}">
     <input id="wifi_password" type="password" value="${manualValues.wifiPassword}">
+    <input id="wifi_password_explicit" name="wifi_password_explicit" type="hidden" value="0">
     <input id="base_url" value="${manualValues.baseUrl}">
     <input id="terminal_token" type="password" value="${manualValues.terminalToken}">
     <button id="toggle_wifi_password" data-target="wifi_password" type="button" aria-label="Mostrar contraseña Wi-Fi" aria-pressed="false">ojo</button>
     <button id="toggle_terminal_token" data-target="terminal_token" type="button" aria-label="Mostrar API key del terminal" aria-pressed="false">ojo</button>
     <button type="submit">Comprobar y guardar</button>
   </form>
-  <p id="qr_status" hidden></p>
+  <p id="qr_status" hidden role="status" aria-live="polite"></p>
 </body></html>`;
 
 async function routePortal(page: Page, body = portalHtml): Promise<void> {
@@ -160,6 +161,7 @@ async function expectManualValues(page: Page): Promise<void> {
   await expect(page.locator('#wifi_password')).toHaveValue(manualValues.wifiPassword);
   await expect(page.locator('#base_url')).toHaveValue(manualValues.baseUrl);
   await expect(page.locator('#terminal_token')).toHaveValue(manualValues.terminalToken);
+  await expect(page.locator('#wifi_password_explicit')).toHaveValue('0');
 }
 
 test('applies the exact vector atomically, clears the fragment and never submits', async ({
@@ -174,11 +176,29 @@ test('applies the exact vector atomically, clears the fragment and never submits
   await expect(page.locator('#wifi_password')).toHaveValue('Clave WiFi 123!');
   await expect(page.locator('#base_url')).toHaveValue('https://jornada.example.com');
   await expect(page.locator('#terminal_token')).toHaveValue('ojterm_demo_1234567890');
+  await expect(page.locator('#wifi_password_explicit')).toHaveValue('1');
   await expect(page).toHaveURL('http://192.168.4.1/');
   await expect(page.locator('#qr_status')).toHaveText(
     'Configuración leída. Revisa los datos y pulsa Comprobar y guardar.',
   );
   await expect(page.locator('#qr_status')).toHaveAttribute('role', 'status');
+  await expect(page.locator('#qr_status')).toHaveAttribute('aria-live', 'polite');
+  await expectNoForbiddenEffects(page, observer);
+});
+
+test('returns to manual password semantics after editing a QR value', async ({ page }) => {
+  const observer = await openPortal(
+    page,
+    new URL(TERMINAL_PROVISIONING_V1_VECTOR.url).hash,
+  );
+
+  const password = page.locator('#wifi_password');
+  const explicit = page.locator('#wifi_password_explicit');
+  await expect(explicit).toHaveValue('1');
+  await password.fill('otra contraseña');
+  await expect(explicit).toHaveValue('0');
+  await password.fill('');
+  await expect(explicit).toHaveValue('0');
   await expectNoForbiddenEffects(page, observer);
 });
 
@@ -197,6 +217,7 @@ test('accepts a canonical provisioning URL of exactly 600 bytes', async ({ page 
   const observer = await openPortal(page, hash);
 
   await expect(page.locator('#ssid')).toHaveValue('s');
+  await expect(page.locator('#wifi_password_explicit')).toHaveValue('1');
   await expect(page.locator('#qr_status')).toHaveAttribute('role', 'status');
   await expect(page).toHaveURL('http://192.168.4.1/');
   await expectNoForbiddenEffects(page, observer);
@@ -273,6 +294,7 @@ for (const { name, value } of validBoundaryValues) {
     await expect(page.locator('#wifi_password')).toHaveValue(value.p);
     await expect(page.locator('#base_url')).toHaveValue(value.u);
     await expect(page.locator('#terminal_token')).toHaveValue(value.t);
+    await expect(page.locator('#wifi_password_explicit')).toHaveValue('1');
     await expect(page.locator('#qr_status')).toHaveAttribute('role', 'status');
     await expect(page).toHaveURL('http://192.168.4.1/');
     await expectNoForbiddenEffects(page, observer);
@@ -477,6 +499,7 @@ for (const [name, hash] of invalidHashes) {
       'No se pudo leer la configuración del QR. Introduce los datos manualmente.',
     );
     await expect(page.locator('#qr_status')).toHaveAttribute('role', 'alert');
+    await expect(page.locator('#qr_status')).toHaveAttribute('aria-live', 'assertive');
     await expect(page).toHaveURL('http://192.168.4.1/');
     await expectNoForbiddenEffects(page, observer);
   });
@@ -492,6 +515,7 @@ test('keeps all manual fields intact when a required target is missing', async (
   await expect(page.locator('#ssid')).toHaveValue(manualValues.ssid);
   await expect(page.locator('#wifi_password')).toHaveValue(manualValues.wifiPassword);
   await expect(page.locator('#terminal_token')).toHaveValue(manualValues.terminalToken);
+  await expect(page.locator('#wifi_password_explicit')).toHaveValue('0');
   await expect(page.locator('#qr_status')).toHaveAttribute('role', 'alert');
   await expect(page).toHaveURL('http://192.168.4.1/');
   await expectNoForbiddenEffects(page, observer);
@@ -501,6 +525,9 @@ test('leaves an unrelated fragment and the manual form untouched', async ({ page
   const observer = await openPortal(page, '#otra-cosa');
   await expectManualValues(page);
   await expect(page.locator('#qr_status')).toBeHidden();
+  await expect(page.locator('#qr_status')).toHaveAttribute('role', 'status');
+  await expect(page.locator('#qr_status')).toHaveAttribute('aria-live', 'polite');
+  await expect(page.locator('#wifi_password_explicit')).toHaveValue('0');
   await expect(page).toHaveURL('http://192.168.4.1/#otra-cosa');
   await expectNoForbiddenEffects(page, observer);
 });
@@ -537,6 +564,7 @@ test('toggles both secrets once after reinitializing, accessibly and without sub
 }) => {
   const observer = await openPortal(page, '');
   await expect(page.locator('#qr_status')).toBeHidden();
+  await expect(page.locator('#wifi_password_explicit')).toHaveValue('0');
   await page.evaluate(() => {
     (
       window as typeof window & {
