@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -18,6 +19,13 @@ struct DeviceConfig {
   std::string baseUrl;
   std::string terminalToken;
   bool soundEnabled = true;
+};
+
+struct RuntimeState {
+  std::string terminalId;
+  std::string clockSyncedAt;
+  std::string configFingerprint;
+  int64_t lastNtpEpochSeconds = 0;
 };
 
 enum class ConfigError {
@@ -41,6 +49,8 @@ class ConfigStore {
   std::optional<DeviceConfig> load(BuildProfile profile,
                                    ConfigError* error = nullptr) const;
   bool save(const DeviceConfig& config, BuildProfile profile);
+  std::optional<RuntimeState> loadRuntime() const;
+  bool saveRuntime(const RuntimeState& state);
   bool clear();
 };
 

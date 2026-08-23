@@ -19,6 +19,8 @@ struct CacheEntry {
 struct CacheSnapshot {
   uint32_t revision = 0;
   std::vector<CacheEntry> entries;
+  std::string terminalId;
+  std::string configFingerprint;
 };
 
 enum class CacheError {
@@ -59,6 +61,8 @@ class CacheCodec {
   static constexpr size_t kMaxEmployeeId = 64;
   static constexpr size_t kMaxDisplayName = 96;
   static constexpr size_t kMaxUid = 20;
+  static constexpr size_t kMaxTerminalId = 64;
+  static constexpr size_t kFingerprintLength = 64;
   static constexpr size_t kMaxEncodedSize = 8192;
 
   static CacheError encode(const CacheSnapshot& snapshot,
@@ -69,13 +73,14 @@ class CacheCodec {
 
 class CacheStore {
  public:
+  virtual ~CacheStore() = default;
   // Mounts an existing filesystem and never formats on failure.
-  bool begin();
+  virtual bool begin();
   // Destructive operation reserved for explicit first-use or factory reset.
-  bool formatAndInitialize();
-  CacheError load(CacheSnapshot& output);
-  CacheError replaceAtomically(const CacheSnapshot& snapshot);
-  bool clear();
+  virtual bool formatAndInitialize();
+  virtual CacheError load(CacheSnapshot& output);
+  virtual CacheError replaceAtomically(const CacheSnapshot& snapshot);
+  virtual bool clear();
 };
 
 }  // namespace openjornada

@@ -1,5 +1,7 @@
 #include <unity.h>
 
+#include <utility>
+
 #include "openjornada/network_worker.hpp"
 
 using namespace openjornada;
@@ -162,7 +164,7 @@ void test_retry_hint_is_returned_for_transport_failure() {
   NetworkWorker worker(api);
   NetworkJob job = makeJob(NetworkJobKind::Resolve, 7);
   job.attempt = 3;
-  TEST_ASSERT_TRUE(worker.enqueue(job));
+  TEST_ASSERT_TRUE(worker.enqueue(std::move(job)));
   TEST_ASSERT_TRUE(worker.processOne());
   NetworkResult result;
   TEST_ASSERT_TRUE(worker.poll(result));

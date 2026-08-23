@@ -23,6 +23,10 @@ constexpr std::array<uint8_t, 4> kConfigMagic{'O', 'J', 'C', 'F'};
 constexpr uint8_t kConfigVersion = 1;
 constexpr const char* kPreferencesNamespace = "openjornada";
 constexpr const char* kConfigKey = "config_blob";
+constexpr const char* kRuntimeTerminalIdKey = "runtime_tid";
+constexpr const char* kRuntimeClockKey = "runtime_clock";
+constexpr const char* kRuntimeFingerprintKey = "runtime_cfg";
+constexpr const char* kRuntimeNtpKey = "runtime_ntp";
 constexpr size_t kConfigHeaderSize = 11;
 constexpr size_t kConfigCrcSize = 4;
 constexpr size_t kMaxConfigBlobSize = kConfigHeaderSize + kMaxSsidBytes +
@@ -220,12 +224,66 @@ bool ConfigStore::save(const DeviceConfig& config, BuildProfile profile) {
 #endif
 }
 
+std::optional<RuntimeState> ConfigStore::loadRuntime() const {
+#ifdef ARDUINO
+  Preferences preferences;
+  if (!preferences.begin(kPreferencesNamespace, true)) return std::nullopt;
+  RuntimeState state;
+  state.terminalId = preferences.getString(kRuntimeTerminalIdKey, "").c_str();
+  state.clockSyncedAt = preferences.getString(kRuntimeClockKey, "").c_str();
+  state.configFingerprint =
+      preferences.getString(kRuntimeFingerprintKey, "").c_str();
+  state.lastNtpEpochSeconds =
+      preferences.getLong64(kRuntimeNtpKey, 0);
+  preferences.end();
+  if (state.terminalId.empty() || state.terminalId.size() > 64U ||
+      state.clockSyncedAt.size() > 48U ||
+      state.configFingerprint.size() != 64U ||
+      invalidText(state.configFingerprint) || state.lastNtpEpochSeconds < 0) {
+    return std::nullopt;
+  }
+  return state;
+#else
+  return std::nullopt;
+#endif
+}
+
+bool ConfigStore::saveRuntime(const RuntimeState& state) {
+  if (state.terminalId.empty() || state.terminalId.size() > 64U ||
+      state.clockSyncedAt.empty() || state.clockSyncedAt.size() > 48U ||
+      state.configFingerprint.size() != 64U ||
+      invalidText(state.configFingerprint) ||
+      state.lastNtpEpochSeconds <= 0) {
+    return false;
+  }
+#ifdef ARDUINO
+  Preferences preferences;
+  if (!preferences.begin(kPreferencesNamespace, false)) return false;
+  const bool savedTerminal =
+      preferences.putString(kRuntimeTerminalIdKey, state.terminalId.c_str()) ==
+      state.terminalId.size();
+  const bool savedClock =
+      preferences.putString(kRuntimeClockKey, state.clockSyncedAt.c_str()) ==
+      state.clockSyncedAt.size();
+  const bool savedFingerprint =
+      preferences.putString(kRuntimeFingerprintKey,
+                            state.configFingerprint.c_str()) ==
+      state.configFingerprint.size();
+  const bool savedNtp =
+      preferences.putLong64(kRuntimeNtpKey, state.lastNtpEpochSeconds) ==
+      sizeof(int64_t);
+  preferences.end();
+  return savedTerminal && savedClock && savedFingerprint && savedNtp;
+#else
+  return false;
+#endif
+}
+
 bool ConfigStore::clear() {
 #ifdef ARDUINO
   Preferences preferences;
   if (!preferences.begin(kPreferencesNamespace, false)) return false;
-  const bool removed =
-      !preferences.isKey(kConfigKey) || preferences.remove(kConfigKey);
+  const bool removed = preferences.clear();
   preferences.end();
   return removed;
 #else

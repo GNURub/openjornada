@@ -52,7 +52,14 @@
           cinco minutos la asignación local de tags.
         </p>
       </div>
-      <button type="button" (click)="loadTerminals()" class="btn-secondary">Actualizar</button>
+      <button
+        type="button"
+        (click)="loadTerminals()"
+        [disabled]="terminalBusy() || terminalsLoading()"
+        class="btn-secondary"
+      >
+        Actualizar
+      </button>
     </div>
 
     @if (auth.user()?.role === 'admin') {
@@ -70,7 +77,11 @@
               placeholder="Recepción"
             />
           </label>
-          <button type="submit" [disabled]="terminalSaving()" class="btn-primary mt-4">
+          <button
+            type="submit"
+            [disabled]="terminalBusy() || terminalsLoading()"
+            class="btn-primary mt-4"
+          >
             {{ terminalSaving() ? 'Creando…' : 'Crear terminal' }}
           </button>
         </form>
@@ -92,7 +103,11 @@
             />
           </label>
           <div class="mt-4 flex items-center gap-3">
-            <button type="submit" class="btn-primary">
+            <button
+              type="submit"
+              [disabled]="terminalBusy() || terminalsLoading()"
+              class="btn-primary"
+            >
               {{ adminPinConfigured() ? 'Cambiar PIN' : 'Configurar PIN' }}
             </button>
             <span
@@ -106,7 +121,7 @@
       </div>
     }
 
-    @if (terminalsLoading()) {
+    @if (terminalsLoading() && terminals().length === 0) {
       <div class="mt-6 h-24 animate-pulse rounded-2xl bg-stone-100"></div>
     } @else if (terminals().length === 0) {
       <p class="mt-6 rounded-2xl bg-stone-50 px-5 py-8 text-center text-sm text-stone-500">
@@ -115,6 +130,8 @@
     } @else {
       <ul
         class="mt-6 divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-100"
+        [attr.aria-busy]="terminalsLoading()"
+        [class.opacity-60]="terminalsLoading()"
       >
         @for (terminal of terminals(); track terminal.id) {
           <li class="flex flex-wrap items-center gap-4 px-5 py-4">
@@ -138,7 +155,8 @@
               </div>
               <p class="mt-1 font-mono text-xs text-stone-400">ojterm_{{ terminal.prefix }}_…</p>
               <p class="mt-1 text-xs text-stone-500">
-                Última conexión {{ formatTerminalDate(terminal.lastSeenAt) }} · Protocolo
+                Creado {{ formatTerminalDate(terminal.created) }} · Última conexión
+                {{ formatTerminalDate(terminal.lastSeenAt) }} · Protocolo
                 {{ terminal.protocolVersion || 1 }} ·
                 {{ terminal.clientVersion || 'Sin versión informada' }}
               </p>
@@ -148,6 +166,7 @@
                 <button
                   type="button"
                   (click)="renameTerminal(terminal)"
+                  [disabled]="terminalBusy() || terminalsLoading()"
                   class="btn-secondary !min-h-10 !px-4"
                 >
                   Renombrar
@@ -155,7 +174,7 @@
                 <button
                   type="button"
                   (click)="rotateTerminal(terminal)"
-                  [disabled]="terminalSaving()"
+                  [disabled]="terminalBusy() || terminalsLoading()"
                   class="btn-secondary !min-h-10 !px-4"
                 >
                   Rotar key
@@ -163,7 +182,8 @@
                 <button
                   type="button"
                   (click)="revokeTerminal(terminal)"
-                  class="rounded-xl border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50"
+                  [disabled]="terminalBusy() || terminalsLoading()"
+                  class="rounded-xl border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
                 >
                   Revocar
                 </button>
@@ -172,6 +192,45 @@
           </li>
         }
       </ul>
+      <div
+        class="mt-4 flex flex-col gap-3 text-sm text-stone-500 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <p aria-live="polite">
+          @if (terminalsLoading()) {
+            Actualizando.
+          }
+          Mostrando {{ terminalRangeStart() }}–{{ terminalRangeEnd() }} de
+          {{ terminalTotalItems() }} terminales
+        </p>
+        <nav
+          aria-label="Paginación de terminales RFID"
+          class="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:w-auto"
+        >
+          <button
+            type="button"
+            (click)="goToTerminalPage(terminalPage() - 1)"
+            [disabled]="terminalBusy() || terminalsLoading() || terminalPage() <= 1"
+            class="btn-secondary !min-h-10 !px-3"
+          >
+            Anterior
+          </button>
+          <span
+            class="whitespace-nowrap text-center text-xs font-semibold text-stone-700 sm:text-sm"
+          >
+            Página {{ terminalPage() }} de {{ terminalTotalPages() }}
+          </span>
+          <button
+            type="button"
+            (click)="goToTerminalPage(terminalPage() + 1)"
+            [disabled]="
+              terminalBusy() || terminalsLoading() || terminalPage() >= terminalTotalPages()
+            "
+            class="btn-secondary !min-h-10 !px-3"
+          >
+            Siguiente
+          </button>
+        </nav>
+      </div>
     }
     <p class="mt-5 rounded-2xl bg-amber-50 px-5 py-4 text-sm text-amber-900">
       <strong>Importante:</strong> los UIDs RFID pueden clonarse. El tag facilita el fichaje, pero

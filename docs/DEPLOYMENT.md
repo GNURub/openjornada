@@ -79,6 +79,20 @@ HTTPS y fija ambas variables en `false`. La excepción no publica ni autoriza el
 panel PocketBase `/_/`; mantenlo sin exposición pública y restringido a
 administración.
 
+Compila y flashea por USB desde `firmware/terminal/`:
+
+```bash
+uv tool run --from platformio platformio test -e native
+uv tool run --from platformio platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
+uv tool run --from platformio platformio device monitor --port /dev/ttyACM0 --baud 115200
+uv tool run --from platformio platformio run -e m5stack_release
+```
+
+La release sólo admite HTTPS y usa el bundle de CA del firmware. No existe OTA:
+las actualizaciones v1 se hacen por USB. Consulta el procedimiento operativo,
+el cableado Grove A y los gestos de recuperación en
+[`firmware/terminal/README.md`](../firmware/terminal/README.md).
+
 ## Despliegue en proveedores gestionados
 
 OpenJornada necesita una única instancia con almacenamiento persistente montado

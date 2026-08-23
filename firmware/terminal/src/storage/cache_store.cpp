@@ -20,7 +20,7 @@ namespace openjornada {
 namespace {
 
 constexpr std::array<uint8_t, 4> kMagic{'O', 'J', 'C', 'A'};
-constexpr uint8_t kFormatVersion = 1;
+constexpr uint8_t kFormatVersion = 2;
 constexpr size_t kCrcSize = 4;
 constexpr const char* kSlotAPath = "/cache-a.bin";
 constexpr const char* kSlotBPath = "/cache-b.bin";
@@ -86,9 +86,20 @@ bool validState(const WorkState& state) {
          state.workedSeconds >= 0 && state.breakSeconds >= 0;
 }
 
+bool validFingerprint(std::string_view value) {
+  return value.size() == CacheCodec::kFingerprintLength &&
+         std::all_of(value.begin(), value.end(), [](unsigned char byte) {
+           return std::isdigit(byte) || (byte >= 'a' && byte <= 'f');
+         });
+}
+
 CacheError validateSnapshot(const CacheSnapshot& snapshot) {
   if (snapshot.entries.size() > CacheCodec::kCapacity) {
     return CacheError::Capacity;
+  }
+  if (!validText(snapshot.terminalId, CacheCodec::kMaxTerminalId, false) ||
+      !validFingerprint(snapshot.configFingerprint)) {
+    return CacheError::InvalidData;
   }
   std::unordered_set<std::string> employeeIds;
   std::unordered_set<std::string> uids;
@@ -265,7 +276,11 @@ CacheError CacheCodec::encode(const CacheSnapshot& snapshot,
   if (validation != CacheError::None) return validation;
 
   std::vector<uint8_t> payload;
-  payload.reserve(1 + snapshot.entries.size() * 32);
+  payload.reserve(3 + snapshot.terminalId.size() +
+                  snapshot.configFingerprint.size() +
+                  snapshot.entries.size() * 32);
+  appendString(payload, snapshot.terminalId);
+  appendString(payload, snapshot.configFingerprint);
   payload.push_back(static_cast<uint8_t>(snapshot.entries.size()));
   for (const auto& entry : snapshot.entries) {
     appendString(payload, entry.employeeId);
@@ -317,12 +332,17 @@ CacheError CacheCodec::decode(const std::vector<uint8_t>& input,
 
   const size_t payloadEnd = kHeaderSize + payloadLength;
   size_t cursor = kHeaderSize;
+  CacheSnapshot candidate;
+  candidate.revision = readU32(input, 5);
+  if (!takeString(input, payloadEnd, cursor, kMaxTerminalId,
+                  candidate.terminalId) ||
+      !takeString(input, payloadEnd, cursor, kFingerprintLength,
+                  candidate.configFingerprint)) {
+    return CacheError::Truncated;
+  }
   uint8_t count = 0;
   if (!takeByte(input, payloadEnd, cursor, count)) return CacheError::Truncated;
   if (count > kCapacity) return CacheError::Capacity;
-
-  CacheSnapshot candidate;
-  candidate.revision = readU32(input, 5);
   candidate.entries.reserve(count);
   for (uint8_t index = 0; index < count; ++index) {
     CacheEntry entry;

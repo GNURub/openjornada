@@ -18,6 +18,7 @@ enum class ScreenKind {
   AdminPin,
   AdminEmployees,
   AdminScan,
+  AdminReplaceConfirm,
   Provisioning,
   Fatal,
 };
@@ -54,6 +55,7 @@ std::string fitUtf8ToWidth(std::string_view value, int maximumWidth,
 class ScreenRenderer {
  public:
   void render(const ScreenState& state, int64_t nowEpochSeconds);
+  void invalidate();
 
  private:
   std::string lastFingerprint_;

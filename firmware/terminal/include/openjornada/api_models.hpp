@@ -18,11 +18,11 @@ inline constexpr size_t kMaxApiActions = 3;
 inline constexpr size_t kMaxApiCacheEntries = 30;
 inline constexpr size_t kMaxApiEmployees = 30;
 // The wire protocol accepts at most 500 items, while this constrained client
-// deliberately materializes and sends at most 50 at once. A larger server-side
+// deliberately materializes and sends at most 10 at once. A larger server-side
 // allowance must never silently expand fixed firmware memory use.
 inline constexpr size_t kProtocolMaxSyncItems = Outbox::kProtocolBatchLimit;
 inline constexpr size_t kMaxApiSyncItems = Outbox::kMaxInMemoryBatch;
-static_assert(kMaxApiSyncItems == 50);
+static_assert(kMaxApiSyncItems == 10);
 static_assert(kProtocolMaxSyncItems == 500);
 static_assert(kMaxApiSyncItems < kProtocolMaxSyncItems);
 
@@ -203,14 +203,14 @@ struct SyncResponse {
 
 class ApiCodec {
  public:
-  static constexpr size_t kMaxRequestBytes = 48U * 1024U;
+  static constexpr size_t kMaxRequestBytes = 16U * 1024U;
   static constexpr size_t kMaxBootstrapResponseBytes = 4096;
   static constexpr size_t kMaxResolveResponseBytes = 4096;
   static constexpr size_t kMaxActionResponseBytes = 4096;
   static constexpr size_t kMaxCacheResponseBytes = 32U * 1024U;
   static constexpr size_t kMaxAdminResponseBytes = 2048;
   static constexpr size_t kMaxEmployeeResponseBytes = 16U * 1024U;
-  static constexpr size_t kMaxSyncResponseBytes = 48U * 1024U;
+  static constexpr size_t kMaxSyncResponseBytes = 16U * 1024U;
   static constexpr size_t kMaxErrorResponseBytes = 2048;
 
   static bool decodeBootstrap(std::string_view json,

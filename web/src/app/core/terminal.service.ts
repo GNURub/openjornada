@@ -15,11 +15,15 @@ import {
 export class TerminalService {
   private readonly pb = inject(PocketBaseService).client;
 
-  listTerminals(): Promise<{
+  listTerminals(page = 1): Promise<{
     items: TerminalRecord[];
     adminPinConfigured: boolean;
+    page: number;
+    perPage: number;
+    totalItems: number;
+    totalPages: number;
   }> {
-    return this.pb.send('/api/openjornada/terminals', { method: 'GET' });
+    return this.pb.send(`/api/openjornada/terminals?page=${page}`, { method: 'GET' });
   }
 
   createTerminal(name: string): Promise<TerminalRecord> {

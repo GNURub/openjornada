@@ -24,6 +24,25 @@ function signOfflineAction(
   return createHmac('sha256', key).update(canonical).digest('hex');
 }
 
+test('the firmware HMAC vector stays byte-for-byte compatible with the server', () => {
+  const token =
+    'ojterm_abcdefghijkl_secret0123456789012345678901234567890123456789';
+  const action = {
+    clientRequestId: 'req-1',
+    uid: '04A1B2C3',
+    command: 'clock_in',
+    deviceCapturedAt: '2026-08-21T08:00:00.000Z',
+    appliedAt: '',
+    clockSyncedAt: '2026-08-21T07:59:59.000Z',
+    deviceSequence: 1,
+    rebootId: 'boot-1',
+    previousLocalHash: '',
+  };
+  expect(signOfflineAction(token, 'terminal-a', action)).toBe(
+    'f6d92375cab26283b16c1174a19c60cdaff19ac4c646f6e34f6748a90fc6b118',
+  );
+});
+
 async function signIn(
   request: import('@playwright/test').APIRequestContext,
   identity = 'admin@example.com',
@@ -52,19 +71,22 @@ async function signIn(
 test('the simulator opens administration only after a complete mouse hold', async ({ page }) => {
   await page.goto('/terminal-simulator');
   const control = page.getByTestId('simulate-admin-hold');
-  const box = await control.boundingBox();
-  expect(box).not.toBeNull();
-  if (!box) return;
+  const moveMouseToControl = async (): Promise<void> => {
+    await control.scrollIntoViewIfNeeded();
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) return;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  };
 
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
-  await page.mouse.move(x, y);
+  await moveMouseToControl();
   await page.mouse.down();
   await page.waitForTimeout(500);
   await page.mouse.up();
   await page.waitForTimeout(2_600);
   await expect(page.getByText('Acerca tu tarjeta')).toBeVisible();
 
+  await moveMouseToControl();
   await page.mouse.down();
   await page.waitForTimeout(3_100);
   await page.mouse.up();
@@ -134,8 +156,40 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
   const bootstrap = (await bootstrapResponse.json()) as {
     serverTime: string;
     maxOfflineSeconds: number;
+    cacheRevision: number;
   };
   expect(bootstrap.maxOfflineSeconds).toBe(86_400);
+
+  const cacheResponse = await request.get(`${apiBase}/openjornada/terminal/v1/cache`, {
+    headers: deviceHeaders,
+    params: { revision: 0 },
+  });
+  expect(cacheResponse.ok(), await cacheResponse.text()).toBeTruthy();
+  const cache = (await cacheResponse.json()) as {
+    revision: number;
+    unchanged: boolean;
+    items: Array<{ employeeId: string }>;
+  };
+  expect(cache.revision).toBe(bootstrap.cacheRevision);
+  expect(cache.unchanged).toBe(false);
+  expect(cache.items.length).toBeLessThanOrEqual(30);
+  expect(cache.items.map((item) => item.employeeId)).toContain(employee.id);
+  const unchangedCache = await request.get(
+    `${apiBase}/openjornada/terminal/v1/cache`,
+    { headers: deviceHeaders, params: { revision: cache.revision } },
+  );
+  expect(unchangedCache.ok(), await unchangedCache.text()).toBeTruthy();
+  expect(await unchangedCache.json()).toMatchObject({
+    revision: cache.revision,
+    unchanged: true,
+    items: [],
+  });
+
+  const oversizedSync = await request.post(`${apiBase}/openjornada/terminal/v1/sync`, {
+    headers: deviceHeaders,
+    data: { actions: Array.from({ length: 501 }, () => ({})), pendingCount: 501 },
+  });
+  expect(oversizedSync.status()).toBe(400);
 
   const unknown = await request.post(`${apiBase}/openjornada/terminal/v1/resolve`, {
     headers: deviceHeaders,
@@ -208,13 +262,31 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
     { headers: deviceHeaders, data: { pin: '9669' } },
   );
   expect(adminSessionResponse.ok(), await adminSessionResponse.text()).toBeTruthy();
-  const adminSession = (await adminSessionResponse.json()) as { token: string };
+  const adminSession = (await adminSessionResponse.json()) as {
+    token: string;
+    idleExpiresAt: string;
+  };
+  const adminIdleMs =
+    new Date(adminSession.idleExpiresAt).getTime() - Date.now();
+  expect(adminIdleMs).toBeGreaterThan(290_000);
+  expect(adminIdleMs).toBeLessThanOrEqual(300_000);
   const employeesResponse = await request.get(`${apiBase}/openjornada/terminal/v1/employees`, {
     headers: { ...deviceHeaders, 'X-Terminal-Admin-Session': adminSession.token },
   });
   expect(employeesResponse.ok(), await employeesResponse.text()).toBeTruthy();
   const employees = (await employeesResponse.json()) as { items: Array<{ id: string }> };
   expect(employees.items.map((item) => item.id)).toContain(employee.id);
+
+  const closeAdmin = await request.delete(
+    `${apiBase}/openjornada/terminal/v1/admin-sessions/current`,
+    { headers: { ...deviceHeaders, 'X-Terminal-Admin-Session': adminSession.token } },
+  );
+  expect(closeAdmin.ok(), await closeAdmin.text()).toBeTruthy();
+  const expiredAdmin = await request.get(`${apiBase}/openjornada/terminal/v1/employees`, {
+    headers: { ...deviceHeaders, 'X-Terminal-Admin-Session': adminSession.token },
+  });
+  expect(expiredAdmin.status()).toBe(401);
+  expect(await expiredAdmin.text()).toContain('"code":"admin_session_required"');
 
   const offlineAction: Record<string, unknown> = {
     clientRequestId: `rfid-${suffix}-2`,

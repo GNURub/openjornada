@@ -78,7 +78,7 @@ class NetworkWorker {
   explicit NetworkWorker(ApiClient& client);
   ~NetworkWorker();
   bool begin();
-  bool enqueue(const NetworkJob& job);
+  bool enqueue(NetworkJob&& job);
   bool poll(NetworkResult& output);
   // Host tests and deterministic diagnostics execute one queued job directly.
   // Production uses exactly one FreeRTOS task calling the same path.

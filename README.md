@@ -295,7 +295,19 @@ pnpm exec playwright install chromium
 Administración configura los dispositivos desde **Integraciones → Terminales
 RFID**. Al crear o rotar una credencial, la clave completa se muestra una sola
 vez; después sólo puede revocarse o sustituirse. El PIN empresarial abre durante
-cinco minutos las funciones de alta de tarjetas en los terminales.
+cinco minutos las funciones de alta de tarjetas en los terminales. El listado
+se pagina de diez en diez y ordena primero los terminales activos; dentro de
+cada estado muestra antes los creados más recientemente.
+
+En esa vista de un solo uso, Integraciones puede generar localmente un QR con
+el SSID, la contraseña Wi-Fi, la URL actual de OpenJornada —que puede editarse—
+y la API key recién emitida. Integraciones no envía al backend ni guarda en el
+almacenamiento del navegador los datos Wi-Fi o el QR. Al cerrar la vista deja
+de mostrarlos y no puede recuperarlos, pero esto no garantiza un borrado
+criptográfico de la RAM ni hace caducar la key: continúa activa hasta rotarla o
+revocarla. Tras la confirmación manual y un `bootstrap` válido, el terminal sí
+guarda localmente la configuración validada. El portal mantiene siempre la
+entrada manual como alternativa.
 
 Las tarjetas se vinculan a personas desde **Equipo**. OpenJornada no escribe
 datos personales en el tag: normaliza su UID, guarda una huella para resolverlo
@@ -321,6 +333,12 @@ hosts RFC1918 y peers privados o locales. Es exclusivamente de desarrollo;
 Con `pnpm start` está disponible `/terminal-simulator`. La ruta sólo existe en
 desarrollo y permite simular lector, botones A/B/C, reloj, reinicio, pérdida de
 red y posterior sincronización sin conectar un M5Stack.
+
+El firmware físico, su cableado, compilación, flasheo, aprovisionamiento y
+recuperación se documentan en [`firmware/terminal/README.md`](firmware/terminal/README.md).
+Cada acción se escribe primero en LittleFS; tras un reinicio se reproduce la
+cola sobre la caché y no se admiten nuevas acciones offline hasta recibir una
+sincronización NTP del arranque actual.
 
 ## Integración MCP
 

@@ -50,9 +50,23 @@ void test_canonical_order_covers_adjustment_and_chain_fields() {
       canonicalAction("terminal-b", action).c_str());
 }
 
+void test_configuration_fingerprint_binds_url_and_token_without_storing_them() {
+  TEST_ASSERT_EQUAL_STRING(
+      "383ebc724b1ddf9fd426340c177a3ea7b3e5bfcadde1312fe26ba289c2624d69",
+      configurationFingerprint("https://jornada.example.es",
+                               "ojterm_test_token")
+          .c_str());
+  TEST_ASSERT_FALSE(
+      configurationFingerprint("https://jornada.example.es",
+                               "ojterm_test_token") ==
+      configurationFingerprint("https://otra.example.es",
+                               "ojterm_test_token"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_matches_server_signature_vector_exactly);
   RUN_TEST(test_canonical_order_covers_adjustment_and_chain_fields);
+  RUN_TEST(test_configuration_fingerprint_binds_url_and_token_without_storing_them);
   return UNITY_END();
 }

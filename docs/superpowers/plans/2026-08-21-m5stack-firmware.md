@@ -23,22 +23,39 @@ interpretarse como el estado actualizado.
 | 3. Configuración y caché | Completada | Validación de URL, configuración persistente y caché A/B recuperable. |
 | 4. Cola durable y firma | Completada | Outbox LittleFS con append-before-send, HMAC, recuperación y límite de 10.000 acciones. |
 | 5. HTTP privado de desarrollo | Completada | Excepción limitada a compilación de desarrollo, autorización explícita y red RFC1918. |
-| 6. Aprovisionamiento móvil | Completada | Portal cautivo WPA2, QR, recuperación segura y textos españoles UTF-8. |
+| 6. Aprovisionamiento móvil | Completada | Portal cautivo WPA2 persistente hasta guardar una configuración válida, QR, reposo de pantalla a los diez minutos, despertar con A/B/C, recuperación segura y textos españoles UTF-8. |
 | 7. API y worker de red | Completada | Cliente HTTP/HTTPS acotado, contratos v1, colas FreeRTOS y bootstrap real. |
 | 8. Fichaje conectado | Implementada; validación física RFID pendiente | Inicio y fin de jornada, pausas, selector de hora, cierre desde pausa y conservación durable ante respuestas ambiguas para su futura sincronización. |
-| 9. Offline, reloj y sincronización | Pendiente | Falta `ClockTrust`, `SyncEngine`, replay tras reinicio, refresco de caché y sincronización automática ordenada. |
-| 10. Administración local | Pendiente | Falta el flujo físico con PIN, listado de personas, asignación/sustitución de tags y expiración de sesión. |
-| 11. Endurecimiento y entrega final | Pendiente | Falta la matriz E2E/física completa, documentación operativa final y artefacto USB de producción. |
+| 9. Offline, reloj y sincronización | Completada | `ClockTrust`, replay streaming, caché A/B, backoff y sincronización automática cronológica. |
+| 10. Administración local | Completada | A+C, PIN, capacidad sólo en RAM, personal, asignación/sustitución, expiración y reset seguro. |
+| 11. Endurecimiento y entrega final | Validación automatizada y flasheo completados; aceptación RFID pendiente | Matriz completa en verde, artefactos reproducidos, documentación actualizada y binario actual verificado por `esptool` en la placa. Falta un tag compatible y completar el aprovisionamiento para validar el recorrido real. |
 
 ### Estado verificable
 
-- `116/116` pruebas nativas superadas.
-- Compilaciones `m5stack_dev` y `m5stack_release` superadas localmente y en
-  GitHub Actions.
-- Firmware de desarrollo flasheado por USB en la placa hasta el commit
-  `9260344` (`fix: lower M5Stack provisioning QR`). El commit posterior
-  `b977c48` sólo actualiza versión y changelog, por lo que no cambia el binario
-  funcional instalado.
+- `152/152` pruebas nativas superadas en la implementación actual.
+- Compilaciones locales `m5stack_dev` y `m5stack_release` superadas: 15,6 % de
+  RAM y 33,1 % de flash.
+- La placa se detectó de forma estable como
+  `/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B21222177-if00`. Como el
+  usuario local no pertenece a `dialout`, el flasheo se ejecutó en un
+  contenedor efímero con acceso exclusivo a `/dev/ttyACM0`; `esptool` verificó
+  bootloader, particiones y aplicación y reinició la placa correctamente.
+- El arranque serie completó una sola secuencia sin bucle de reinicio y el
+  punto de acceso de puesta en servicio `OpenJornada-015C` se detectó con señal
+  completa desde el PC. No se registraron credenciales ni UIDs.
+- La placa quedó finalmente flasheada con `m5stack_release`; `esptool` verificó
+  cada bloque, el arranque posterior fue estable y el AP WPA2 reapareció.
+- SHA-256: desarrollo
+  `4beccca45f125d683bd2327cd7676c50cb5798d5e9bc04a0c15f02101c42706f`;
+  producción
+  `d4607c06e5108dbfcae671b028c4937f8947c95b04c5af4d5e3fbc805b8c1f83`.
+- La placa permaneció sin pulsaciones durante más de diez minutos y
+  `OpenJornada-015C` siguió anunciado al 100 % en dos escaneos posteriores al
+  momento programado de reposo de pantalla y al antiguo límite de cierre.
+- El benchmark físico de LittleFS completó 10.000 registros sin watchdog ni
+  reinicio: población 7,467 s, validación de arranque 6,233 s, conteo 3,090 s
+  y rechazo seguro de una acción adicional 3,099 s. La prueba eliminó todos
+  sus registros sintéticos antes de terminar.
 - Botones físicos, portal desde móvil, QR y caracteres españoles comprobados
   en la placa.
 - La lectura completa con credencial de personal sigue pendiente de probar con
@@ -49,10 +66,9 @@ interpretarse como el estado actualizado.
 
 ### Próximo hito
 
-Implementar la tarea 9 antes de considerar el firmware apto para uso sin red:
-confianza NTP por arranque, avance local sólo después de persistir, replay de la
-cola, sincronización automática por lotes y preservación estricta del orden por
-persona ante respuestas ambiguas.
+Aprovisionar la placa desde el portal y ejecutar el smoke test físico con un
+tag ISO/IEC 14443A de 13,56 MHz. La validación física debe confirmar botones,
+sonido, lector, fichaje online/offline y recuperación tras reinicio.
 
 ## Global Constraints
 

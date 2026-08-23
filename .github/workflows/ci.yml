@@ -48,6 +48,18 @@ jobs:
         run: pnpm run test:ci
         working-directory: web
 
+      - name: Compilar frontend
+        run: pnpm run build
+        working-directory: web
+
+      - name: Instalar Chromium para el contrato RFID
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Probar contrato E2E del terminal RFID
+        run: pnpm exec playwright test e2e/rfid-terminal.spec.ts --project=desktop-chromium
+        working-directory: web
+
       - name: Preparar uv
         uses: astral-sh/setup-uv@v7
 

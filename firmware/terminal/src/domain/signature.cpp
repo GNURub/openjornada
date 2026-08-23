@@ -14,6 +14,8 @@ namespace {
 
 constexpr std::string_view kSigningDomain =
     "openjornada-terminal-signing-v1|";
+constexpr std::string_view kConfigurationDomain =
+    "openjornada-terminal-config-v1|";
 
 const char* commandName(Command command) {
   switch (command) {
@@ -212,6 +214,18 @@ SigningKey deriveSigningKey(const std::string& token) {
   material.append(kSigningDomain);
   material.append(token);
   return sha256(material);
+}
+
+std::string configurationFingerprint(const std::string& baseUrl,
+                                     const std::string& token) {
+  std::string material;
+  material.reserve(kConfigurationDomain.size() + baseUrl.size() + token.size() +
+                   1U);
+  material.append(kConfigurationDomain);
+  material.append(baseUrl);
+  material.push_back('|');
+  material.append(token);
+  return lowerHex(sha256(material));
 }
 
 std::string canonicalAction(const std::string& terminalId,

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <new>
 #include <string_view>
+#include <utility>
 
 #include "openjornada/config.hpp"
 
@@ -151,7 +152,7 @@ bool NetworkWorker::begin() {
 #endif
 }
 
-bool NetworkWorker::enqueue(const NetworkJob& job) {
+bool NetworkWorker::enqueue(NetworkJob&& job) {
   if (!validJob(job)) return false;
 #ifdef ARDUINO
   if (stopRequested_.load(std::memory_order_acquire)) return false;
@@ -162,7 +163,7 @@ bool NetworkWorker::enqueue(const NetworkJob& job) {
     return false;
   }
   try {
-    slots_[index].job = job;
+    slots_[index].job = std::move(job);
   } catch (const std::bad_alloc&) {
     slots_[index].inUse = false;
     xSemaphoreGive(slotsMutex_);
@@ -183,7 +184,7 @@ bool NetworkWorker::enqueue(const NetworkJob& job) {
 #else
   if (pending_.size() + results_.size() >= kQueueCapacity) return false;
   try {
-    pending_.push_back(job);
+    pending_.push_back(std::move(job));
   } catch (const std::bad_alloc&) {
     return false;
   }

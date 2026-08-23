@@ -83,7 +83,10 @@ bool LittleFsOutboxStorage::size(const char* path, size_t& output) const {
 bool LittleFsOutboxStorage::read(const char* path, size_t offset,
                                  uint8_t* output, size_t length) const {
   File* file = openReadSession(path);
-  if (file == nullptr || !file->seek(offset, SeekSet)) return false;
+  if (file == nullptr ||
+      (file->position() != offset && !file->seek(offset, SeekSet))) {
+    return false;
+  }
   const size_t read = length == 0 ? 0 : file->read(output, length);
   return read == length;
 }
@@ -122,6 +125,8 @@ bool LittleFsOutboxStorage::rename(const char* from, const char* to) {
   closeReadSession(to);
   return !LittleFS.exists(to) && LittleFS.rename(from, to);
 }
+
+void LittleFsOutboxStorage::cooperativeYield() const { ::yield(); }
 
 }  // namespace openjornada
 #endif

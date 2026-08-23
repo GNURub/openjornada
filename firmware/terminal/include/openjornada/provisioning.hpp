@@ -9,12 +9,19 @@
 
 namespace openjornada {
 
-inline constexpr size_t kMaxProvisioningHeaderBytes = 1024;
+// Mobile browsers can legitimately exceed 1 KiB with their default request
+// headers. Keep the parser bounded, but leave enough room for current captive
+// portal clients (Chrome/Brave/Safari) without rejecting the initial GET.
+inline constexpr size_t kMaxProvisioningHeaderBytes = 4096;
 inline constexpr size_t kMaxProvisioningRequestTargetBytes = 128;
 inline constexpr size_t kMaxProvisioningFormBodyBytes =
     kMaxSsidBytes * 3U + kMaxWifiPasswordBytes * 3U +
     kMaxBaseUrlBytes * 3U + kMaxTerminalTokenBytes * 3U + 256U;
-
+inline constexpr char kProvisioningScriptPath[] = "/provisioning.js";
+inline constexpr char kProvisioningContentSecurityPolicy[] =
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "form-action http://192.168.4.1; base-uri 'none'; "
+    "frame-ancestors 'none'";
 enum class CaptiveHttpParseStatus {
   NeedMore,
   Complete,
@@ -31,6 +38,22 @@ struct CaptiveHttpRequest {
   std::string contentType;
   std::string body;
 };
+
+bool isProvisioningScriptRequest(const CaptiveHttpRequest& request);
+
+template <typename WriteChunk>
+bool writeAllProvisioningBytes(const uint8_t* data, size_t length,
+                               WriteChunk writeChunk) {
+  size_t offset = 0;
+  while (offset < length) {
+    const size_t remaining = length - offset;
+    const size_t written =
+        static_cast<size_t>(writeChunk(data + offset, remaining));
+    if (written == 0 || written > remaining) return false;
+    offset += written;
+  }
+  return true;
+}
 
 class BoundedCaptiveHttpParser {
  public:
@@ -54,6 +77,7 @@ struct ProvisioningFormFields {
   std::string csrf;
   std::string ssid;
   std::string wifiPassword;
+  bool wifiPasswordExplicit = false;
   std::string baseUrl;
   std::string terminalToken;
 };
@@ -71,11 +95,15 @@ struct ProvisioningResult {
 };
 
 using CandidateValidator =
-    std::function<bool(const DeviceConfig&, std::string& displayError)>;
+    std::function<bool(const DeviceConfig&, std::string& displayError,
+                       const std::function<void()>& service)>;
 
 bool canApplyProvisioningCandidate(
     const std::optional<DeviceConfig>& activeConfig,
     const DeviceConfig& candidate, size_t pendingCount);
+void applyProvisioningSecretFallbacks(const DeviceConfig& activeConfig,
+                                      bool wifiPasswordExplicit,
+                                      DeviceConfig& candidate);
 
 class ProvisioningPortal {
  public:

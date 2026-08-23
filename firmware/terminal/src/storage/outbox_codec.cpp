@@ -20,6 +20,8 @@ constexpr size_t kMaxTimestamp = 35;
 constexpr size_t kMaxRebootId = 64;
 constexpr size_t kHashHexLength = 64;
 constexpr size_t kCopyChunkSize = OutboxCodec::kMaxRecordSize;
+constexpr size_t kCooperativeRecordStride = 16;
+constexpr size_t kCooperativeSearchStride = 256;
 
 enum class JournalKind { Action, Completion };
 
@@ -200,6 +202,7 @@ bool sameAction(const QueuedAction& left, const QueuedAction& right) {
 }
 
 struct FrameHeader {
+  std::array<uint8_t, OutboxCodec::kHeaderSize> bytes{};
   uint32_t payloadLength = 0;
   size_t frameLength = 0;
 };
@@ -210,16 +213,15 @@ OutboxError readHeader(const OutboxStorage& storage, const char* path,
   if (offset > fileSize || fileSize - offset < OutboxCodec::kHeaderSize) {
     return OutboxError::Truncated;
   }
-  std::array<uint8_t, OutboxCodec::kHeaderSize> header{};
-  if (!storage.read(path, offset, header.data(), header.size())) {
+  if (!storage.read(path, offset, output.bytes.data(), output.bytes.size())) {
     return OutboxError::Io;
   }
   const auto& magic = magicFor(kind);
   for (size_t index = 0; index < magic.size(); ++index) {
-    if (header[index] != magic[index]) return OutboxError::Magic;
+    if (output.bytes[index] != magic[index]) return OutboxError::Magic;
   }
-  if (header[4] != kFormatVersion) return OutboxError::Version;
-  output.payloadLength = readU32(header.data() + 5);
+  if (output.bytes[4] != kFormatVersion) return OutboxError::Version;
+  output.payloadLength = readU32(output.bytes.data() + 5);
   const size_t maximumPayload = OutboxCodec::kMaxRecordSize -
                                 OutboxCodec::kHeaderSize -
                                 OutboxCodec::kCrcSize;
@@ -238,7 +240,11 @@ OutboxError readCompleteFrame(const OutboxStorage& storage, const char* path,
   if (result != OutboxError::None) return result;
   if (header.frameLength > fileSize - offset) return OutboxError::Truncated;
   frame.resize(header.frameLength);
-  if (!storage.read(path, offset, frame.data(), frame.size())) {
+  std::copy(header.bytes.begin(), header.bytes.end(), frame.begin());
+  const size_t remaining = frame.size() - OutboxCodec::kHeaderSize;
+  if (remaining != 0 &&
+      !storage.read(path, offset + OutboxCodec::kHeaderSize,
+                    frame.data() + OutboxCodec::kHeaderSize, remaining)) {
     return OutboxError::Io;
   }
   const uint32_t expected =
@@ -277,6 +283,9 @@ OutboxError hasValidLaterFrame(const OutboxStorage& storage, const char* path,
   }
   const size_t last = fileSize - OutboxCodec::kHeaderSize;
   for (size_t offset = after; offset <= last; ++offset) {
+    if ((offset - after) % kCooperativeSearchStride == 0) {
+      storage.cooperativeYield();
+    }
     std::array<uint8_t, 4> prefix{};
     if (!storage.read(path, offset, prefix.data(), prefix.size())) {
       return OutboxError::Io;
@@ -329,6 +338,9 @@ class ActionReader {
     }
     ++count_;
     offset_ += frame.size();
+    if (count_ % kCooperativeRecordStride == 0) {
+      storage_.cooperativeYield();
+    }
     available = true;
     return OutboxError::None;
   }
@@ -380,6 +392,9 @@ class CompletionReader {
     }
     ++count_;
     offset_ += frame.size();
+    if (count_ % kCooperativeRecordStride == 0) {
+      storage_.cooperativeYield();
+    }
     available = true;
     return OutboxError::None;
   }
@@ -498,6 +513,7 @@ OutboxError atomicRepairPrefix(OutboxStorage& storage, const char* current,
     const std::vector<uint8_t> chunk(buffer.begin(), buffer.begin() + length);
     if (!storage.appendAndFlush(fresh, chunk)) return OutboxError::Io;
     offset += length;
+    storage.cooperativeYield();
   }
   OutboxError result = verifyJournal(storage, fresh, kind, expectedCount);
   if (result != OutboxError::None) return result;
@@ -532,6 +548,7 @@ OutboxError promoteTruncatedOld(OutboxStorage& storage, const char* current,
     const std::vector<uint8_t> chunk(buffer.begin(), buffer.begin() + length);
     if (!storage.appendAndFlush(fresh, chunk)) return OutboxError::Io;
     offset += length;
+    storage.cooperativeYield();
   }
   OutboxError result = verifyJournal(storage, fresh, kind, expectedCount);
   if (result != OutboxError::None) return result;
@@ -808,6 +825,19 @@ OutboxError Outbox::pendingCount(size_t& output) const {
   if (result != OutboxError::None) return result;
   output = stats.actions - stats.completed;
   return OutboxError::None;
+}
+
+OutboxError Outbox::visitPending(
+    const std::function<OutboxError(const QueuedAction&)>& visitor) const {
+  if (!begun_ || !visitor) return OutboxError::Unsupported;
+  QueueStats stats;
+  return scanQueue(
+      storage_,
+      [&](const QueuedAction& action, const std::vector<uint8_t>&,
+          bool completed) {
+        return completed ? OutboxError::None : visitor(action);
+      },
+      stats);
 }
 
 OutboxError Outbox::append(const QueuedAction& action) {

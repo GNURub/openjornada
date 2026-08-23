@@ -234,9 +234,16 @@ describe('TerminalProvisioningCardComponent', () => {
 
 interface TestableIntegrationsComponent {
   terminalName: string;
+  terminalPin: string;
+  loadTerminals(page?: number): Promise<void>;
   createTerminal(): Promise<void>;
+  saveTerminalPin(): Promise<void>;
   rotateTerminal(terminal: TerminalRecord): Promise<void>;
   terminals(): TerminalRecord[];
+  adminPinConfigured(): boolean;
+  terminalPage(): number;
+  terminalTotalItems(): number;
+  terminalTotalPages(): number;
   terminalSaving(): boolean;
   generatedTerminalToken(): string;
 }
@@ -244,6 +251,8 @@ interface TestableIntegrationsComponent {
 function terminalRecord(id: string, token?: string): TerminalRecord {
   const record = {
     id,
+    collectionId: 'attendance_terminals',
+    collectionName: 'attendance_terminals',
     organization: 'organization-1',
     name: 'Recepción',
     prefix: 'demo',
@@ -254,19 +263,31 @@ function terminalRecord(id: string, token?: string): TerminalRecord {
     lastPendingCount: 0,
     revokedAt: '',
     createdBy: 'admin-1',
+    created: '2026-08-22 18:00:00.000Z',
   } as TerminalRecord;
   return token ? { ...record, token } : record;
 }
 
 describe('IntegrationsComponent terminal credential lifecycle', () => {
   let createTerminal: ReturnType<typeof vi.fn>;
+  let listTerminals: ReturnType<typeof vi.fn>;
   let rotateTerminalKey: ReturnType<typeof vi.fn>;
+  let updateAdminPin: ReturnType<typeof vi.fn>;
   let fixture: ComponentFixture<IntegrationsComponent>;
   let component: TestableIntegrationsComponent;
 
   beforeEach(async () => {
     createTerminal = vi.fn();
+    listTerminals = vi.fn().mockResolvedValue({
+      items: [terminalRecord('terminal-1')],
+      adminPinConfigured: true,
+      page: 1,
+      perPage: 10,
+      totalItems: 1,
+      totalPages: 1,
+    });
     rotateTerminalKey = vi.fn();
+    updateAdminPin = vi.fn();
     await TestBed.configureTestingModule({
       imports: [IntegrationsComponent],
       providers: [
@@ -278,12 +299,10 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
         {
           provide: TerminalService,
           useValue: {
-            listTerminals: vi.fn().mockResolvedValue({
-              items: [terminalRecord('terminal-1')],
-              adminPinConfigured: true,
-            }),
+            listTerminals,
             createTerminal,
             rotateTerminalKey,
+            updateAdminPin,
           },
         },
       ],
@@ -306,7 +325,181 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
     await component.createTerminal();
 
     expect(component.generatedTerminalToken()).toBe('ojterm_created_1234567890');
+    expect(component.terminals()[0].id).toBe('terminal-2');
     expect(component.terminals()[0]).not.toHaveProperty('token');
+  });
+
+  it('loads terminal pages and exposes their server metadata', async () => {
+    listTerminals.mockResolvedValueOnce({
+      items: [terminalRecord('terminal-11')],
+      adminPinConfigured: true,
+      page: 2,
+      perPage: 10,
+      totalItems: 11,
+      totalPages: 2,
+    });
+
+    await component.loadTerminals(2);
+    fixture.detectChanges();
+
+    expect(listTerminals).toHaveBeenLastCalledWith(2);
+    expect(component.terminals().map((terminal) => terminal.id)).toEqual(['terminal-11']);
+    expect(component.terminalPage()).toBe(2);
+    expect(component.terminalTotalItems()).toBe(11);
+    expect(component.terminalTotalPages()).toBe(2);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Mostrando 11–11 de 11');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Página 2 de 2');
+  });
+
+  it('keeps paginator focus while the next page is loading', async () => {
+    listTerminals.mockResolvedValueOnce({
+      items: Array.from({ length: 10 }, (_, index) => terminalRecord(`terminal-${index + 1}`)),
+      adminPinConfigured: true,
+      page: 1,
+      perPage: 10,
+      totalItems: 11,
+      totalPages: 2,
+    });
+    await component.loadTerminals(1);
+    fixture.detectChanges();
+    let finishList!: (response: {
+      items: TerminalRecord[];
+      adminPinConfigured: boolean;
+      page: number;
+      perPage: number;
+      totalItems: number;
+      totalPages: number;
+    }) => void;
+    listTerminals.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishList = resolve;
+      }),
+    );
+    const nextButton = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button'),
+    ).find((button) => button.textContent?.trim() === 'Siguiente');
+    expect(nextButton).toBeDefined();
+    nextButton?.focus();
+
+    nextButton?.click();
+    fixture.detectChanges();
+
+    expect(nextButton?.isConnected).toBe(true);
+    expect(document.activeElement).toBe(nextButton);
+    expect(nextButton?.disabled).toBe(true);
+    finishList({
+      items: [terminalRecord('terminal-11')],
+      adminPinConfigured: true,
+      page: 2,
+      perPage: 10,
+      totalItems: 11,
+      totalPages: 2,
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(nextButton);
+  });
+
+  it('returns to the first ordered page after creating from another page', async () => {
+    listTerminals.mockResolvedValueOnce({
+      items: [terminalRecord('terminal-11')],
+      adminPinConfigured: true,
+      page: 2,
+      perPage: 10,
+      totalItems: 11,
+      totalPages: 2,
+    });
+    await component.loadTerminals(2);
+    createTerminal.mockResolvedValue(terminalRecord('terminal-12', 'ojterm_created_1234567890'));
+    listTerminals.mockResolvedValueOnce({
+      items: [terminalRecord('terminal-12'), terminalRecord('terminal-1')],
+      adminPinConfigured: true,
+      page: 1,
+      perPage: 10,
+      totalItems: 12,
+      totalPages: 2,
+    });
+    component.terminalName = 'Almacén';
+
+    await component.createTerminal();
+
+    expect(listTerminals).toHaveBeenLastCalledWith(1);
+    expect(component.terminalPage()).toBe(1);
+    expect(component.terminals()[0].id).toBe('terminal-12');
+    expect(component.terminals()[0]).not.toHaveProperty('token');
+    expect(component.generatedTerminalToken()).toBe('ojterm_created_1234567890');
+  });
+
+  it('does not create while a terminal page request is pending', async () => {
+    let finishList!: (response: {
+      items: TerminalRecord[];
+      adminPinConfigured: boolean;
+      page: number;
+      perPage: number;
+      totalItems: number;
+      totalPages: number;
+    }) => void;
+    listTerminals.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishList = resolve;
+      }),
+    );
+    const loading = component.loadTerminals(1);
+    component.terminalName = 'Almacén';
+
+    await component.createTerminal();
+
+    expect(createTerminal).not.toHaveBeenCalled();
+    finishList({
+      items: [terminalRecord('terminal-1')],
+      adminPinConfigured: true,
+      page: 1,
+      perPage: 10,
+      totalItems: 1,
+      totalPages: 1,
+    });
+    await loading;
+  });
+
+  it('does not refresh while a terminal credential creation is pending', async () => {
+    let finishCreation!: (terminal: TerminalRecord) => void;
+    createTerminal.mockReturnValue(
+      new Promise<TerminalRecord>((resolve) => {
+        finishCreation = resolve;
+      }),
+    );
+    component.terminalName = 'Almacén';
+    const creation = component.createTerminal();
+    const listCallsBeforeRefresh = listTerminals.mock.calls.length;
+
+    await component.loadTerminals(1);
+
+    expect(listTerminals).toHaveBeenCalledTimes(listCallsBeforeRefresh);
+    finishCreation(terminalRecord('terminal-2', 'ojterm_created_1234567890'));
+    await creation;
+    expect(component.terminals().filter((terminal) => terminal.id === 'terminal-2')).toHaveLength(
+      1,
+    );
+    expect(component.terminalTotalItems()).toBe(2);
+  });
+
+  it('does not refresh with stale PIN state while the PIN update is pending', async () => {
+    let finishPinUpdate!: (response: { configured: boolean }) => void;
+    updateAdminPin.mockReturnValue(
+      new Promise((resolve) => {
+        finishPinUpdate = resolve;
+      }),
+    );
+    component.terminalPin = '9669';
+    const update = component.saveTerminalPin();
+    const listCallsBeforeRefresh = listTerminals.mock.calls.length;
+
+    await component.loadTerminals(1);
+
+    expect(listTerminals).toHaveBeenCalledTimes(listCallsBeforeRefresh);
+    finishPinUpdate({ configured: true });
+    await update;
+    expect(component.adminPinConfigured()).toBe(true);
   });
 
   it('removes the one-time token and child secrets synchronously on pagehide', async () => {

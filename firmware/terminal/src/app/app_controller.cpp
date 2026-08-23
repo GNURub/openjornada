@@ -22,6 +22,13 @@ bool ambiguous(const ApiFailure& failure) {
          failure.code == ApiErrorCode::InvalidResponse;
 }
 
+bool isAdminScreen(ScreenKind kind) {
+  return kind == ScreenKind::AdminPin ||
+         kind == ScreenKind::AdminEmployees ||
+         kind == ScreenKind::AdminScan ||
+         kind == ScreenKind::AdminReplaceConfirm;
+}
+
 const char* actionSuccessMessage(Command command) {
   switch (command) {
     case Command::ClockIn: return "Jornada iniciada";
@@ -130,23 +137,51 @@ std::string isoUtc(int64_t epochSeconds) {
 }
 
 AppController::AppController(NetworkWorker& worker, Outbox& outbox,
-                             AppControllerConfig config)
-    : worker_(worker), outbox_(outbox), config_(std::move(config)) {}
+                             AppControllerConfig config,
+                             CacheStore* cacheStore, ConfigStore* configStore)
+    : worker_(worker),
+      outbox_(outbox),
+      cacheStore_(cacheStore),
+      configStore_(configStore),
+      config_(std::move(config)),
+      cache_(config_.initialCache),
+      clockTrust_(config_.lastNtpEpochSeconds),
+      terminalId_(config_.terminalId),
+      clockSyncedAt_(config_.clockSyncedAt) {
+  if (config_.configFingerprint.empty()) {
+    config_.configFingerprint = configurationFingerprint(
+        config_.credentials.baseUrl, config_.credentials.terminalToken);
+  }
+  if ((!cache_.terminalId.empty() && cache_.terminalId != terminalId_) ||
+      (!cache_.configFingerprint.empty() &&
+       cache_.configFingerprint != config_.configFingerprint)) {
+    cache_ = {};
+  }
+}
 
 void AppController::start(size_t pendingCount, uint32_t nowMs) {
+  clockTrust_.onBoot();
+  monotonicMs_ = 0;
+  lastObservedNowMs_ = nowMs;
+  monotonicInitialized_ = true;
   started_ = true;
   screen_ = {};
   screen_.kind = ScreenKind::Boot;
   screen_.title = "OpenJornada";
   screen_.detail = "Conectando con el servidor...";
   screen_.pendingCount = pendingCount;
+  if (!rehydratePending()) return;
   bootstrapRetryAtMs_ = nowMs;
+  if (!terminalId_.empty() && !cache_.entries.empty()) returnToIdle();
 }
 
 void AppController::tick(const AppEvent& event) {
   if (!started_) return;
+  observeMonotonic(event.nowMs);
+  if (!outboxOperational_) return;
   updateStatus(event);
   processNetworkResults(event);
+  if (!outboxOperational_) return;
   switch (event.kind) {
     case AppEventKind::Timer: handleTimer(event); break;
     case AppEventKind::TagScanned: handleTag(event); break;
@@ -163,7 +198,14 @@ AppFeedback AppController::takeFeedback() {
 
 void AppController::updateStatus(const AppEvent& event) {
   screen_.networkConnected = event.networkConnected;
-  screen_.ntpTrusted = event.ntpTrusted;
+  if (event.ntpTrusted &&
+      (!clockTrust_.synchronizedThisBoot() ||
+       event.ntpSyncEpochSeconds > clockTrust_.lastNtpEpochSeconds()) &&
+      clockTrust_.onNtpSync(event.ntpSyncEpochSeconds)) {
+    clockSyncedAt_ = isoUtc(event.ntpSyncEpochSeconds);
+    persistRuntimeState();
+  }
+  screen_.ntpTrusted = clockTrust_.canCreateOffline(event.nowEpochSeconds);
 }
 
 void AppController::processNetworkResults(const AppEvent& event) {
@@ -189,12 +231,22 @@ void AppController::processNetworkResult(NetworkResult&& result,
                             std::max<uint32_t>(result.suggestedRetryMs, 2000U);
       return;
     }
+    const bool terminalChanged =
+        !terminalId_.empty() && terminalId_ != result.bootstrap->terminal.id;
     terminalId_ = result.bootstrap->terminal.id;
     timezone_ = result.bootstrap->timezone;
-    clockSyncedAt_ = result.bootstrap->serverTime;
+    serverTimeEpochSeconds_ =
+        parseRfc3339(result.bootstrap->serverTime).value_or(0);
+    serverTimeObservedAtMonotonicMs_ = monotonicMs_;
+    if (clockSyncedAt_.empty()) clockSyncedAt_ = result.bootstrap->serverTime;
     bootstrapReady_ = true;
-    screen_.ntpTrusted = true;
-    returnToIdle();
+    if (terminalChanged || cache_.terminalId != terminalId_ ||
+        cache_.configFingerprint != config_.configFingerprint) {
+      cache_ = {};
+      if (cacheStore_ != nullptr) (void)cacheStore_->clear();
+    }
+    persistRuntimeState();
+    enqueueCacheRefresh(event.nowMs);
     return;
   }
   if (result.kind == NetworkJobKind::Resolve) {
@@ -248,20 +300,100 @@ void AppController::processNetworkResult(NetworkResult&& result,
   }
   if (result.kind == NetworkJobKind::Action) {
     handleActionResult(std::move(result), event);
+    return;
+  }
+  if (result.kind == NetworkJobKind::Cache) {
+    handleCacheResult(std::move(result), event);
+    return;
+  }
+  if (result.kind == NetworkJobKind::Sync) {
+    handleSyncResult(std::move(result), event);
+    return;
+  }
+  if (result.kind == NetworkJobKind::OpenAdminSession) {
+    if (!result.call.ok || result.adminSession == nullptr ||
+        !adminFlow_.setSession(result.adminSession->token, event.nowMs)) {
+      const std::string message = result.call.failure.safeMessage.empty()
+                                      ? "PIN no válido o sesión no disponible."
+                                      : result.call.failure.safeMessage;
+      adminFlow_.clearSession();
+      showMessage(message, event.nowMs, kMessageMs, true);
+      return;
+    }
+    enqueueEmployees(event);
+    return;
+  }
+  if (result.kind == NetworkJobKind::Employees) {
+    if (adminFlow_.expire(event.nowMs, event.networkConnected) ||
+        !adminFlow_.canAdminister(event.networkConnected)) {
+      adminEmployees_ = {};
+      showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                  kMessageMs, true);
+      return;
+    }
+    if (!result.call.ok || result.employees == nullptr) {
+      const std::string message = result.call.failure.safeMessage.empty()
+                                      ? "No se pudo cargar el personal."
+                                      : result.call.failure.safeMessage;
+      showMessage(message, event.nowMs, kMessageMs, true);
+      return;
+    }
+    adminEmployees_ = std::move(*result.employees);
+    selectedEmployeeIndex_ = 0;
+    adminFlow_.touch(event.nowMs);
+    showAdminEmployees();
+    return;
+  }
+  if (result.kind == NetworkJobKind::AssignEmployee) {
+    const bool sessionExpired =
+        adminFlow_.expire(event.nowMs, event.networkConnected) ||
+        !adminFlow_.canAdminister(event.networkConnected);
+    if (!result.call.ok) {
+      const std::string message = result.call.failure.safeMessage.empty()
+                                      ? "No se pudo asignar el tag."
+                                      : result.call.failure.safeMessage;
+      pendingAdminUid_.clear();
+      showMessage(message, event.nowMs, kMessageMs, true);
+      return;
+    }
+    pendingAdminUid_.clear();
+    if (selectedEmployeeIndex_ < adminEmployees_.itemCount) {
+      adminEmployees_.items[selectedEmployeeIndex_].hasRfidTag = true;
+    }
+    if (!sessionExpired) adminFlow_.touch(event.nowMs);
+    cacheRefreshForAdmin_ = !sessionExpired;
+    cacheRefreshDone_ = false;
+    enqueueCacheRefresh(event.nowMs);
+    return;
+  }
+  if (result.kind == NetworkJobKind::CloseAdminSession) {
+    returnToIdle();
   }
 }
 
 void AppController::handleTimer(const AppEvent& event) {
+  handleAdminTimer(event);
   if (!bootstrapReady_ && !bootstrapQueued_ && activeJobId_ == 0 &&
       event.networkConnected &&
       (bootstrapRetryAtMs_ == 0 ||
        deadlineReached(event.nowMs, bootstrapRetryAtMs_))) {
     enqueueBootstrap(event.nowMs);
   }
+  if (bootstrapReady_ && !cacheRefreshDone_ && !cacheRefreshQueued_ &&
+      activeJobId_ == 0 && event.networkConnected &&
+      screen_.kind == ScreenKind::Idle) {
+    enqueueCacheRefresh(event.nowMs);
+  }
+  if (bootstrapReady_ && cacheRefreshDone_ && !syncBlocked_ &&
+      activeJobId_ == 0 && event.networkConnected &&
+      screen_.kind == ScreenKind::Idle && screen_.pendingCount > 0 &&
+      syncEngine_.ready(event.nowMs)) {
+    enqueueSync(event);
+  }
   if (screen_.kind == ScreenKind::Message && messageDeadlineActive_ &&
       deadlineReached(event.nowMs, messageNextAtMs_)) {
     messageDeadlineActive_ = false;
-    if (bootstrapReady_) {
+    if (bootstrapReady_ || (!terminalId_.empty() && !cache_.entries.empty())) {
       returnToIdle();
     } else {
       screen_.kind = ScreenKind::Boot;
@@ -285,8 +417,60 @@ void AppController::handleTimer(const AppEvent& event) {
 }
 
 void AppController::handleTag(const AppEvent& event) {
-  if (!bootstrapReady_ || !event.networkConnected || activeJobId_ != 0 ||
-      screen_.kind != ScreenKind::Idle || event.uid.empty()) {
+  if (screen_.kind == ScreenKind::AdminScan && activeJobId_ == 0 &&
+      !event.uid.empty()) {
+    if (!adminFlow_.canAdminister(event.networkConnected) ||
+        selectedEmployeeIndex_ >= adminEmployees_.itemCount) {
+      adminFlow_.clearSession();
+      showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                  kMessageMs, true);
+      return;
+    }
+    adminFlow_.touch(event.nowMs);
+    pendingAdminUid_ = event.uid;
+    if (adminEmployees_.items[selectedEmployeeIndex_].hasRfidTag) {
+      screen_.kind = ScreenKind::AdminReplaceConfirm;
+      screen_.title = "Sustituir tag";
+      screen_.detail = "Esta persona ya tiene un tag asignado.";
+      screen_.buttons = {"Cancelar", "", "Sustituir"};
+      screen_.warning = true;
+      return;
+    }
+    enqueueAssignment(event, false);
+    return;
+  }
+  if (activeJobId_ != 0 || screen_.kind != ScreenKind::Idle ||
+      event.uid.empty()) {
+    return;
+  }
+  if (!event.networkConnected) {
+    if (!clockTrust_.canCreateOffline(event.nowEpochSeconds)) {
+      showMessage("Reloj no fiable; conecta la red.", event.nowMs,
+                  kMessageMs, true);
+      feedback_ = AppFeedback::Error;
+      return;
+    }
+    auto cached = resolveFromCache(event.uid);
+    if (!cached.has_value()) {
+      showMessage("Tag no asignado; conecta la red.", event.nowMs,
+                  kMessageMs, true);
+      feedback_ = AppFeedback::Error;
+      return;
+    }
+    currentUid_ = event.uid;
+    resolved_ = std::move(*cached);
+    resolvedOffline_ = true;
+    lastAuthoritativeState_ = resolved_->state;
+    showActions(event.nowMs);
+    return;
+  }
+  if (!bootstrapReady_) {
+    showMessage("Conectando con OpenJornada; inténtalo de nuevo.",
+                event.nowMs, kMessageMs, true);
+    return;
+  }
+  if (screen_.pendingCount > 0) {
+    enqueueSync(event);
     return;
   }
   NetworkJob job;
@@ -294,7 +478,7 @@ void AppController::handleTag(const AppEvent& event) {
   job.kind = NetworkJobKind::Resolve;
   job.credentials = config_.credentials;
   job.uid = event.uid;
-  if (!worker_.enqueue(job)) {
+  if (!worker_.enqueue(std::move(job))) {
     showMessage("El terminal está ocupado; vuelve a acercar el tag.",
                 event.nowMs, kMessageMs, true);
     feedback_ = AppFeedback::Error;
@@ -343,11 +527,61 @@ void AppController::handleButton(const AppEvent& event, bool held) {
     }
     return;
   }
+  if (!held && screen_.kind == ScreenKind::AdminPin) {
+    const auto pin = adminFlow_.updatePin(event.button, event.nowMs);
+    screen_.detail = "PIN: " + adminFlow_.pinDisplay();
+    if (pin.has_value()) enqueueAdminSession(*pin, event);
+    return;
+  }
+  if (!held && screen_.kind == ScreenKind::AdminEmployees) {
+    if (!adminFlow_.canAdminister(event.networkConnected) ||
+        adminEmployees_.itemCount == 0) {
+      adminFlow_.clearSession();
+      showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                  kMessageMs, true);
+      return;
+    }
+    adminFlow_.touch(event.nowMs);
+    if (event.button == Button::A) {
+      selectedEmployeeIndex_ =
+          (selectedEmployeeIndex_ + adminEmployees_.itemCount - 1U) %
+          adminEmployees_.itemCount;
+      showAdminEmployees();
+    } else if (event.button == Button::C) {
+      selectedEmployeeIndex_ =
+          (selectedEmployeeIndex_ + 1U) % adminEmployees_.itemCount;
+      showAdminEmployees();
+    } else {
+      screen_.kind = ScreenKind::AdminScan;
+      screen_.title = adminEmployees_.items[selectedEmployeeIndex_].displayName;
+      screen_.detail = "Acerca el tag que deseas asignar.";
+      screen_.buttons = {"Volver", "", ""};
+      screen_.warning = false;
+    }
+    return;
+  }
+  if (!held && screen_.kind == ScreenKind::AdminScan) {
+    if (event.button == Button::A) showAdminEmployees();
+    return;
+  }
+  if (!held && screen_.kind == ScreenKind::AdminReplaceConfirm) {
+    if (event.button == Button::A) {
+      pendingAdminUid_.clear();
+      showAdminEmployees();
+    } else if (event.button == Button::C) {
+      enqueueAssignment(event, true);
+    }
+    return;
+  }
   if (held || activeJobId_ != 0) return;
   if (screen_.kind == ScreenKind::CloseConfirm) {
     if (event.button == Button::A) returnToIdle();
     if (event.button == Button::C) {
-      enqueueCloseRefresh(event);
+      if (closeBreakQueued_) {
+        executeAction(Command::ClockOut, event);
+      } else {
+        enqueueCloseRefresh(event);
+      }
     }
     return;
   }
@@ -373,6 +607,167 @@ void AppController::handleButton(const AppEvent& event, bool held) {
   }
 }
 
+void AppController::handleAdminTimer(const AppEvent& event) {
+  if (activeJobId_ == 0 &&
+      adminFlow_.holdCombo(event.buttonADown, event.buttonBDown,
+                           event.buttonCDown, event.nowMs)) {
+    if (screen_.kind == ScreenKind::Idle) {
+      if (!event.networkConnected) {
+        showMessage("La administración necesita conexión.", event.nowMs,
+                    kMessageMs, true);
+      } else {
+        openAdminPin(event.nowMs);
+      }
+    } else if (isAdminScreen(screen_.kind)) {
+      exitAdmin(event);
+    }
+  }
+  if (adminFlow_.expire(event.nowMs, event.networkConnected)) {
+    pendingAdminUid_.clear();
+    if (isAdminScreen(screen_.kind)) {
+      showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                  kMessageMs, true);
+    }
+  }
+}
+
+void AppController::openAdminPin(uint32_t nowMs) {
+  adminFlow_.clearSession();
+  adminFlow_.resetPin();
+  screen_.kind = ScreenKind::AdminPin;
+  screen_.title = "Administración";
+  screen_.detail = "PIN: " + adminFlow_.pinDisplay();
+  screen_.buttons = {"−", "Confirmar", "+"};
+  screen_.deadlineMs = nowMs + AdminFlow::kSessionIdleMs;
+  screen_.warning = false;
+  screen_.busy = false;
+}
+
+void AppController::enqueueAdminSession(const std::string& pin,
+                                        const AppEvent& event) {
+  if (!event.networkConnected || activeJobId_ != 0) {
+    showMessage("La administración necesita conexión.", event.nowMs,
+                kMessageMs, true);
+    return;
+  }
+  NetworkJob job;
+  job.id = nextJobId_++;
+  job.kind = NetworkJobKind::OpenAdminSession;
+  job.credentials = config_.credentials;
+  job.pin = pin;
+  if (!worker_.enqueue(std::move(job))) {
+    showMessage("El terminal está ocupado; inténtalo de nuevo.",
+                event.nowMs, kMessageMs, true);
+    return;
+  }
+  activeJobId_ = job.id;
+  screen_.kind = ScreenKind::Message;
+  screen_.title = "Administración";
+  screen_.detail = "Comprobando PIN...";
+  screen_.buttons = {};
+  screen_.busy = true;
+  screen_.deadlineMs = 0;
+}
+
+void AppController::enqueueEmployees(const AppEvent& event) {
+  if (!adminFlow_.canAdminister(event.networkConnected)) {
+    adminFlow_.clearSession();
+    showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                kMessageMs, true);
+    return;
+  }
+  NetworkJob job;
+  job.id = nextJobId_++;
+  job.kind = NetworkJobKind::Employees;
+  job.credentials = config_.credentials;
+  job.adminSession = adminFlow_.capability();
+  if (!worker_.enqueue(std::move(job))) {
+    showMessage("No se pudo solicitar la lista de personal.", event.nowMs,
+                kMessageMs, true);
+    return;
+  }
+  activeJobId_ = job.id;
+  screen_.kind = ScreenKind::Message;
+  screen_.title = "Administración";
+  screen_.detail = "Cargando personal...";
+  screen_.buttons = {};
+  screen_.busy = true;
+  screen_.deadlineMs = 0;
+}
+
+void AppController::enqueueAssignment(const AppEvent& event, bool replace) {
+  if (!adminFlow_.canAdminister(event.networkConnected) ||
+      selectedEmployeeIndex_ >= adminEmployees_.itemCount ||
+      pendingAdminUid_.empty()) {
+    showMessage("No se puede asignar el tag en este momento.", event.nowMs,
+                kMessageMs, true);
+    return;
+  }
+  NetworkJob job;
+  job.id = nextJobId_++;
+  job.kind = NetworkJobKind::AssignEmployee;
+  job.credentials = config_.credentials;
+  job.adminSession = adminFlow_.capability();
+  job.employeeId = adminEmployees_.items[selectedEmployeeIndex_].id;
+  job.uid = pendingAdminUid_;
+  job.replace = replace;
+  if (!worker_.enqueue(std::move(job))) {
+    showMessage("El terminal está ocupado; inténtalo de nuevo.",
+                event.nowMs, kMessageMs, true);
+    return;
+  }
+  activeJobId_ = job.id;
+  screen_.kind = ScreenKind::Message;
+  screen_.title = "Asignando tag";
+  screen_.detail = "Esperando confirmación del servidor...";
+  screen_.buttons = {};
+  screen_.busy = true;
+  screen_.deadlineMs = 0;
+}
+
+void AppController::exitAdmin(const AppEvent& event) {
+  const std::string capability = adminFlow_.capability();
+  adminFlow_.clearSession();
+  pendingAdminUid_.clear();
+  adminEmployees_ = {};
+  if (!event.networkConnected || capability.empty()) {
+    returnToIdle();
+    return;
+  }
+  NetworkJob job;
+  job.id = nextJobId_++;
+  job.kind = NetworkJobKind::CloseAdminSession;
+  job.credentials = config_.credentials;
+  job.adminSession = capability;
+  if (!worker_.enqueue(std::move(job))) {
+    returnToIdle();
+    return;
+  }
+  activeJobId_ = job.id;
+  screen_.kind = ScreenKind::Message;
+  screen_.title = "Administración";
+  screen_.detail = "Cerrando sesión...";
+  screen_.buttons = {};
+  screen_.busy = true;
+}
+
+void AppController::showAdminEmployees() {
+  screen_.kind = ScreenKind::AdminEmployees;
+  screen_.title = "Asignar tag";
+  if (adminEmployees_.itemCount == 0) {
+    screen_.detail = "No hay personal disponible.";
+    screen_.buttons = {};
+  } else {
+    const auto& employee = adminEmployees_.items[selectedEmployeeIndex_];
+    screen_.detail = employee.displayName +
+                     (employee.hasRfidTag ? " · tag asignado" : " · sin tag");
+    screen_.buttons = {"Anterior", "Elegir", "Siguiente"};
+  }
+  screen_.warning = false;
+  screen_.busy = false;
+  screen_.deadlineMs = 0;
+}
+
 void AppController::enqueueBootstrap(uint32_t nowMs) {
   NetworkJob job;
   job.id = nextJobId_++;
@@ -381,7 +776,7 @@ void AppController::enqueueBootstrap(uint32_t nowMs) {
   job.bootstrap = {kTerminalProtocolVersion, config_.clientVersion,
                    static_cast<uint32_t>(std::min<size_t>(
                        screen_.pendingCount, OutboxCodec::kCapacity))};
-  if (!worker_.enqueue(job)) {
+  if (!worker_.enqueue(std::move(job))) {
     bootstrapRetryAtMs_ = nowMs + 2000U;
     return;
   }
@@ -391,6 +786,209 @@ void AppController::enqueueBootstrap(uint32_t nowMs) {
   screen_.title = "OpenJornada";
   screen_.detail = "Conectando con el servidor...";
   screen_.busy = true;
+}
+
+void AppController::enqueueCacheRefresh(uint32_t nowMs) {
+  NetworkJob job;
+  job.id = nextJobId_++;
+  job.kind = NetworkJobKind::Cache;
+  job.credentials = config_.credentials;
+  job.cacheRevision = cache_.revision;
+  if (!worker_.enqueue(std::move(job))) {
+    cacheRefreshQueued_ = false;
+    bootstrapRetryAtMs_ = nowMs + 2000U;
+    return;
+  }
+  activeJobId_ = job.id;
+  cacheRefreshQueued_ = true;
+  screen_.kind = ScreenKind::Boot;
+  screen_.title = "OpenJornada";
+  screen_.detail = "Actualizando credenciales locales...";
+  screen_.busy = true;
+}
+
+void AppController::enqueueSync(const AppEvent& event) {
+  activeSyncBatch_.clear();
+  const OutboxError listed = outbox_.list(activeSyncBatch_, kMaxApiSyncItems);
+  if (listed != OutboxError::None || activeSyncBatch_.empty()) {
+    if (listed != OutboxError::None) {
+      failClosedOnOutbox();
+    } else {
+      if (!refreshPendingCount()) return;
+      returnToIdle();
+    }
+    return;
+  }
+  NetworkJob job;
+  job.id = nextJobId_++;
+  job.kind = NetworkJobKind::Sync;
+  job.credentials = config_.credentials;
+  job.sync.actions = activeSyncBatch_;
+  job.sync.pendingCount = static_cast<uint32_t>(screen_.pendingCount);
+  if (!worker_.enqueue(std::move(job))) {
+    syncEngine_.onTransportFailure(event.nowMs);
+    activeSyncBatch_.clear();
+    return;
+  }
+  activeJobId_ = job.id;
+  screen_.kind = ScreenKind::Message;
+  screen_.title = "Sincronizando";
+  screen_.detail = "Enviando fichajes pendientes...";
+  screen_.buttons = {};
+  screen_.busy = true;
+  screen_.deadlineMs = 0;
+}
+
+void AppController::handleCacheResult(NetworkResult&& result,
+                                      const AppEvent& event) {
+  cacheRefreshQueued_ = false;
+  cacheRefreshDone_ = true;
+  const bool adminSessionExpired =
+      cacheRefreshForAdmin_ &&
+      (adminFlow_.expire(event.nowMs, event.networkConnected) ||
+       !adminFlow_.canAdminister(event.networkConnected));
+  if (!result.call.ok || result.cache == nullptr) {
+    if (cacheRefreshForAdmin_) {
+      cacheRefreshForAdmin_ = false;
+      if (adminSessionExpired) {
+        showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                    kMessageMs, true);
+      } else {
+        showAdminEmployees();
+      }
+      return;
+    }
+    if (cache_.entries.empty()) {
+      showMessage("No se pudo reconstruir la caché; se necesita red.",
+                  event.nowMs, kMessageMs, true);
+    } else {
+      returnToIdle();
+    }
+    return;
+  }
+  if (!result.cache->unchanged) {
+    CacheSnapshot candidate;
+    candidate.revision = result.cache->revision;
+    candidate.terminalId = terminalId_;
+    candidate.configFingerprint = config_.configFingerprint;
+    candidate.entries.reserve(result.cache->itemCount);
+    for (size_t index = 0; index < result.cache->itemCount; ++index) {
+      const CacheItem& item = result.cache->items[index];
+      candidate.entries.push_back(
+          {item.employeeId, item.displayName, item.uid,
+           {item.state.kind, item.state.workedSeconds,
+            item.state.breakSeconds, item.state.longShift,
+            item.state.staleBreak}});
+    }
+    if (cacheStore_ != nullptr &&
+        cacheStore_->replaceAtomically(candidate) != CacheError::None) {
+      showMessage("No se pudo guardar la caché actualizada.", event.nowMs,
+                  kMessageMs, true);
+      return;
+    }
+    cache_ = std::move(candidate);
+    if (!rehydratePending()) return;
+  }
+  if (cacheRefreshForAdmin_) {
+    cacheRefreshForAdmin_ = false;
+    if (adminSessionExpired) {
+      showMessage("La sesión administrativa ha caducado.", event.nowMs,
+                  kMessageMs, true);
+    } else {
+      showAdminEmployees();
+    }
+    return;
+  }
+  returnToIdle();
+}
+
+void AppController::handleSyncResult(NetworkResult&& result,
+                                     const AppEvent& event) {
+  const SyncResponse empty{};
+  const SyncApplyResult applied = syncEngine_.applyResults(
+      activeSyncBatch_, result.call,
+      result.sync == nullptr ? empty : *result.sync);
+  if (applied.status == SyncApplyStatus::Retry ||
+      applied.status == SyncApplyStatus::Invalid) {
+    syncEngine_.onTransportFailure(event.nowMs);
+    activeSyncBatch_.clear();
+    returnToIdle();
+  }
+  CacheSnapshot reconciled = cache_;
+  const auto applyResultState = [&](size_t index) {
+    if (result.sync == nullptr || index >= result.sync->itemCount ||
+        index >= activeSyncBatch_.size()) {
+      return false;
+    }
+    for (auto& entry : reconciled.entries) {
+      if (entry.uid != activeSyncBatch_[index].uid) continue;
+      const ApiWorkState& state = result.sync->items[index].state;
+      entry.state = {state.kind, state.workedSeconds, state.breakSeconds,
+                     state.longShift, state.staleBreak};
+      return true;
+    }
+    // A full cache refresh is authoritative. If the UID is absent, there is
+    // no local employee state left to reconcile before completing a
+    // definitive server result.
+    return true;
+  };
+  bool statesReady = true;
+  for (size_t index = 0; index < applied.completedRequestIds.size(); ++index) {
+    statesReady = applyResultState(index) && statesReady;
+  }
+  if (applied.status == SyncApplyStatus::Blocked && result.call.ok &&
+      result.sync != nullptr &&
+      applied.completedRequestIds.size() < result.sync->itemCount) {
+    statesReady = applyResultState(applied.completedRequestIds.size()) &&
+                  statesReady;
+  }
+  if (!result.call.ok && applied.status == SyncApplyStatus::Blocked) {
+    reconciled.revision = 0;
+    cacheRefreshDone_ = false;
+  }
+  if (statesReady && cacheStore_ != nullptr && !reconciled.entries.empty()) {
+    statesReady =
+        cacheStore_->replaceAtomically(reconciled) == CacheError::None;
+  }
+  if (!statesReady) {
+    syncBlocked_ = true;
+    activeSyncBatch_.clear();
+    showMessage("No se pudo reconciliar la caché local; la cola se conserva.",
+                event.nowMs, kMessageMs, true);
+    return;
+  }
+  cache_ = std::move(reconciled);
+  for (const auto& requestId : applied.completedRequestIds) {
+    if (outbox_.complete(requestId) != OutboxError::None) {
+      syncBlocked_ = true;
+      activeSyncBatch_.clear();
+      if (!refreshPendingCount()) return;
+      showMessage("No se pudo confirmar la cola local.", event.nowMs,
+                  kMessageMs, true);
+      return;
+    }
+  }
+  activeSyncBatch_.clear();
+  if (!refreshPendingCount()) return;
+  syncEngine_.onSuccess();
+  if (applied.status == SyncApplyStatus::Blocked) {
+    syncBlocked_ = true;
+    showMessage("Un fichaje fue rechazado; revisa la incidencia.",
+                event.nowMs, kMessageMs, true);
+    feedback_ = AppFeedback::Error;
+    return;
+  }
+  if (screen_.pendingCount == 0) {
+    if (outbox_.compact() != OutboxError::None) {
+      syncBlocked_ = true;
+      showMessage("No se pudo compactar la cola local.", event.nowMs,
+                  kMessageMs, true);
+      return;
+    }
+    showMessage("Fichajes sincronizados", event.nowMs, kSuccessMessageMs);
+  } else {
+    returnToIdle();
+  }
 }
 
 void AppController::enqueueCloseRefresh(const AppEvent& event) {
@@ -407,7 +1005,7 @@ void AppController::enqueueCloseRefresh(const AppEvent& event) {
   job.kind = NetworkJobKind::Resolve;
   job.credentials = config_.credentials;
   job.uid = currentUid_;
-  if (!worker_.enqueue(job)) {
+  if (!worker_.enqueue(std::move(job))) {
     showMessage("El terminal está ocupado; acerca de nuevo el tag.",
                 event.nowMs, kMessageMs, true);
     feedback_ = AppFeedback::Error;
@@ -422,6 +1020,17 @@ void AppController::enqueueCloseRefresh(const AppEvent& event) {
   screen_.buttons = {};
   screen_.busy = true;
   screen_.deadlineMs = 0;
+}
+
+void AppController::showQueuedCloseConfirm(uint32_t nowMs) {
+  closeBreakQueued_ = true;
+  if (resolved_.has_value()) resolved_->state.kind = WorkKind::Working;
+  screen_.kind = ScreenKind::CloseConfirm;
+  screen_.title = "¿Deseas cerrar ahora la jornada?";
+  screen_.detail = "El fin de pausa está pendiente de sincronizar";
+  screen_.buttons = {"No", "", "Sí"};
+  armInteractionDeadline(nowMs);
+  screen_.busy = false;
 }
 
 void AppController::showActions(uint32_t nowMs) {
@@ -450,7 +1059,7 @@ void AppController::openTimePicker(Command command, bool closesBreak,
   screen_.title = closesBreak ? "¿A qué hora terminaste la pausa?"
                               : "¿A qué hora terminaste?";
   screen_.detail = "Mantén A/C para saltar 30 min";
-  pickerMaxEpochSeconds_ = event.nowEpochSeconds;
+  pickerMaxEpochSeconds_ = effectiveCapturedEpoch(event);
   pickerMinEpochSeconds_ =
       parseRfc3339(resolved_->state.since).value_or(pickerMaxEpochSeconds_);
   if (pickerMinEpochSeconds_ < 0 ||
@@ -467,10 +1076,24 @@ void AppController::openTimePicker(Command command, bool closesBreak,
 void AppController::executeAction(Command command, const AppEvent& event,
                                   std::optional<int64_t> appliedEpoch,
                                   bool closeAfterBreak) {
+  const bool useServerClock =
+      event.networkConnected &&
+      (event.timestamp.empty() ||
+       !clockTrust_.canCreateOffline(event.nowEpochSeconds));
+  const int64_t capturedEpoch = effectiveCapturedEpoch(event);
+  const std::string capturedAt =
+      useServerClock ? isoUtc(capturedEpoch) : event.timestamp;
   if (!resolved_.has_value() || currentUid_.empty() || terminalId_.empty() ||
-      activeJobId_ != 0 || event.timestamp.empty() || clockSyncedAt_.empty()) {
+      activeJobId_ != 0 || capturedAt.empty() || clockSyncedAt_.empty()) {
     showMessage("No se puede preparar el fichaje; acerca de nuevo el tag.",
                 event.nowMs, kMessageMs, true);
+    feedback_ = AppFeedback::Error;
+    return;
+  }
+  if ((resolvedOffline_ || !event.networkConnected) &&
+      !clockTrust_.canCreateOffline(event.nowEpochSeconds)) {
+    showMessage("Reloj no fiable; conecta la red.", event.nowMs,
+                kMessageMs, true);
     feedback_ = AppFeedback::Error;
     return;
   }
@@ -479,9 +1102,9 @@ void AppController::executeAction(Command command, const AppEvent& event,
   queued.clientRequestId = makeRequestId(++sequence_);
   queued.uid = currentUid_;
   queued.command = command;
-  queued.deviceCapturedAt = event.timestamp;
+  queued.deviceCapturedAt = capturedAt;
   queued.appliedAt = appliedEpoch.has_value() ? isoUtc(*appliedEpoch) : "";
-  queued.clockSyncedAt = clockSyncedAt_;
+  queued.clockSyncedAt = useServerClock ? capturedAt : clockSyncedAt_;
   queued.deviceSequence = sequence_;
   queued.rebootId = config_.rebootId;
   queued.previousLocalHash = lastLocalHash_;
@@ -491,7 +1114,7 @@ void AppController::executeAction(Command command, const AppEvent& event,
 
   const OutboxError appended = outbox_.append(queued);
   if (appended != OutboxError::None) {
-    refreshPendingCount();
+    if (!refreshPendingCount()) return;
     showMessage(appended == OutboxError::Capacity
                     ? "Memoria llena; conecta la red."
                     : "No se pudo guardar el fichaje.",
@@ -500,7 +1123,8 @@ void AppController::executeAction(Command command, const AppEvent& event,
     return;
   }
   lastLocalHash_ = queued.signature;
-  refreshPendingCount();
+  if (!refreshPendingCount()) return;
+  (void)applyLocalAction(queued);
 
   NetworkJob job;
   job.id = nextJobId_++;
@@ -516,7 +1140,14 @@ void AppController::executeAction(Command command, const AppEvent& event,
   activeActionRequestId_ = queued.clientRequestId;
   activeActionCommand_ = command;
   activeActionClosesBreak_ = closeAfterBreak;
-  if (!event.networkConnected || !worker_.enqueue(job)) {
+  if (closeBreakQueued_ || resolvedOffline_ || !event.networkConnected ||
+      !worker_.enqueue(std::move(job))) {
+    if (closeAfterBreak) {
+      clearActiveActionTracking();
+      showQueuedCloseConfirm(event.nowMs);
+      feedback_ = AppFeedback::Success;
+      return;
+    }
     clearActiveActionTracking();
     showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
     feedback_ = AppFeedback::Success;
@@ -540,32 +1171,49 @@ void AppController::handleActionResult(NetworkResult&& result,
   if (result.call.ok &&
       (result.action == nullptr || requestId.empty() ||
        requestId != activeActionRequestId_)) {
-    showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
+    if (activeActionClosesBreak_) {
+      showQueuedCloseConfirm(event.nowMs);
+    } else {
+      showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
+    }
     clearActiveActionTracking();
     feedback_ = AppFeedback::Success;
     return;
   }
 
   if (!result.call.ok && ambiguous(result.call.failure)) {
-    showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
+    if (activeActionClosesBreak_) {
+      showQueuedCloseConfirm(event.nowMs);
+    } else {
+      showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
+    }
     clearActiveActionTracking();
     feedback_ = AppFeedback::Success;
     return;
   }
 
-  // A definitive HTTP failure belongs to the one request serialized by this
-  // controller. Never let a partially decoded error payload choose a different
-  // durable record.
-  const std::string completedId =
-      result.call.ok ? requestId : activeActionRequestId_;
-  const bool completionStored =
-      !completedId.empty() && markActionComplete(completedId);
-
   if (!result.call.ok) {
-    if (result.call.failure.authoritativeState.has_value()) {
-      lastAuthoritativeState_ = *result.call.failure.authoritativeState;
-      if (resolved_.has_value()) resolved_->state = lastAuthoritativeState_;
+    const bool hasAuthoritativeState =
+        result.call.failure.authoritativeState.has_value();
+    const ApiWorkState reconciled =
+        hasAuthoritativeState ? *result.call.failure.authoritativeState
+                              : lastAuthoritativeState_;
+    if (!hasAuthoritativeState) {
+      // A definitive rejection did not mutate server state. Persist the last
+      // resolved state, then force a full cache response after this message.
+      cache_.revision = 0;
+      cacheRefreshDone_ = false;
     }
+    const bool stateStored = updateCachedState(currentUid_, reconciled);
+    const bool completionStored =
+        stateStored && !activeActionRequestId_.empty() &&
+        markActionComplete(activeActionRequestId_);
+    if (!outboxOperational_) {
+      clearActiveActionTracking();
+      return;
+    }
+    lastAuthoritativeState_ = reconciled;
+    if (resolved_.has_value()) resolved_->state = reconciled;
     std::string message = result.call.failure.safeMessage.empty()
                               ? safeApiErrorMessage(result.call.failure.code)
                               : result.call.failure.safeMessage;
@@ -577,6 +1225,13 @@ void AppController::handleActionResult(NetworkResult&& result,
     return;
   }
 
+  const bool stateStored = updateCachedState(currentUid_, result.action->state);
+  const bool completionStored =
+      stateStored && !requestId.empty() && markActionComplete(requestId);
+  if (!outboxOperational_) {
+    clearActiveActionTracking();
+    return;
+  }
   lastAuthoritativeState_ = result.action->state;
   if (resolved_.has_value()) resolved_->state = result.action->state;
   if (result.action->status == ActionStatus::Incident ||
@@ -591,8 +1246,12 @@ void AppController::handleActionResult(NetworkResult&& result,
     return;
   }
   if (!completionStored) {
-    showMessage("Registrado; pendiente de sincronizar", event.nowMs,
-                kMessageMs);
+    if (activeActionClosesBreak_) {
+      showQueuedCloseConfirm(event.nowMs);
+    } else {
+      showMessage("Registrado; pendiente de sincronizar", event.nowMs,
+                  kMessageMs);
+    }
     clearActiveActionTracking();
     feedback_ = AppFeedback::Success;
     return;
@@ -628,6 +1287,7 @@ void AppController::showMessage(std::string detail, uint32_t nowMs,
 }
 
 void AppController::returnToIdle() {
+  if (!outboxOperational_) return;
   screen_.kind = ScreenKind::Idle;
   screen_.title = "OpenJornada";
   screen_.detail = "Acerca tu tarjeta";
@@ -645,19 +1305,177 @@ void AppController::returnToIdle() {
   currentUid_.clear();
   pickerClosesBreak_ = false;
   activeActionClosesBreak_ = false;
+  resolvedOffline_ = false;
+  closeBreakQueued_ = false;
 }
 
-void AppController::refreshPendingCount() {
-  size_t count = screen_.pendingCount;
-  if (outbox_.pendingCount(count) == OutboxError::None) {
-    screen_.pendingCount = count;
+bool AppController::refreshPendingCount() {
+  size_t count = 0;
+  if (outbox_.pendingCount(count) != OutboxError::None) {
+    failClosedOnOutbox();
+    return false;
   }
+  screen_.pendingCount = count;
+  return true;
 }
 
 bool AppController::markActionComplete(const std::string& clientRequestId) {
   const bool stored = outbox_.complete(clientRequestId) == OutboxError::None;
-  refreshPendingCount();
-  return stored;
+  return refreshPendingCount() && stored;
+}
+
+bool AppController::applyLocalAction(const QueuedAction& action) {
+  for (auto& entry : cache_.entries) {
+    if (entry.uid != action.uid) continue;
+    entry.state.kind = replayCommand(entry.state.kind, action.command);
+    entry.state.longShift = entry.state.kind == WorkKind::Working &&
+                            entry.state.workedSeconds >= 4 * 60 * 60;
+    entry.state.staleBreak = entry.state.kind == WorkKind::OnBreak &&
+                             entry.state.breakSeconds > 25 * 60;
+    if (cacheStore_ != nullptr) {
+      if (cacheStore_->replaceAtomically(cache_) != CacheError::None) {
+        return false;
+      }
+    }
+    if (resolved_.has_value() && currentUid_ == action.uid) {
+      resolved_->state.kind = entry.state.kind;
+    }
+    return true;
+  }
+  return false;
+}
+
+bool AppController::updateCachedState(const std::string& uid,
+                                      const ApiWorkState& state) {
+  for (auto& entry : cache_.entries) {
+    if (entry.uid != uid) continue;
+    entry.state = {state.kind, state.workedSeconds, state.breakSeconds,
+                   state.longShift, state.staleBreak};
+    if (cacheStore_ != nullptr) {
+      if (cacheStore_->replaceAtomically(cache_) != CacheError::None) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (!resolved_.has_value() || currentUid_ != uid ||
+      resolved_->employee.id.empty() ||
+      cache_.entries.size() >= CacheCodec::kCapacity) {
+    return false;
+  }
+  cache_.terminalId = terminalId_;
+  cache_.configFingerprint = config_.configFingerprint;
+  cache_.entries.push_back(
+      {resolved_->employee.id, resolved_->employee.displayName, uid,
+       {state.kind, state.workedSeconds, state.breakSeconds, state.longShift,
+        state.staleBreak}});
+  return cacheStore_ == nullptr ||
+         cacheStore_->replaceAtomically(cache_) == CacheError::None;
+}
+
+void AppController::observeMonotonic(uint32_t nowMs) {
+  if (!monotonicInitialized_) {
+    lastObservedNowMs_ = nowMs;
+    monotonicInitialized_ = true;
+    return;
+  }
+  monotonicMs_ += static_cast<uint32_t>(nowMs - lastObservedNowMs_);
+  lastObservedNowMs_ = nowMs;
+}
+
+int64_t AppController::effectiveCapturedEpoch(const AppEvent& event) const {
+  if (event.networkConnected && serverTimeEpochSeconds_ > 0 &&
+      (event.timestamp.empty() ||
+       !clockTrust_.canCreateOffline(event.nowEpochSeconds))) {
+    const uint64_t elapsedMs =
+        monotonicMs_ - serverTimeObservedAtMonotonicMs_;
+    return serverTimeEpochSeconds_ + static_cast<int64_t>(elapsedMs / 1000U);
+  }
+  if (!event.timestamp.empty() && event.nowEpochSeconds > 0) {
+    return event.nowEpochSeconds;
+  }
+  if (!event.networkConnected || serverTimeEpochSeconds_ <= 0) return 0;
+  const uint64_t elapsedMs =
+      monotonicMs_ - serverTimeObservedAtMonotonicMs_;
+  return serverTimeEpochSeconds_ + static_cast<int64_t>(elapsedMs / 1000U);
+}
+
+void AppController::failClosedOnOutbox() {
+  outboxOperational_ = false;
+  syncBlocked_ = true;
+  activeSyncBatch_.clear();
+  clearActiveActionTracking();
+  screen_.kind = ScreenKind::Fatal;
+  screen_.title = "Cola local no disponible";
+  screen_.detail =
+      "No se aceptarán fichajes. Reinicia o usa la recuperación segura.";
+  screen_.employee.clear();
+  screen_.buttons = {};
+  screen_.deadlineMs = 0;
+  screen_.pendingCount = OutboxCodec::kCapacity;
+  screen_.warning = true;
+  screen_.busy = false;
+  feedback_ = AppFeedback::Error;
+}
+
+void AppController::persistRuntimeState() {
+  if (configStore_ == nullptr || terminalId_.empty() ||
+      clockSyncedAt_.empty() || clockTrust_.lastNtpEpochSeconds() <= 0) {
+    return;
+  }
+  (void)configStore_->saveRuntime(
+      {terminalId_, clockSyncedAt_, config_.configFingerprint,
+       clockTrust_.lastNtpEpochSeconds()});
+}
+
+bool AppController::rehydratePending() {
+  CacheSnapshot candidate = cache_;
+  std::string candidateLocalHash = lastLocalHash_;
+  uint32_t candidateSequence = sequence_;
+  const OutboxError replayed = outbox_.visitPending(
+      [&](const QueuedAction& action) {
+        if (action.rebootId == config_.rebootId) {
+          candidateLocalHash = action.signature;
+          candidateSequence =
+              std::max(candidateSequence, action.deviceSequence);
+        }
+        for (auto& entry : candidate.entries) {
+          if (entry.uid == action.uid) {
+            entry.state.kind = replayCommand(entry.state.kind, action.command);
+            break;
+          }
+        }
+        return OutboxError::None;
+      });
+  if (replayed != OutboxError::None) {
+    failClosedOnOutbox();
+    return false;
+  }
+  if (cacheStore_ != nullptr && !candidate.entries.empty() &&
+      cacheStore_->replaceAtomically(candidate) != CacheError::None) {
+    failClosedOnOutbox();
+    return false;
+  }
+  cache_ = std::move(candidate);
+  lastLocalHash_ = std::move(candidateLocalHash);
+  sequence_ = candidateSequence;
+  return true;
+}
+
+std::optional<ResolveResponse> AppController::resolveFromCache(
+    const std::string& uid) const {
+  for (const auto& entry : cache_.entries) {
+    if (entry.uid != uid) continue;
+    ResolveResponse result;
+    result.employee = {entry.employeeId, entry.displayName};
+    result.state.kind = entry.state.kind;
+    result.state.workedSeconds = entry.state.workedSeconds;
+    result.state.breakSeconds = entry.state.breakSeconds;
+    result.state.longShift = entry.state.longShift;
+    result.state.staleBreak = entry.state.staleBreak;
+    return result;
+  }
+  return std::nullopt;
 }
 
 void AppController::clearActiveActionTracking() {

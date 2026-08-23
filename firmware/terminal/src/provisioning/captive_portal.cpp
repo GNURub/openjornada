@@ -1,5 +1,7 @@
 #include "openjornada/provisioning.hpp"
 
+#include "openjornada/display_power.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -12,7 +14,9 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <esp_system.h>
+#include <lwip/sockets.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #endif
@@ -95,6 +99,10 @@ bool urlDecode(std::string_view encoded, size_t maximum,
 }
 
 }  // namespace
+
+bool isProvisioningScriptRequest(const CaptiveHttpRequest& request) {
+  return request.method == "GET" && request.target == kProvisioningScriptPath;
+}
 
 CaptiveHttpParseStatus BoundedCaptiveHttpParser::consume(char byte) {
   if (status_ != CaptiveHttpParseStatus::NeedMore) return status_;
@@ -231,6 +239,7 @@ bool decodeProvisioningForm(const std::string& body,
   bool csrf = false;
   bool ssid = false;
   bool password = false;
+  bool passwordExplicit = false;
   bool baseUrl = false;
   bool token = false;
   size_t fields = 0;
@@ -257,6 +266,15 @@ bool decodeProvisioningForm(const std::string& body,
         return false;
       }
       password = true;
+    } else if (name == "wifi_password_explicit" && !passwordExplicit) {
+      if (value == "0") {
+        output.wifiPasswordExplicit = false;
+      } else if (value == "1") {
+        output.wifiPasswordExplicit = true;
+      } else {
+        return false;
+      }
+      passwordExplicit = true;
     } else if (name == "base_url" && !baseUrl) {
       if (!urlDecode(value, kMaxBaseUrlBytes, output.baseUrl)) return false;
       baseUrl = true;
@@ -272,7 +290,10 @@ bool decodeProvisioningForm(const std::string& body,
     if (ampersand == std::string::npos) break;
     cursor = ampersand + 1;
   }
-  return fields == 5 && csrf && ssid && password && baseUrl && token;
+  const bool supportedFieldSet =
+      (fields == 5 && !passwordExplicit) ||
+      (fields == 6 && passwordExplicit);
+  return supportedFieldSet && csrf && ssid && password && baseUrl && token;
 }
 
 bool decodeProvisioningFormRequest(const CaptiveHttpRequest& request,
@@ -305,6 +326,18 @@ bool canApplyProvisioningCandidate(
           activeConfig->terminalToken == candidate.terminalToken);
 }
 
+void applyProvisioningSecretFallbacks(const DeviceConfig& activeConfig,
+                                      bool wifiPasswordExplicit,
+                                      DeviceConfig& candidate) {
+  if (!wifiPasswordExplicit && candidate.wifiPassword.empty() &&
+      candidate.ssid == activeConfig.ssid) {
+    candidate.wifiPassword = activeConfig.wifiPassword;
+  }
+  if (candidate.terminalToken.empty()) {
+    candidate.terminalToken = activeConfig.terminalToken;
+  }
+}
+
 ProvisioningPortal::ProvisioningPortal(
     ConfigStore& store, BuildProfile profile,
     std::optional<DeviceConfig> activeConfig, size_t pendingCount)
@@ -330,9 +363,13 @@ const IPAddress kPortalMask{255, 255, 255, 0};
 constexpr uint16_t kDnsPort = 53;
 constexpr uint32_t kConnectTimeoutMs = 20000;
 constexpr uint32_t kRequestTimeoutMs = 2000;
-constexpr uint32_t kIdleTimeoutMs = 10U * 60U * 1000U;
 constexpr char kRandomAlphabet[] =
     "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+extern const uint8_t provisioningJsStart[]
+    asm("_binary_assets_provisioning_js_start");
+extern const uint8_t provisioningJsEnd[]
+    asm("_binary_assets_provisioning_js_end");
 
 std::string randomText(size_t length) {
   constexpr uint32_t alphabetSize = sizeof(kRandomAlphabet) - 1;
@@ -470,7 +507,7 @@ String portalPage(const std::string& csrf,
   const std::string baseUrl =
       active.has_value() ? active->baseUrl : std::string{};
   String page;
-  page.reserve(4200);
+  page.reserve(6200);
   page += F(
       "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">"
       "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -485,8 +522,14 @@ String portalPage(const std::string& csrf,
       "border-radius:10px}input:focus{outline:3px solid #fdba7466;"
       "border-color:#ea580c}button{width:100%;margin-top:22px;padding:13px;"
       "border:0;border-radius:12px;background:#f04b32;color:white;font:"
-      "700 1rem system-ui}.error{padding:12px;border-radius:10px;"
-      "background:#fef2f2;color:#b91c1c}.hint{font-size:.88rem}"
+      "700 1rem system-ui}button:focus-visible{outline:3px solid #fdba74;"
+      "outline-offset:2px}.secret-field{position:relative}.secret-field input{"
+      "padding-right:52px}.secret-field button{position:absolute;right:5px;"
+      "top:12px;width:42px;height:42px;margin:0;padding:0;border-radius:9px;"
+      "background:#f5f5f4;color:#292524;font-size:1.15rem}.error{padding:12px;"
+      "border-radius:10px;background:#fef2f2;color:#b91c1c}.success{"
+      "padding:12px;border-radius:10px;background:#f0fdf4;color:#166534}"
+      ".hint{font-size:.88rem}"
       "</style></head><body><main><p>TERMINAL RFID</p>"
       "<h1>Configurar OpenJornada</h1><p>Conecta el terminal a la red del "
       "negocio. La configuración solo se guardará después de comprobar el "
@@ -496,19 +539,29 @@ String portalPage(const std::string& csrf,
     page += htmlEscape(fromArduinoString(error));
     page += F("</p>");
   }
-  page += F("<form method=\"post\" action=\"http://192.168.4.1/save\" "
+  page += F("<p id=\"qr_status\" hidden role=\"status\" "
+            "aria-live=\"polite\"></p><form method=\"post\" "
+            "action=\"http://192.168.4.1/save\" "
             "autocomplete=\"off\"><input type=\"hidden\" name=\"csrf\" value=\"");
   page += htmlEscape(csrf);
-  page += F("\"><label for=\"ssid\">Red Wi-Fi</label><input id=\"ssid\" "
+  page += F("\"><input id=\"wifi_password_explicit\" "
+            "name=\"wifi_password_explicit\" type=\"hidden\" value=\"0\">"
+            "<label for=\"ssid\">Red Wi-Fi</label><input id=\"ssid\" "
             "name=\"ssid\" required maxlength=\"");
   page += String(kMaxSsidBytes);
   page += F("\" value=\"");
   page += htmlEscape(ssid);
   page += F("\"><label for=\"wifi_password\">Contraseña Wi-Fi</label>"
-            "<input id=\"wifi_password\" name=\"wifi_password\" "
+            "<div class=\"secret-field\"><input id=\"wifi_password\" "
+            "name=\"wifi_password\" "
             "type=\"password\" maxlength=\"");
   page += String(kMaxWifiPasswordBytes);
-  page += F("\"><p class=\"hint\">Si ya estaba configurado, déjala vacía "
+  page += F("\"><button id=\"toggle_wifi_password\" "
+            "data-target=\"wifi_password\" type=\"button\" "
+            "aria-label=\"Mostrar contraseña Wi-Fi\" "
+            "aria-pressed=\"false\"><span aria-hidden=\"true\">"
+            "&#128065;</span></button></div><p class=\"hint\">Si ya estaba "
+            "configurado, déjala vacía "
             "para conservarla.</p><label for=\"base_url\">URL de OpenJornada"
             "</label><input id=\"base_url\" name=\"base_url\" type=\"url\" "
             "required inputmode=\"url\" maxlength=\"");
@@ -516,40 +569,133 @@ String portalPage(const std::string& csrf,
   page += F("\" placeholder=\"https://jornada.ejemplo.es\" value=\"");
   page += htmlEscape(baseUrl);
   page += F("\"><label for=\"terminal_token\">API key del terminal</label>"
-            "<input id=\"terminal_token\" name=\"terminal_token\" "
+            "<div class=\"secret-field\"><input id=\"terminal_token\" "
+            "name=\"terminal_token\" "
             "type=\"password\" maxlength=\"");
   page += String(kMaxTerminalTokenBytes);
   page += F("\"");
   if (!active.has_value()) page += F(" required");
-  page += F("><p class=\"hint\">Empieza por ojterm_. Si ya existe, déjala "
-            "vacía para conservarla.</p><button type=\"submit\">Comprobar y "
-            "guardar</button></form></main></body></html>");
+  page += F("><button id=\"toggle_terminal_token\" "
+            "data-target=\"terminal_token\" type=\"button\" "
+            "aria-label=\"Mostrar API key del terminal\" "
+            "aria-pressed=\"false\"><span aria-hidden=\"true\">"
+            "&#128065;</span></button></div><p class=\"hint\">Empieza por "
+            "ojterm_. Si ya existe, déjala vacía para conservarla.</p>"
+            "<button type=\"submit\">Comprobar y guardar</button></form>"
+            "</main><script src=\"/provisioning.js\" defer></script>"
+            "</body></html>");
   return page;
 }
 
-void sendResponse(WiFiClient& client, int status, const char* contentType,
-                  const String& body, const char* location = nullptr) {
-  client.print(F("HTTP/1.1 "));
-  client.print(status);
-  client.print(' ');
-  client.print(reasonPhrase(status));
-  client.print(F("\r\nContent-Type: "));
-  client.print(contentType);
-  client.print(F("\r\nContent-Length: "));
-  client.print(body.length());
-  client.print(F("\r\nConnection: close\r\nCache-Control: no-store, max-age=0"
-                 "\r\nPragma: no-cache\r\nX-Content-Type-Options: nosniff"
-                 "\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: "
-                 "default-src 'none'; style-src 'unsafe-inline'; form-action "
-                 "http://192.168.4.1; base-uri 'none'; frame-ancestors 'none'"
-                 "\r\n"));
-  if (location != nullptr) {
-    client.print(F("Location: "));
-    client.print(location);
-    client.print(F("\r\n"));
+bool writeProvisioningBytes(WiFiClient& client, const uint8_t* data,
+                            size_t length,
+                            const std::function<void()>& service) {
+  constexpr uint32_t kWriteTimeoutMs = 1500;
+  constexpr size_t kWriteChunkBytes = 1024;
+  const int socket = client.fd();
+  if (socket < 0) return false;
+
+  const uint32_t startedMs = millis();
+  size_t offset = 0;
+  while (offset < length && millis() - startedMs < kWriteTimeoutMs) {
+    const size_t remaining = length - offset;
+    const size_t chunk = std::min(remaining, kWriteChunkBytes);
+    const int written =
+        send(socket, data + offset, chunk, MSG_DONTWAIT);
+    if (written > 0) {
+      offset += static_cast<size_t>(written);
+      continue;
+    }
+    if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+        errno != EINTR) {
+      return false;
+    }
+    service();
+    delay(1);
   }
-  client.print(F("\r\n"));
-  client.print(body);
+  return offset == length;
+}
+
+bool writeProvisioningString(WiFiClient& client, const String& value,
+                             const std::function<void()>& service) {
+  return writeProvisioningBytes(
+      client, reinterpret_cast<const uint8_t*>(value.c_str()),
+      value.length(), service);
+}
+
+bool sendHeaders(WiFiClient& client, int status, const char* contentType,
+                 size_t contentLength,
+                 const std::function<void()>& service,
+                 const char* location = nullptr) {
+  String headers;
+  if (!headers.reserve(512) || !headers.concat(F("HTTP/1.1 ")) ||
+      !headers.concat(status) || !headers.concat(' ') ||
+      !headers.concat(reasonPhrase(status)) ||
+      !headers.concat(F("\r\nContent-Type: ")) ||
+      !headers.concat(contentType) ||
+      !headers.concat(F("\r\nContent-Length: ")) ||
+      !headers.concat(static_cast<unsigned long>(contentLength)) ||
+      !headers.concat(
+          F("\r\nConnection: close\r\nCache-Control: no-store, max-age=0"
+            "\r\nPragma: no-cache\r\nX-Content-Type-Options: nosniff"
+            "\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: ")) ||
+      !headers.concat(kProvisioningContentSecurityPolicy) ||
+      !headers.concat(F("\r\n"))) {
+    return false;
+  }
+  if (location != nullptr) {
+    if (!headers.concat(F("Location: ")) || !headers.concat(location) ||
+        !headers.concat(F("\r\n"))) {
+      return false;
+    }
+  }
+  return headers.concat(F("\r\n")) &&
+         writeProvisioningString(client, headers, service);
+}
+
+bool sendResponse(WiFiClient& client, int status, const char* contentType,
+                  const String& body,
+                  const std::function<void()>& service,
+                  const char* location = nullptr) {
+  return sendHeaders(client, status, contentType, body.length(), service,
+                     location) &&
+         writeProvisioningString(client, body, service);
+}
+
+bool sendProvisioningScript(WiFiClient& client,
+                            const std::function<void()>& service) {
+  size_t length = static_cast<size_t>(provisioningJsEnd - provisioningJsStart);
+  if (length > 0 && provisioningJsStart[length - 1] == 0) --length;
+  return sendHeaders(client, 200, "application/javascript; charset=utf-8",
+                     length, service) &&
+         writeProvisioningBytes(client, provisioningJsStart, length, service);
+}
+
+void drainAndCloseClient(WiFiClient& client) {
+  // If parsing stopped at a bound (for example a malicious oversized header),
+  // closing with unread TCP data produces a reset and browsers discard even
+  // the error response. Drain only what has arrived and remain strictly
+  // time-bounded so one client cannot stall the portal.
+  constexpr uint32_t kDrainTimeoutMs = 100;
+  constexpr uint32_t kQuietPeriodMs = 10;
+  constexpr size_t kMaxDrainBytes = kMaxProvisioningHeaderBytes;
+  const uint32_t startedMs = millis();
+  uint32_t lastReadMs = startedMs;
+  size_t drained = 0;
+  while (client.connected() && millis() - startedMs < kDrainTimeoutMs) {
+    bool readAny = false;
+    while (client.available() > 0 && drained < kMaxDrainBytes &&
+           millis() - startedMs < kDrainTimeoutMs) {
+      if (client.read() < 0) break;
+      ++drained;
+      readAny = true;
+    }
+    if (readAny) lastReadMs = millis();
+    if (drained >= kMaxDrainBytes) break;
+    if (millis() - lastReadMs >= kQuietPeriodMs) break;
+    delay(1);
+  }
+  client.stop();
 }
 
 void stopPortal(DNSServer& dns, WiFiServer& server, bool keepStation) {
@@ -595,11 +741,37 @@ ProvisioningResult ProvisioningPortal::run(
     return result;
   }
 
-  uint32_t lastActivityMs = millis();
   bool completed = false;
   server.begin();
   drawProvisioningAccess(apSsid, apPassword);
-  while (!completed && millis() - lastActivityMs < kIdleTimeoutMs) {
+  DisplayPowerPolicy displayPower(millis());
+  const auto serviceProvisioningDisplay = [&]() {
+    M5.update();
+    const bool buttonPressed = M5.BtnA.wasPressed() ||
+                               M5.BtnB.wasPressed() ||
+                               M5.BtnC.wasPressed();
+    const bool buttonDown = M5.BtnA.isPressed() || M5.BtnB.isPressed() ||
+                            M5.BtnC.isPressed();
+    const DisplayPowerDecision decision = displayPower.update(
+        millis(), DisplayActivity{buttonPressed, buttonDown, false});
+    switch (decision.power) {
+      case DisplayPowerEvent::Sleep:
+        M5.Display.sleep();
+        break;
+      case DisplayPowerEvent::Wake:
+        M5.Display.wakeup();
+        drawProvisioningAccess(apSsid, apPassword);
+        break;
+      case DisplayPowerEvent::None:
+        break;
+    }
+  };
+  const auto serviceProvisioningIo = [&]() {
+    dns.processNextRequest();
+    serviceProvisioningDisplay();
+  };
+
+  while (!completed) {
     dns.processNextRequest();
     WiFiClient client = server.available();
     if (client) {
@@ -615,38 +787,46 @@ ProvisioningResult ProvisioningPortal::run(
           parser.consume(static_cast<char>(byte));
         }
         dns.processNextRequest();
-        M5.update();
+        serviceProvisioningDisplay();
         delay(2);
       }
 
       const CaptiveHttpParseStatus parseStatus = parser.status();
+      bool responseSent = false;
       if (parseStatus == CaptiveHttpParseStatus::NeedMore) {
-        sendResponse(client, 408, "text/plain; charset=utf-8",
-                     "La solicitud tardó demasiado.");
+        responseSent = sendResponse(client, 408, "text/plain; charset=utf-8",
+                                    "La solicitud tardó demasiado.",
+                                    serviceProvisioningIo);
       } else if (parseStatus == CaptiveHttpParseStatus::HeaderTooLarge) {
-        sendResponse(client, 431, "text/plain; charset=utf-8",
-                     "Las cabeceras son demasiado grandes.");
+        responseSent = sendResponse(
+            client, 431, "text/plain; charset=utf-8",
+            "Las cabeceras son demasiado grandes.", serviceProvisioningIo);
       } else if (parseStatus == CaptiveHttpParseStatus::BodyTooLarge) {
-        sendResponse(client, 413, "text/plain; charset=utf-8",
-                     "El formulario es demasiado grande.");
+        responseSent = sendResponse(client, 413, "text/plain; charset=utf-8",
+                                    "El formulario es demasiado grande.",
+                                    serviceProvisioningIo);
       } else if (parseStatus == CaptiveHttpParseStatus::Invalid) {
-        sendResponse(client, 400, "text/plain; charset=utf-8",
-                     "La solicitud no es válida.");
+        responseSent = sendResponse(client, 400, "text/plain; charset=utf-8",
+                                    "La solicitud no es válida.",
+                                    serviceProvisioningIo);
       } else {
         const CaptiveHttpRequest& request = parser.request();
         if (request.method == "GET" && request.target == "/") {
-          lastActivityMs = millis();
-          sendResponse(client, 200, "text/html; charset=utf-8",
-                       portalPage(csrf, activeConfig_, {}));
+          responseSent = sendResponse(
+              client, 200, "text/html; charset=utf-8",
+              portalPage(csrf, activeConfig_, {}), serviceProvisioningIo);
+        } else if (isProvisioningScriptRequest(request)) {
+          responseSent =
+              sendProvisioningScript(client, serviceProvisioningIo);
         } else if (request.method == "POST" && request.target == "/save") {
-          lastActivityMs = millis();
           ProvisioningFormFields form;
           if (!remoteFromPortal(client.remoteIP()) ||
               !decodeProvisioningFormRequest(request, csrf, form)) {
-            sendResponse(
+            responseSent = sendResponse(
                 client, 403, "text/html; charset=utf-8",
                 portalPage(csrf, activeConfig_,
-                           "La solicitud ha caducado. Vuelve a abrir el portal."));
+                           "La solicitud ha caducado. Vuelve a abrir el portal."),
+                serviceProvisioningIo);
           } else {
             DeviceConfig candidate;
             candidate.ssid = std::move(form.ssid);
@@ -657,28 +837,26 @@ ProvisioningResult ProvisioningPortal::run(
                 activeConfig_.has_value() ? activeConfig_->soundEnabled : true;
 
             if (activeConfig_.has_value()) {
-              if (candidate.wifiPassword.empty() &&
-                  candidate.ssid == activeConfig_->ssid) {
-                candidate.wifiPassword = activeConfig_->wifiPassword;
-              }
-              if (candidate.terminalToken.empty()) {
-                candidate.terminalToken = activeConfig_->terminalToken;
-              }
+              applyProvisioningSecretFallbacks(
+                  *activeConfig_, form.wifiPasswordExplicit, candidate);
             }
 
             const ConfigError configError =
                 validateDeviceConfig(candidate, profile_);
             if (configError != ConfigError::None) {
-              sendResponse(client, 400, "text/html; charset=utf-8",
-                           portalPage(csrf, activeConfig_,
-                                      validationMessage(configError)));
+              responseSent = sendResponse(
+                  client, 400, "text/html; charset=utf-8",
+                  portalPage(csrf, activeConfig_,
+                             validationMessage(configError)),
+                  serviceProvisioningIo);
             } else if (!canApplyProvisioningCandidate(
                            activeConfig_, candidate, pendingCount_)) {
-              sendResponse(
+              responseSent = sendResponse(
                   client, 409, "text/html; charset=utf-8",
                   portalPage(csrf, activeConfig_,
                              "Hay fichajes pendientes. Sincronízalos antes de "
-                             "cambiar la API key."));
+                             "cambiar la API key."),
+                  serviceProvisioningIo);
             } else {
               drawProvisioningStatus("Comprobando",
                                      "Conectando con el negocio...", false);
@@ -689,46 +867,55 @@ ProvisioningResult ProvisioningPortal::run(
               while (WiFi.status() != WL_CONNECTED &&
                      millis() - connectStartedMs < kConnectTimeoutMs) {
                 dns.processNextRequest();
-                M5.update();
+                serviceProvisioningDisplay();
                 delay(25);
               }
               if (WiFi.status() != WL_CONNECTED) {
                 WiFi.disconnect(false, false);
                 drawProvisioningAccess(apSsid, apPassword);
-                sendResponse(
+                responseSent = sendResponse(
                     client, 400, "text/html; charset=utf-8",
                     portalPage(csrf, activeConfig_,
                                "No se pudo conectar a esa red Wi-Fi en 20 "
-                               "segundos."));
+                               "segundos."),
+                    serviceProvisioningIo);
               } else {
                 std::string bootstrapError;
-                if (!candidateValidator(candidate, bootstrapError)) {
+                if (!candidateValidator(candidate, bootstrapError, [&]() {
+                      dns.processNextRequest();
+                      serviceProvisioningDisplay();
+                    })) {
                   WiFi.disconnect(false, false);
                   drawProvisioningAccess(apSsid, apPassword);
                   const std::string displayError =
                       safeBootstrapError(candidate, bootstrapError);
-                  sendResponse(client, 400, "text/html; charset=utf-8",
-                               portalPage(csrf, activeConfig_,
-                                          String(displayError.c_str())));
+                  responseSent = sendResponse(
+                      client, 400, "text/html; charset=utf-8",
+                      portalPage(csrf, activeConfig_,
+                                 String(displayError.c_str())),
+                      serviceProvisioningIo);
                 } else if (!store_.save(candidate, profile_)) {
                   WiFi.disconnect(false, false);
                   drawProvisioningAccess(apSsid, apPassword);
-                  sendResponse(
+                  responseSent = sendResponse(
                       client, 500, "text/html; charset=utf-8",
                       portalPage(csrf, activeConfig_,
                                  "El servidor respondió, pero no se pudo "
-                                 "guardar la configuración."));
+                                 "guardar la configuración."),
+                      serviceProvisioningIo);
                 } else {
-                  sendResponse(
+                  responseSent = sendResponse(
                       client, 200, "text/html; charset=utf-8",
                       "<!doctype html><html lang=\"es\"><meta charset=\"utf-8\">"
                       "<meta name=\"viewport\" content=\"width=device-width\">"
                       "<title>Terminal configurado</title><body><main>"
                       "<h1>Terminal configurado</h1><p>Ya puedes cerrar esta "
-                      "página.</p></main></body></html>");
+                      "página.</p></main></body></html>",
+                      serviceProvisioningIo);
                   result.saved = true;
                   result.config = candidate;
                   completed = true;
+                  M5.Display.wakeup();
                   drawProvisioningStatus("Configurado",
                                          "El terminal está listo.", false);
                 }
@@ -736,23 +923,21 @@ ProvisioningResult ProvisioningPortal::run(
             }
           }
         } else {
-          sendResponse(client, 302, "text/plain; charset=utf-8",
-                       "Abriendo configuración...", "http://192.168.4.1/");
+          responseSent = sendResponse(
+              client, 302, "text/plain; charset=utf-8",
+              "Abriendo configuración...", serviceProvisioningIo,
+              "http://192.168.4.1/");
         }
       }
-      delay(5);
-      client.stop();
+      if (!responseSent) client.stop();
+      drainAndCloseClient(client);
     }
-    M5.update();
+    serviceProvisioningDisplay();
     delay(10);
   }
 
   const bool keepStation = completed && WiFi.status() == WL_CONNECTED;
   stopPortal(dns, server, keepStation);
-  if (!completed) {
-    result.displayError = "El portal se cerró por inactividad.";
-    drawProvisioningStatus("Configuración", result.displayError, true);
-  }
   return result;
 }
 

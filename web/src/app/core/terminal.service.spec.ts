@@ -16,6 +16,8 @@ describe('terminal service public contract', () => {
   });
 
   it('uses the administrative terminal routes with exact methods and bodies', async () => {
+    await service.listTerminals();
+    await service.listTerminals(3);
     await service.createTerminal('Recepción');
     await service.renameTerminal('terminal-1', 'Entrada');
     await service.rotateTerminalKey('terminal-1');
@@ -23,6 +25,8 @@ describe('terminal service public contract', () => {
     await service.updateAdminPin('9669');
 
     expect(send.mock.calls).toEqual([
+      ['/api/openjornada/terminals?page=1', { method: 'GET' }],
+      ['/api/openjornada/terminals?page=3', { method: 'GET' }],
       ['/api/openjornada/terminals', { method: 'POST', body: { name: 'Recepción' } }],
       ['/api/openjornada/terminals/terminal-1', { method: 'PATCH', body: { name: 'Entrada' } }],
       ['/api/openjornada/terminals/terminal-1/rotate-key', { method: 'POST' }],

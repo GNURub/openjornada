@@ -192,7 +192,7 @@ void test_admin_and_employee_contracts_are_bounded() {
 
 void test_sync_contract_and_request_are_bounded() {
   TEST_ASSERT_EQUAL_UINT32(500, kProtocolMaxSyncItems);
-  TEST_ASSERT_EQUAL_UINT32(50, kMaxApiSyncItems);
+  TEST_ASSERT_EQUAL_UINT32(10, kMaxApiSyncItems);
   TEST_ASSERT_TRUE(kMaxApiSyncItems < kProtocolMaxSyncItems);
   std::string response =
       R"json({"items":[{"clientRequestId":"req-1","status":"accepted","workEventId":"event1","state":)json";

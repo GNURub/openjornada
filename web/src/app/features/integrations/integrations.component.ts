@@ -31,9 +31,24 @@ export class IntegrationsComponent implements OnDestroy {
   protected readonly terminals = signal<TerminalRecord[]>([]);
   protected readonly terminalsLoading = signal(true);
   protected readonly terminalSaving = signal(false);
+  protected readonly terminalMutationPending = signal(false);
+  protected readonly terminalBusy = computed(
+    () => this.terminalSaving() || this.terminalMutationPending(),
+  );
   protected readonly generatedTerminalToken = signal('');
   protected readonly adminPinConfigured = signal(false);
+  protected readonly terminalPage = signal(1);
+  protected readonly terminalPerPage = signal(10);
+  protected readonly terminalTotalItems = signal(0);
+  protected readonly terminalTotalPages = signal(0);
+  protected readonly terminalRangeStart = computed(() =>
+    this.terminalTotalItems() === 0 ? 0 : (this.terminalPage() - 1) * this.terminalPerPage() + 1,
+  );
+  protected readonly terminalRangeEnd = computed(() =>
+    Math.min(this.terminalPage() * this.terminalPerPage(), this.terminalTotalItems()),
+  );
   private terminalCredentialGeneration = 0;
+  private terminalListGeneration = 0;
   protected readonly mcpUrl = signal('https://tu-dominio.example/mcp');
   protected readonly codexConfig = computed(
     () => `[mcp_servers.openjornada]
@@ -60,22 +75,48 @@ default_tools_approval_mode = "writes"`,
     void this.loadTerminals();
   }
 
-  protected async loadTerminals(): Promise<void> {
+  protected async loadTerminals(
+    page = this.terminalPage(),
+    allowDuringMutation = false,
+  ): Promise<void> {
+    if (this.terminalBusy() && !allowDuringMutation) return;
+    const listGeneration = ++this.terminalListGeneration;
     this.terminalsLoading.set(true);
     try {
-      const response = await this.terminalService.listTerminals();
+      const response = await this.terminalService.listTerminals(page);
+      if (listGeneration !== this.terminalListGeneration) return;
       this.terminals.set(response.items);
       this.adminPinConfigured.set(response.adminPinConfigured);
+      this.terminalPage.set(response.page ?? page);
+      this.terminalPerPage.set(response.perPage ?? 10);
+      this.terminalTotalItems.set(response.totalItems ?? response.items.length);
+      this.terminalTotalPages.set(response.totalPages ?? (response.items.length > 0 ? 1 : 0));
     } catch (error) {
+      if (listGeneration !== this.terminalListGeneration) return;
       this.error.set(this.errorMessage(error, 'No se pudieron cargar los terminales RFID.'));
     } finally {
-      this.terminalsLoading.set(false);
+      if (listGeneration === this.terminalListGeneration) {
+        this.terminalsLoading.set(false);
+      }
     }
+  }
+
+  protected goToTerminalPage(page: number): void {
+    if (
+      this.terminalsLoading() ||
+      this.terminalBusy() ||
+      page < 1 ||
+      this.terminalTotalPages() === 0 ||
+      page > this.terminalTotalPages()
+    ) {
+      return;
+    }
+    void this.loadTerminals(page);
   }
 
   protected async createTerminal(): Promise<void> {
     const name = this.terminalName.trim();
-    if (name.length < 3 || this.terminalSaving()) return;
+    if (name.length < 3 || this.terminalBusy() || this.terminalsLoading()) return;
     this.dismissTerminalProvisioning();
     const credentialGeneration = ++this.terminalCredentialGeneration;
     this.terminalSaving.set(true);
@@ -84,10 +125,14 @@ default_tools_approval_mode = "writes"`,
       const terminal = await this.terminalService.createTerminal(name);
       if (credentialGeneration !== this.terminalCredentialGeneration) return;
       const { token, ...storedTerminal } = terminal;
-      this.terminals.update((items) => [storedTerminal, ...items]);
       this.generatedTerminalToken.set(token ?? '');
       this.terminalName = '';
       this.success.set('Terminal creado. Copia la API key o genera ahora el QR de configuración.');
+      if (this.terminalPage() === 1) {
+        this.mergeCreatedTerminal(storedTerminal);
+      } else {
+        await this.loadTerminals(1, true);
+      }
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudo crear el terminal.'));
     } finally {
@@ -96,7 +141,7 @@ default_tools_approval_mode = "writes"`,
   }
 
   protected async rotateTerminal(terminal: TerminalRecord): Promise<void> {
-    if (this.terminalSaving()) return;
+    if (this.terminalBusy() || this.terminalsLoading()) return;
     if (
       terminal.lastPendingCount > 0 &&
       !confirm(
@@ -127,8 +172,10 @@ default_tools_approval_mode = "writes"`,
   }
 
   protected async renameTerminal(terminal: TerminalRecord): Promise<void> {
+    if (this.terminalBusy() || this.terminalsLoading()) return;
     const name = prompt('Nuevo nombre del terminal:', terminal.name)?.trim();
     if (!name || name === terminal.name) return;
+    this.terminalMutationPending.set(true);
     try {
       const updated = await this.terminalService.renameTerminal(terminal.id, name);
       this.terminals.update((items) =>
@@ -137,29 +184,35 @@ default_tools_approval_mode = "writes"`,
       this.success.set('Terminal renombrado.');
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudo renombrar el terminal.'));
+    } finally {
+      this.terminalMutationPending.set(false);
     }
   }
 
   protected async revokeTerminal(terminal: TerminalRecord): Promise<void> {
+    if (this.terminalBusy() || this.terminalsLoading()) return;
     const pending =
       terminal.lastPendingCount > 0 ? ' Tiene fichajes pendientes sin sincronizar.' : '';
     if (!confirm(`¿Revocar “${terminal.name}”?${pending}`)) return;
+    this.terminalMutationPending.set(true);
     try {
-      const updated = await this.terminalService.revokeTerminal(terminal.id);
-      this.terminals.update((items) =>
-        items.map((item) => (item.id === terminal.id ? updated : item)),
-      );
+      await this.terminalService.revokeTerminal(terminal.id);
       this.success.set('Terminal revocado.');
+      await this.loadTerminals(this.terminalPage(), true);
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudo revocar el terminal.'));
+    } finally {
+      this.terminalMutationPending.set(false);
     }
   }
 
   protected async saveTerminalPin(): Promise<void> {
+    if (this.terminalBusy() || this.terminalsLoading()) return;
     if (!/^\d{4}$/.test(this.terminalPin)) {
       this.error.set('El PIN debe contener exactamente cuatro cifras.');
       return;
     }
+    this.terminalMutationPending.set(true);
     try {
       await this.terminalService.updateAdminPin(this.terminalPin);
       this.terminalPin = '';
@@ -169,6 +222,8 @@ default_tools_approval_mode = "writes"`,
       );
     } catch (error) {
       this.error.set(this.errorMessage(error, 'No se pudo actualizar el PIN.'));
+    } finally {
+      this.terminalMutationPending.set(false);
     }
   }
 
@@ -325,6 +380,24 @@ default_tools_approval_mode = "writes"`,
       return String(error.response.message);
     }
     return fallback;
+  }
+
+  private mergeCreatedTerminal(terminal: TerminalRecord): void {
+    const alreadyPresent = this.terminals().some((item) => item.id === terminal.id);
+    this.terminals.update((items) =>
+      [terminal, ...items.filter((item) => item.id !== terminal.id)]
+        .sort((left, right) => {
+          const statusOrder = Number(Boolean(left.revokedAt)) - Number(Boolean(right.revokedAt));
+          if (statusOrder !== 0) return statusOrder;
+          const createdOrder = right.created.localeCompare(left.created);
+          return createdOrder !== 0 ? createdOrder : right.id.localeCompare(left.id);
+        })
+        .slice(0, this.terminalPerPage()),
+    );
+    if (!alreadyPresent) {
+      this.terminalTotalItems.update((total) => total + 1);
+      this.terminalTotalPages.set(Math.ceil(this.terminalTotalItems() / this.terminalPerPage()));
+    }
   }
 
   private invalidateTerminalCredentialOperations(): void {

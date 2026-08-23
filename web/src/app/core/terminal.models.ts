@@ -28,6 +28,7 @@ export interface TerminalRecord extends RecordModel {
   lastPendingCount: number;
   revokedAt: string;
   createdBy: string;
+  created: string;
   token?: string;
 }
 

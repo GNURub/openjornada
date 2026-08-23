@@ -20,6 +20,7 @@ class MemoryStorage final : public OutboxStorage {
   size_t durableWrites = 0;
   mutable size_t maximumRead = 0;
   mutable bool oversizedRead = false;
+  mutable size_t cooperativeYields = 0;
   size_t readLimit = OutboxCodec::kMaxRecordSize;
   size_t renameCalls = 0;
   size_t failRenameCall = 0;
@@ -113,6 +114,8 @@ class MemoryStorage final : public OutboxStorage {
     }
     return true;
   }
+
+  void cooperativeYield() const override { ++cooperativeYields; }
 };
 
 QueuedAction action(uint32_t sequence = 1, std::string id = "req-1") {
@@ -571,6 +574,12 @@ void test_bounds_capacity_and_batch_are_streaming_at_ten_thousand() {
   TEST_ASSERT_FALSE(storage.oversizedRead);
   TEST_ASSERT_LESS_OR_EQUAL_UINT(OutboxCodec::kMaxRecordSize,
                                  storage.maximumRead);
+  storage.cooperativeYields = 0;
+  size_t pending = 0;
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.pendingCount(pending));
+  TEST_ASSERT_EQUAL_UINT(OutboxCodec::kCapacity, pending);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT(
+      OutboxCodec::kCapacity / 16, storage.cooperativeYields);
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(OutboxError::Capacity),
       static_cast<int>(outbox.append(action(10001, "overflow"))));
@@ -798,6 +807,33 @@ void test_startup_readiness_blocks_any_mount_begin_or_count_failure() {
   TEST_ASSERT_EQUAL_UINT32(37, ready.pendingForSafety);
 }
 
+void test_pending_visitor_streams_beyond_the_in_memory_batch() {
+  MemoryStorage storage;
+  Outbox outbox(storage);
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+  for (uint32_t index = 1; index <= 75; ++index) {
+    TEST_ASSERT_EQUAL(
+        OutboxError::None,
+        outbox.append(action(index, "visit-" + std::to_string(index))));
+  }
+  for (uint32_t index = 1; index <= 12; ++index) {
+    TEST_ASSERT_EQUAL(
+        OutboxError::None,
+        outbox.complete("visit-" + std::to_string(index)));
+  }
+  size_t visited = 0;
+  std::string last;
+  TEST_ASSERT_EQUAL(
+      OutboxError::None,
+      outbox.visitPending([&](const QueuedAction& queued) {
+        ++visited;
+        last = queued.clientRequestId;
+        return OutboxError::None;
+      }));
+  TEST_ASSERT_EQUAL_UINT32(63, visited);
+  TEST_ASSERT_EQUAL_STRING("visit-75", last.c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_codec_round_trip_preserves_retry_identity);
@@ -819,5 +855,6 @@ int main(int, char**) {
   RUN_TEST(test_completion_clear_failures_preserve_completed_prefix);
   RUN_TEST(test_pending_count_scans_beyond_the_in_memory_batch);
   RUN_TEST(test_startup_readiness_blocks_any_mount_begin_or_count_failure);
+  RUN_TEST(test_pending_visitor_streams_beyond_the_in_memory_batch);
   return UNITY_END();
 }

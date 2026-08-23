@@ -4,9 +4,11 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "openjornada/app_controller.hpp"
+#include "openjornada/signature.hpp"
 
 using namespace openjornada;
 
@@ -23,6 +25,7 @@ class MemoryStorage final : public OutboxStorage {
   }
   bool read(const char* path, size_t offset, uint8_t* output,
             size_t length) const override {
+    if (failReads) return false;
     const auto found = files.find(path);
     if (found == files.end() || offset > found->second.size() ||
         length > found->second.size() - offset) {
@@ -40,6 +43,10 @@ class MemoryStorage final : public OutboxStorage {
     auto& target = files[path];
     target.insert(target.end(), bytes.begin(), bytes.end());
     ++flushes;
+    if (failReadsAfterAppend) {
+      failReadsAfterAppend = false;
+      failReads = true;
+    }
     return true;
   }
   bool writeAndFlush(const char* path,
@@ -60,6 +67,8 @@ class MemoryStorage final : public OutboxStorage {
   mutable std::map<std::string, std::vector<uint8_t>> files;
   size_t flushes = 0;
   bool failNextAppend = false;
+  mutable bool failReads = false;
+  bool failReadsAfterAppend = false;
 };
 
 class FakeApi final : public ApiClient {
@@ -74,6 +83,20 @@ class FakeApi final : public ApiClient {
   ActionRequest lastAction;
   int actionCalls = 0;
   int resolveCalls = 0;
+  int syncCalls = 0;
+  SyncRequest lastSync;
+  SyncResponse nextSync;
+  ApiCallResult syncCall;
+  CacheResponse nextCache;
+  bool useNextCache = false;
+  int cacheCalls = 0;
+  AdminSessionResponse nextAdminSession;
+  EmployeeListResponse nextEmployees;
+  int openAdminCalls = 0;
+  int employeeCalls = 0;
+  int assignCalls = 0;
+  bool lastAssignReplace = false;
+  std::string lastAssignedEmployee;
   std::string lastResolvedUid;
   size_t pendingObservedByResolve = 0;
 
@@ -108,26 +131,72 @@ class FakeApi final : public ApiClient {
     }
     return actionCall;
   }
-  ApiCallResult cache(const ApiCredentials&, uint32_t, CacheResponse&,
-                      uint32_t) override { return {}; }
+  ApiCallResult cache(const ApiCredentials&, uint32_t revision,
+                      CacheResponse& output, uint32_t) override {
+    ++cacheCalls;
+    if (useNextCache) {
+      output = nextCache;
+      return {};
+    }
+    output.revision = revision;
+    output.unchanged = true;
+    return {};
+  }
   ApiCallResult openAdminSession(const ApiCredentials&, const std::string&,
-                                 AdminSessionResponse&, uint32_t) override {
+                                 AdminSessionResponse& output, uint32_t) override {
+    ++openAdminCalls;
+    output = nextAdminSession;
     return {};
   }
   ApiCallResult closeAdminSession(const ApiCredentials&, const std::string&,
                                   uint32_t) override { return {}; }
   ApiCallResult employees(const ApiCredentials&, const std::string&,
-                          EmployeeListResponse&, uint32_t) override { return {}; }
+                          EmployeeListResponse& output, uint32_t) override {
+    ++employeeCalls;
+    output = nextEmployees;
+    return {};
+  }
   ApiCallResult assignEmployee(const ApiCredentials&, const std::string&,
-                               const std::string&, const std::string&, bool,
-                               uint32_t) override { return {}; }
+                               const std::string& employeeId,
+                               const std::string&, bool replace,
+                               uint32_t) override {
+    ++assignCalls;
+    lastAssignedEmployee = employeeId;
+    lastAssignReplace = replace;
+    return {};
+  }
   ApiCallResult revokeEmployee(const ApiCredentials&, const std::string&,
                                const std::string&, uint32_t) override { return {}; }
-  ApiCallResult sync(const ApiCredentials&, const SyncRequest&, SyncResponse&,
-                     uint32_t) override { return {}; }
+  ApiCallResult sync(const ApiCredentials&, const SyncRequest& request,
+                     SyncResponse& output, uint32_t) override {
+    ++syncCalls;
+    lastSync = request;
+    output = nextSync;
+    return syncCall;
+  }
 
  private:
   Outbox& outbox_;
+};
+
+class MemoryCacheStore final : public CacheStore {
+ public:
+  CacheError replaceAtomically(const CacheSnapshot& snapshot) override {
+    ++replaceCalls;
+    if (failOnReplaceCall != 0 && replaceCalls == failOnReplaceCall) {
+      return CacheError::Io;
+    }
+    saved = snapshot;
+    return CacheError::None;
+  }
+  bool clear() override {
+    saved = {};
+    return true;
+  }
+
+  CacheSnapshot saved;
+  size_t replaceCalls = 0;
+  size_t failOnReplaceCall = 0;
 };
 
 struct Fixture {
@@ -135,17 +204,23 @@ struct Fixture {
   Outbox outbox{storage};
   FakeApi api{outbox};
   NetworkWorker worker{api};
+  MemoryCacheStore cacheStore;
   AppController app{worker, outbox,
                     {{"https://jornada.example.es", "ojterm_test_token"},
-                     "m5stack-test", "reboot-test"}};
+                     "m5stack-test", "reboot-test"},
+                    &cacheStore};
   uint32_t nowMs = 1000;
   int64_t epoch = 1787306400;  // 2026-08-21T10:00:00Z
+  int64_t ntpSyncEpoch = 1787306400;
+  int64_t timestampEpochOffset = 0;
+  bool emitNtp = true;
 
-  Fixture() {
+  explicit Fixture(bool ntpAvailable = true) : emitNtp(ntpAvailable) {
     TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
     TEST_ASSERT_TRUE(worker.begin());
     app.start(0, nowMs);
     tick();
+    networkRoundTrip();
     networkRoundTrip();
     TEST_ASSERT_EQUAL(ScreenKind::Idle, app.screen().kind);
   }
@@ -155,9 +230,10 @@ struct Fixture {
     value.kind = kind;
     value.nowMs = nowMs;
     value.nowEpochSeconds = epoch;
-    value.timestamp = isoUtc(epoch);
+    if (emitNtp) value.timestamp = isoUtc(epoch + timestampEpochOffset);
     value.networkConnected = true;
-    value.ntpTrusted = true;
+    value.ntpTrusted = emitNtp;
+    value.ntpSyncEpochSeconds = emitNtp ? ntpSyncEpoch : 0;
     return value;
   }
 
@@ -204,6 +280,55 @@ struct Fixture {
     api.nextAction = {};
     api.nextAction.status = ActionStatus::Accepted;
     api.nextAction.state.kind = state;
+  }
+};
+
+AppControllerConfig offlineConfig() {
+  AppControllerConfig config;
+  config.credentials = {"https://jornada.example.es", "ojterm_test_token"};
+  config.clientVersion = "m5stack-test";
+  config.rebootId = "offline-boot";
+  config.configFingerprint = configurationFingerprint(
+      config.credentials.baseUrl, config.credentials.terminalToken);
+  config.terminalId = "terminal-test";
+  config.clockSyncedAt = "2026-08-21T09:59:59Z";
+  config.lastNtpEpochSeconds = 1787306399;
+  config.initialCache.revision = 7;
+  config.initialCache.terminalId = config.terminalId;
+  config.initialCache.configFingerprint = config.configFingerprint;
+  config.initialCache.entries.push_back(
+      {"employee-1", "Marina", "04AABBCC",
+       {WorkKind::Idle, 0, 0, false, false}});
+  return config;
+}
+
+struct OfflineFixture {
+  MemoryStorage storage;
+  Outbox outbox{storage};
+  FakeApi api{outbox};
+  NetworkWorker worker{api};
+  AppController app{worker, outbox, offlineConfig()};
+  uint32_t nowMs = 1000;
+  int64_t epoch = 1787306400;
+
+  OfflineFixture() {
+    TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+    TEST_ASSERT_TRUE(worker.begin());
+    app.start(0, nowMs);
+    TEST_ASSERT_EQUAL(ScreenKind::Idle, app.screen().kind);
+  }
+
+  AppEvent event(AppEventKind kind, bool connected = false,
+                 bool trusted = true) const {
+    AppEvent value;
+    value.kind = kind;
+    value.nowMs = nowMs;
+    value.nowEpochSeconds = epoch;
+    value.timestamp = isoUtc(epoch);
+    value.networkConnected = connected;
+    value.ntpTrusted = trusted;
+    value.ntpSyncEpochSeconds = trusted ? 1787306400 : 0;
+    return value;
   }
 };
 
@@ -335,6 +460,18 @@ void test_completion_write_failure_keeps_accepted_action_pending() {
   fixture.accepted(WorkKind::Working);
   fixture.press(Button::B);
   fixture.storage.failNextAppend = true;
+  fixture.networkRoundTrip();
+  TEST_ASSERT_EQUAL_UINT32(1, fixture.app.screen().pendingCount);
+  TEST_ASSERT_EQUAL_STRING("Registrado; pendiente de sincronizar",
+                           fixture.app.screen().detail.c_str());
+}
+
+void test_cache_write_failure_keeps_accepted_action_pending() {
+  Fixture fixture;
+  fixture.scan(work(WorkKind::Idle));
+  fixture.accepted(WorkKind::Working);
+  fixture.cacheStore.failOnReplaceCall = fixture.cacheStore.replaceCalls + 1;
+  fixture.press(Button::B);
   fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL_UINT32(1, fixture.app.screen().pendingCount);
   TEST_ASSERT_EQUAL_STRING("Registrado; pendiente de sincronizar",
@@ -573,7 +710,7 @@ void test_close_refresh_network_and_queue_failure_are_safe() {
     queued.kind = NetworkJobKind::Resolve;
     queued.credentials = {"https://jornada.example.es", "ojterm_test_token"};
     queued.uid = "04112233";
-    TEST_ASSERT_TRUE(saturated.worker.enqueue(queued));
+    TEST_ASSERT_TRUE(saturated.worker.enqueue(std::move(queued)));
   }
   saturated.press(Button::C);
   TEST_ASSERT_EQUAL_UINT32(0, saturated.app.screen().pendingCount);
@@ -722,6 +859,519 @@ void test_operational_screens_keep_status_icons_and_button_labels() {
   TEST_ASSERT_EQUAL_STRING("Comenzar", fixture.app.screen().buttons.b.c_str());
 }
 
+void test_offline_action_requires_fresh_ntp_and_advances_only_after_append() {
+  OfflineFixture fixture;
+  AppEvent scan = fixture.event(AppEventKind::TagScanned, false, false);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
+
+  fixture.nowMs += 5000;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, false, true));
+  fixture.nowMs += 5000;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, false, true));
+  scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Actions, fixture.app.screen().kind);
+
+  AppEvent press = fixture.event(AppEventKind::ButtonPressed, false, true);
+  press.button = Button::B;
+  fixture.app.tick(press);
+  TEST_ASSERT_EQUAL_UINT32(1, fixture.app.screen().pendingCount);
+  TEST_ASSERT_EQUAL_STRING("Guardado; se sincronizará",
+                           fixture.app.screen().detail.c_str());
+
+  fixture.nowMs += 5000;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, false, true));
+  scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Actions, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Pausa", fixture.app.screen().buttons.a.c_str());
+}
+
+void test_offline_confirmation_rechecks_clock_trust_after_scan() {
+  OfflineFixture fixture;
+  fixture.epoch = 1787306400 + ClockTrust::kMaximumOfflineAgeSeconds;
+  AppEvent scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Actions, fixture.app.screen().kind);
+
+  fixture.epoch += 1;
+  fixture.nowMs += 1000;
+  AppEvent press = fixture.event(AppEventKind::ButtonPressed, false, true);
+  press.button = Button::B;
+  fixture.app.tick(press);
+  TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
+  TEST_ASSERT_EQUAL_STRING("Reloj no fiable; conecta la red.",
+                           fixture.app.screen().detail.c_str());
+}
+
+void test_new_reboot_starts_a_new_signature_chain_after_replaying_old_records() {
+  MemoryStorage storage;
+  Outbox outbox{storage};
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+  QueuedAction old = pendingAction("old-boot-1");
+  old.rebootId = "old-boot";
+  old.previousLocalHash.clear();
+  old.signature = std::string(64, 'a');
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.append(old));
+
+  FakeApi api{outbox};
+  NetworkWorker worker{api};
+  TEST_ASSERT_TRUE(worker.begin());
+  AppControllerConfig config = offlineConfig();
+  config.rebootId = "new-boot";
+  config.initialCache.entries[0].uid = old.uid;
+  AppController app{worker, outbox, config};
+  app.start(1, 1000);
+
+  AppEvent scan;
+  scan.kind = AppEventKind::TagScanned;
+  scan.nowMs = 1000;
+  scan.nowEpochSeconds = 1787306400;
+  scan.timestamp = isoUtc(scan.nowEpochSeconds);
+  scan.uid = old.uid;
+  scan.ntpTrusted = true;
+  scan.ntpSyncEpochSeconds = scan.nowEpochSeconds;
+  app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Actions, app.screen().kind);
+  AppEvent press = scan;
+  press.kind = AppEventKind::ButtonPressed;
+  press.button = Button::A;
+  app.tick(press);
+
+  std::vector<QueuedAction> pending;
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.list(pending));
+  TEST_ASSERT_EQUAL_UINT32(2, pending.size());
+  TEST_ASSERT_EQUAL_STRING("new-boot", pending[1].rebootId.c_str());
+  TEST_ASSERT_TRUE(pending[1].previousLocalHash.empty());
+  TEST_ASSERT_EQUAL_UINT32(1, pending[1].deviceSequence);
+}
+
+void test_offline_close_from_break_queues_break_end_then_clock_out() {
+  OfflineFixture fixture;
+  auto scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  auto press = fixture.event(AppEventKind::ButtonPressed, false, true);
+  press.button = Button::B;
+  fixture.app.tick(press);  // clock_in
+  fixture.nowMs += 5001;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, false, true));
+  scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  press = fixture.event(AppEventKind::ButtonPressed, false, true);
+  press.button = Button::A;
+  fixture.app.tick(press);  // break_start
+  fixture.nowMs += 5001;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, false, true));
+  scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  press = fixture.event(AppEventKind::ButtonPressed, false, true);
+  press.button = Button::C;
+  fixture.app.tick(press);
+  press.button = Button::B;
+  fixture.app.tick(press);  // break_end
+  TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm, fixture.app.screen().kind);
+  press.button = Button::C;
+  fixture.app.tick(press);  // clock_out
+
+  std::vector<QueuedAction> pending;
+  TEST_ASSERT_EQUAL(OutboxError::None, fixture.outbox.list(pending));
+  TEST_ASSERT_EQUAL_UINT32(4, pending.size());
+  TEST_ASSERT_EQUAL(Command::BreakEnd, pending[2].command);
+  TEST_ASSERT_EQUAL(Command::ClockOut, pending[3].command);
+  TEST_ASSERT_EQUAL_STRING(pending[2].signature.c_str(),
+                           pending[3].previousLocalHash.c_str());
+}
+
+void test_ambiguous_break_end_keeps_following_clock_out_queued_in_order() {
+  Fixture fixture;
+  fixture.scan(work(WorkKind::OnBreak));
+  fixture.press(Button::C);
+  fixture.api.actionCall.ok = false;
+  fixture.api.actionCall.failure.code = ApiErrorCode::Timeout;
+  fixture.api.actionCall.failure.retryable = true;
+  fixture.press(Button::B);
+  fixture.networkRoundTrip();
+  TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm, fixture.app.screen().kind);
+
+  fixture.press(Button::C);
+
+  std::vector<QueuedAction> pending;
+  TEST_ASSERT_EQUAL(OutboxError::None, fixture.outbox.list(pending));
+  TEST_ASSERT_EQUAL_UINT32(2, pending.size());
+  TEST_ASSERT_EQUAL(Command::BreakEnd, pending[0].command);
+  TEST_ASSERT_EQUAL(Command::ClockOut, pending[1].command);
+  TEST_ASSERT_EQUAL_STRING(pending[0].signature.c_str(),
+                           pending[1].previousLocalHash.c_str());
+  TEST_ASSERT_EQUAL_INT(1, fixture.api.actionCalls);
+  TEST_ASSERT_FALSE(fixture.worker.processOne());
+}
+
+void test_sync_definitive_result_completes_when_uid_left_cache() {
+  MemoryStorage storage;
+  Outbox outbox{storage};
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+  QueuedAction queued = pendingAction("removed-uid-request");
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.append(queued));
+  FakeApi api{outbox};
+  NetworkWorker worker{api};
+  TEST_ASSERT_TRUE(worker.begin());
+  AppControllerConfig config = offlineConfig();
+  config.initialCache.entries.clear();
+  AppController app{worker, outbox, config};
+  app.start(1, 1000);
+
+  AppEvent timer;
+  timer.kind = AppEventKind::Timer;
+  timer.nowMs = 1000;
+  timer.nowEpochSeconds = 1787306400;
+  timer.timestamp = isoUtc(timer.nowEpochSeconds);
+  timer.networkConnected = true;
+  timer.ntpTrusted = true;
+  timer.ntpSyncEpochSeconds = timer.nowEpochSeconds;
+  app.tick(timer);
+  TEST_ASSERT_TRUE(worker.processOne());  // bootstrap
+  app.tick(timer);
+  TEST_ASSERT_TRUE(worker.processOne());  // cache
+  app.tick(timer);
+
+  api.nextSync.itemCount = 1;
+  api.nextSync.items[0].clientRequestId = queued.clientRequestId;
+  api.nextSync.items[0].status = ActionStatus::Duplicate;
+  api.nextSync.items[0].state.kind = WorkKind::Idle;
+  TEST_ASSERT_TRUE(worker.processOne());  // sync
+  app.tick(timer);
+
+  TEST_ASSERT_EQUAL_UINT32(0, app.screen().pendingCount);
+  TEST_ASSERT_FALSE(app.screen().warning);
+}
+
+void test_online_action_uses_bootstrap_time_when_ntp_is_unavailable() {
+  Fixture fixture(false);
+  TEST_ASSERT_FALSE(fixture.app.screen().ntpTrusted);
+  fixture.scan(work(WorkKind::Idle));
+  fixture.accepted(WorkKind::Working);
+  fixture.press(Button::B);
+  TEST_ASSERT_EQUAL_UINT32(1, fixture.app.screen().pendingCount);
+  fixture.networkRoundTrip();
+
+  TEST_ASSERT_EQUAL_INT(1, fixture.api.actionCalls);
+  TEST_ASSERT_EQUAL_STRING("2026-08-21T10:00:00Z",
+                           fixture.api.lastAction.deviceCapturedAt.c_str());
+  TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
+}
+
+void test_online_action_replaces_stale_runtime_clock_with_bootstrap_time() {
+  MemoryStorage storage;
+  Outbox outbox{storage};
+  FakeApi api{outbox};
+  NetworkWorker worker{api};
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+  TEST_ASSERT_TRUE(worker.begin());
+  AppControllerConfig config;
+  config.credentials = {"https://jornada.example.es", "ojterm_test_token"};
+  config.clientVersion = "m5stack-test";
+  config.rebootId = "no-ntp-boot";
+  config.terminalId = "terminal-test";
+  config.clockSyncedAt = "2026-08-19T10:00:00Z";
+  config.lastNtpEpochSeconds = 1787133600;
+  AppController app{worker, outbox, config};
+  app.start(0, 1000);
+
+  AppEvent event;
+  event.kind = AppEventKind::Timer;
+  event.nowMs = 1000;
+  event.nowEpochSeconds = 0;
+  event.networkConnected = true;
+  app.tick(event);
+  TEST_ASSERT_TRUE(worker.processOne());
+  app.tick(event);
+  TEST_ASSERT_TRUE(worker.processOne());
+  app.tick(event);
+
+  api.nextResolve.scanContext = "scan-context";
+  api.nextResolve.employee = {"employee-1", "Marina"};
+  api.nextResolve.state = work(WorkKind::Idle);
+  event.kind = AppEventKind::TagScanned;
+  event.uid = "04AABBCC";
+  app.tick(event);
+  TEST_ASSERT_TRUE(worker.processOne());
+  event.kind = AppEventKind::Timer;
+  app.tick(event);
+  api.nextAction.status = ActionStatus::Accepted;
+  api.nextAction.state.kind = WorkKind::Working;
+  event.kind = AppEventKind::ButtonPressed;
+  event.button = Button::B;
+  app.tick(event);
+  TEST_ASSERT_TRUE(worker.processOne());
+  event.kind = AppEventKind::Timer;
+  app.tick(event);
+
+  TEST_ASSERT_EQUAL_STRING("2026-08-21T10:00:00Z",
+                           api.lastAction.deviceCapturedAt.c_str());
+  TEST_ASSERT_EQUAL_STRING("2026-08-21T10:00:00Z",
+                           api.lastAction.clockSyncedAt.c_str());
+  TEST_ASSERT_EQUAL_UINT32(0, app.screen().pendingCount);
+}
+
+void test_pending_count_read_failure_after_append_fails_closed() {
+  Fixture fixture;
+  fixture.scan(work(WorkKind::Idle));
+  fixture.storage.failReadsAfterAppend = true;
+  fixture.press(Button::B);
+
+  TEST_ASSERT_EQUAL(ScreenKind::Fatal, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_UINT32(OutboxCodec::kCapacity,
+                           fixture.app.screen().pendingCount);
+  TEST_ASSERT_FALSE(fixture.worker.processOne());
+}
+
+void test_corrupt_outbox_replay_fails_closed_without_accepting_input() {
+  MemoryStorage storage;
+  Outbox outbox{storage};
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+  TEST_ASSERT_EQUAL(OutboxError::None,
+                    outbox.append(pendingAction("corrupt-1")));
+  TEST_ASSERT_EQUAL(OutboxError::None,
+                    outbox.append(pendingAction("corrupt-2")));
+  auto& journal = storage.files[Outbox::kCurrentPath];
+  TEST_ASSERT_FALSE(journal.empty());
+  journal.back() ^= 0x01U;
+  FakeApi api{outbox};
+  NetworkWorker worker{api};
+  TEST_ASSERT_TRUE(worker.begin());
+  AppController app{worker, outbox, offlineConfig()};
+  app.start(2, 1000);
+
+  TEST_ASSERT_EQUAL(ScreenKind::Fatal, app.screen().kind);
+  TEST_ASSERT_EQUAL_UINT32(OutboxCodec::kCapacity,
+                           app.screen().pendingCount);
+  AppEvent scan;
+  scan.kind = AppEventKind::TagScanned;
+  scan.nowMs = 1000;
+  scan.nowEpochSeconds = 1787306400;
+  scan.timestamp = isoUtc(scan.nowEpochSeconds);
+  scan.uid = "04AABBCC";
+  scan.ntpTrusted = true;
+  scan.ntpSyncEpochSeconds = scan.nowEpochSeconds;
+  app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Fatal, app.screen().kind);
+}
+
+void test_cache_refresh_preserves_sequence_and_hash_from_completed_actions() {
+  Fixture fixture;
+  fixture.scan(work(WorkKind::Idle));
+  fixture.accepted(WorkKind::Working);
+  fixture.press(Button::B);
+  fixture.networkRoundTrip();
+  TEST_ASSERT_EQUAL_STRING("reboot-test-1",
+                           fixture.api.lastAction.clientRequestId.c_str());
+
+  fixture.tick(5001);
+  fixture.scan(work(WorkKind::Working));
+  fixture.api.actionCall.ok = false;
+  fixture.api.actionCall.failure.code = ApiErrorCode::InactiveEmployee;
+  fixture.api.actionCall.failure.safeMessage = "La persona no está activa.";
+  fixture.press(Button::A);
+  fixture.networkRoundTrip();
+  TEST_ASSERT_EQUAL_STRING("reboot-test-2",
+                           fixture.api.lastAction.clientRequestId.c_str());
+
+  fixture.api.useNextCache = true;
+  fixture.api.nextCache.revision = 9;
+  fixture.api.nextCache.unchanged = false;
+  fixture.api.nextCache.itemCount = 1;
+  fixture.api.nextCache.items[0].employeeId = "employee-1";
+  fixture.api.nextCache.items[0].displayName = "Marina";
+  fixture.api.nextCache.items[0].uid = "04AABBCC";
+  fixture.api.nextCache.items[0].state = work(WorkKind::Working);
+  fixture.tick(5001);
+  fixture.tick();
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+
+  fixture.scan(work(WorkKind::Working));
+  fixture.api.actionCall = {};
+  fixture.accepted(WorkKind::OnBreak);
+  fixture.press(Button::A);
+  std::vector<QueuedAction> pending;
+  TEST_ASSERT_EQUAL(OutboxError::None, fixture.outbox.list(pending));
+  TEST_ASSERT_EQUAL_UINT32(1, pending.size());
+  TEST_ASSERT_EQUAL_STRING("reboot-test-3",
+                           pending[0].clientRequestId.c_str());
+  TEST_ASSERT_FALSE(pending[0].previousLocalHash.empty());
+}
+
+void test_online_action_uses_bootstrap_clock_after_ntp_trust_expires() {
+  Fixture fixture;
+  fixture.epoch += ClockTrust::kMaximumOfflineAgeSeconds + 1;
+  fixture.nowMs +=
+      static_cast<uint32_t>((ClockTrust::kMaximumOfflineAgeSeconds + 1) *
+                            1000);
+  fixture.timestampEpochOffset = 60 * 60;
+  fixture.tick();
+  TEST_ASSERT_FALSE(fixture.app.screen().ntpTrusted);
+  fixture.scan(work(WorkKind::Idle));
+  fixture.accepted(WorkKind::Working);
+  fixture.press(Button::B);
+  fixture.networkRoundTrip();
+
+  TEST_ASSERT_EQUAL_STRING(fixture.api.lastAction.deviceCapturedAt.c_str(),
+                           fixture.api.lastAction.clockSyncedAt.c_str());
+  TEST_ASSERT_EQUAL_STRING("2026-08-22T10:00:01Z",
+                           fixture.api.lastAction.deviceCapturedAt.c_str());
+  TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
+}
+
+void test_bootstrap_clock_remains_monotonic_across_millis_rollover() {
+  Fixture fixture;
+  constexpr uint64_t firstDeltaMs =
+      static_cast<uint64_t>(UINT32_MAX - 1000U) - 1000U;
+  constexpr uint64_t secondDeltaMs = 3001U;
+  constexpr uint64_t elapsedMs = firstDeltaMs + secondDeltaMs;
+  fixture.nowMs = UINT32_MAX - 1000U;
+  fixture.epoch = 1787306400 + static_cast<int64_t>(firstDeltaMs / 1000U);
+  fixture.tick();
+  fixture.nowMs = 2000U;
+  fixture.epoch = 1787306400 + static_cast<int64_t>(elapsedMs / 1000U);
+  fixture.timestampEpochOffset = 60 * 60;
+  fixture.tick();
+  TEST_ASSERT_FALSE(fixture.app.screen().ntpTrusted);
+
+  fixture.scan(work(WorkKind::Idle));
+  fixture.accepted(WorkKind::Working);
+  fixture.press(Button::B);
+  fixture.networkRoundTrip();
+
+  const std::string expected =
+      isoUtc(1787306400 + static_cast<int64_t>(elapsedMs / 1000U));
+  TEST_ASSERT_EQUAL_STRING(expected.c_str(),
+                           fixture.api.lastAction.deviceCapturedAt.c_str());
+  TEST_ASSERT_EQUAL_STRING(expected.c_str(),
+                           fixture.api.lastAction.clockSyncedAt.c_str());
+}
+
+void test_automatic_sync_completes_pending_action_in_order() {
+  OfflineFixture fixture;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, true, true));
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.app.tick(fixture.event(AppEventKind::Timer, true, true));
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.app.tick(fixture.event(AppEventKind::Timer, true, true));
+
+  AppEvent scan = fixture.event(AppEventKind::TagScanned, false, true);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  AppEvent press = fixture.event(AppEventKind::ButtonPressed, false, true);
+  press.button = Button::B;
+  fixture.app.tick(press);
+  fixture.nowMs += 5000;
+  fixture.app.tick(fixture.event(AppEventKind::Timer, true, true));
+  fixture.app.tick(fixture.event(AppEventKind::Timer, true, true));
+
+  std::vector<QueuedAction> pending;
+  TEST_ASSERT_EQUAL(OutboxError::None, fixture.outbox.list(pending));
+  TEST_ASSERT_EQUAL_UINT32(1, pending.size());
+  fixture.api.nextSync = {};
+  fixture.api.nextSync.itemCount = 1;
+  fixture.api.nextSync.items[0].clientRequestId = pending[0].clientRequestId;
+  fixture.api.nextSync.items[0].status = ActionStatus::Duplicate;
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.app.tick(fixture.event(AppEventKind::Timer, true, true));
+  TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
+}
+
+void test_admin_pin_assignment_and_session_expiry_flow() {
+  Fixture fixture;
+  fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
+  fixture.api.nextEmployees.itemCount = 1;
+  fixture.api.nextEmployees.items[0] =
+      {"employee-1", "Marina", "Marina", false};
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += 3000;
+  combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  TEST_ASSERT_EQUAL(ScreenKind::AdminPin, fixture.app.screen().kind);
+
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::AdminEmployees, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_INT(1, fixture.api.openAdminCalls);
+
+  fixture.press(Button::B);
+  TEST_ASSERT_EQUAL(ScreenKind::AdminScan, fixture.app.screen().kind);
+  AppEvent scan = fixture.event(AppEventKind::TagScanned);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL_INT(1, fixture.api.assignCalls);
+  TEST_ASSERT_EQUAL_STRING("employee-1", fixture.api.lastAssignedEmployee.c_str());
+  TEST_ASSERT_FALSE(fixture.api.lastAssignReplace);
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::AdminEmployees, fixture.app.screen().kind);
+
+  fixture.nowMs += AdminFlow::kSessionIdleMs;
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("La sesión administrativa ha caducado.",
+                           fixture.app.screen().detail.c_str());
+}
+
+void test_late_employee_response_cannot_restore_an_expired_admin_session() {
+  Fixture fixture;
+  fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
+  fixture.api.nextEmployees.itemCount = 1;
+  fixture.api.nextEmployees.items[0] =
+      {"employee-1", "Marina", "Marina", false};
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  fixture.nowMs += AdminFlow::kSessionIdleMs;
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+
+  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("La sesión administrativa ha caducado.",
+                           fixture.app.screen().detail.c_str());
+}
+
 }  // namespace
 
 int main(int, char**) {
@@ -732,6 +1382,7 @@ int main(int, char**) {
   RUN_TEST(test_working_pause_and_clock_out_commands);
   RUN_TEST(test_duplicate_and_action_rejection_are_definitive);
   RUN_TEST(test_completion_write_failure_keeps_accepted_action_pending);
+  RUN_TEST(test_cache_write_failure_keeps_accepted_action_pending);
   RUN_TEST(test_completion_failure_preserves_each_server_outcome_semantics);
   RUN_TEST(test_stale_pause_warns_and_actions_expire_after_ten_seconds);
   RUN_TEST(test_time_picker_steps_five_and_held_steps_thirty);
@@ -745,5 +1396,21 @@ int main(int, char**) {
   RUN_TEST(test_ambiguous_transport_keeps_pending_and_definitive_rejection_removes_it);
   RUN_TEST(test_409_uses_authoritative_state_and_completes_attempt);
   RUN_TEST(test_operational_screens_keep_status_icons_and_button_labels);
+  RUN_TEST(test_offline_action_requires_fresh_ntp_and_advances_only_after_append);
+  RUN_TEST(test_offline_confirmation_rechecks_clock_trust_after_scan);
+  RUN_TEST(test_new_reboot_starts_a_new_signature_chain_after_replaying_old_records);
+  RUN_TEST(test_offline_close_from_break_queues_break_end_then_clock_out);
+  RUN_TEST(test_ambiguous_break_end_keeps_following_clock_out_queued_in_order);
+  RUN_TEST(test_sync_definitive_result_completes_when_uid_left_cache);
+  RUN_TEST(test_online_action_uses_bootstrap_time_when_ntp_is_unavailable);
+  RUN_TEST(test_online_action_replaces_stale_runtime_clock_with_bootstrap_time);
+  RUN_TEST(test_pending_count_read_failure_after_append_fails_closed);
+  RUN_TEST(test_corrupt_outbox_replay_fails_closed_without_accepting_input);
+  RUN_TEST(test_cache_refresh_preserves_sequence_and_hash_from_completed_actions);
+  RUN_TEST(test_online_action_uses_bootstrap_clock_after_ntp_trust_expires);
+  RUN_TEST(test_bootstrap_clock_remains_monotonic_across_millis_rollover);
+  RUN_TEST(test_automatic_sync_completes_pending_action_in_order);
+  RUN_TEST(test_admin_pin_assignment_and_session_expiry_flow);
+  RUN_TEST(test_late_employee_response_cannot_restore_an_expired_admin_session);
   return UNITY_END();
 }

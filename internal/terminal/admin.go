@@ -4,14 +4,20 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var pinPattern = regexp.MustCompile(`^\d{4}$`)
+
+const terminalListPageSize = 10
+
+const terminalListSort = "-created,-id"
 
 type terminalView struct {
 	ID                  string `json:"id"`
@@ -49,18 +55,91 @@ func terminalRecordView(record *core.Record, raw string) terminalView {
 	}
 }
 
+func terminalListPagination(rawPage string, totalItems int64) (int, int, error) {
+	page := 1
+	if rawPage != "" {
+		parsed, err := strconv.Atoi(rawPage)
+		if err != nil || parsed < 1 {
+			return 0, 0, fmt.Errorf("invalid page")
+		}
+		page = parsed
+	}
+
+	totalPages := int((totalItems + terminalListPageSize - 1) / terminalListPageSize)
+	if totalPages == 0 {
+		return 1, 0, nil
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	return page, totalPages, nil
+}
+
+func findTerminalRecordsPage(app core.App, organization string, page int) ([]*core.Record, error) {
+	activeCount, err := app.CountRecords(
+		"attendance_terminals",
+		dbx.HashExp{"organization": organization, "revokedAt": ""},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	offset := (page - 1) * terminalListPageSize
+	items := make([]*core.Record, 0, terminalListPageSize)
+	if int64(offset) < activeCount {
+		active, err := app.FindRecordsByFilter(
+			"attendance_terminals",
+			"organization = {:organization} && revokedAt = ''",
+			terminalListSort,
+			terminalListPageSize,
+			offset,
+			map[string]any{"organization": organization},
+		)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, active...)
+	}
+
+	remaining := terminalListPageSize - len(items)
+	if remaining == 0 {
+		return items, nil
+	}
+	revokedOffset := offset - int(activeCount)
+	if revokedOffset < 0 {
+		revokedOffset = 0
+	}
+	revoked, err := app.FindRecordsByFilter(
+		"attendance_terminals",
+		"organization = {:organization} && revokedAt != ''",
+		terminalListSort,
+		remaining,
+		revokedOffset,
+		map[string]any{"organization": organization},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return append(items, revoked...), nil
+}
+
 func (s *Service) listTerminals(e *core.RequestEvent) error {
 	if err := requireRFIDManager(e.Auth); err != nil {
 		return e.ForbiddenError(err.Error(), nil)
 	}
-	records, err := e.App.FindRecordsByFilter(
+	organizationID := e.Auth.GetString("organization")
+	totalItems, err := e.App.CountRecords(
 		"attendance_terminals",
-		"organization = {:organization}",
-		"-created",
-		200,
-		0,
-		map[string]any{"organization": e.Auth.GetString("organization")},
+		dbx.HashExp{"organization": organizationID},
 	)
+	if err != nil {
+		return e.InternalServerError("No se pudieron contar los terminales.", err)
+	}
+	page, totalPages, err := terminalListPagination(e.Request.URL.Query().Get("page"), totalItems)
+	if err != nil {
+		return e.BadRequestError("La página solicitada no es válida.", err)
+	}
+	records, err := findTerminalRecordsPage(e.App, organizationID, page)
 	if err != nil {
 		return e.InternalServerError("No se pudieron cargar los terminales.", err)
 	}
@@ -68,10 +147,14 @@ func (s *Service) listTerminals(e *core.RequestEvent) error {
 	for _, record := range records {
 		items = append(items, terminalRecordView(record, ""))
 	}
-	organization, _ := e.App.FindRecordById("organizations", e.Auth.GetString("organization"))
+	organization, _ := e.App.FindRecordById("organizations", organizationID)
 	return e.JSON(http.StatusOK, map[string]any{
 		"items":              items,
 		"adminPinConfigured": organization != nil && organization.GetString("terminalAdminPinHash") != "",
+		"page":               page,
+		"perPage":            terminalListPageSize,
+		"totalItems":         totalItems,
+		"totalPages":         totalPages,
 	})
 }
 

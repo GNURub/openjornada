@@ -172,6 +172,8 @@ void ScreenRenderer::render(const ScreenState& state,
   drawButtons(state.buttons);
 }
 
+void ScreenRenderer::invalidate() { lastFingerprint_.clear(); }
+
 }  // namespace openjornada
 
 #endif

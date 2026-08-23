@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -79,6 +80,10 @@ class OutboxStorage {
                              const std::vector<uint8_t>& bytes) = 0;
   virtual bool remove(const char* path) = 0;
   virtual bool rename(const char* from, const char* to) = 0;
+  // Long journal scans call this regularly so embedded storage adapters can
+  // yield to the RTOS and service watchdogs. Host adapters may keep the
+  // default no-op implementation.
+  virtual void cooperativeYield() const {}
 };
 
 class Outbox {
@@ -90,7 +95,9 @@ class Outbox {
   static constexpr const char* kCompletionNewPath = "/outbox.done.new";
   static constexpr const char* kCompletionOldPath = "/outbox.done.old";
   static constexpr size_t kProtocolBatchLimit = 500;
-  static constexpr size_t kMaxInMemoryBatch = 50;
+  // Ten worst-case records keep the outbox copy, worker slot, JSON document,
+  // TLS buffers and Wi-Fi stack comfortably below the ESP32 heap ceiling.
+  static constexpr size_t kMaxInMemoryBatch = 10;
   static constexpr size_t kDefaultBatchSize = kMaxInMemoryBatch;
 
   explicit Outbox(OutboxStorage& storage) : storage_(storage) {}
@@ -100,6 +107,9 @@ class Outbox {
   OutboxError list(std::vector<QueuedAction>& output,
                    size_t limit = kDefaultBatchSize) const;
   OutboxError pendingCount(size_t& output) const;
+  // Streams every pending record without materializing the complete queue.
+  OutboxError visitPending(
+      const std::function<OutboxError(const QueuedAction&)>& visitor) const;
   OutboxError complete(const std::string& clientRequestId);
   OutboxError compact();
 
@@ -124,6 +134,7 @@ class LittleFsOutboxStorage final : public OutboxStorage {
                      const std::vector<uint8_t>& bytes) override;
   bool remove(const char* path) override;
   bool rename(const char* from, const char* to) override;
+  void cooperativeYield() const override;
 
  private:
   File* openReadSession(const char* path) const;

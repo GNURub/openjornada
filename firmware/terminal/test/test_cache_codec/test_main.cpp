@@ -12,16 +12,23 @@ using namespace openjornada;
 namespace {
 
 CacheSnapshot fixture() {
-  return {42,
-          {{"employee-1", "Ada", "04A1B2C3",
-            {WorkKind::Working, 3600, 300, false, false}},
-           {"employee-2", "Lin", "11223344",
-            {WorkKind::OnBreak, 7200, 1501, false, true}}}};
+  CacheSnapshot result{
+      42,
+      {{"employee-1", "Ada", "04A1B2C3",
+        {WorkKind::Working, 3600, 300, false, false}},
+       {"employee-2", "Lin", "11223344",
+        {WorkKind::OnBreak, 7200, 1501, false, true}}}};
+  result.terminalId = "terminal-a";
+  result.configFingerprint = std::string(64, 'a');
+  return result;
 }
 
 void assertRoundTrip(const CacheSnapshot& expected,
                      const CacheSnapshot& actual) {
   TEST_ASSERT_EQUAL_UINT32(expected.revision, actual.revision);
+  TEST_ASSERT_EQUAL_STRING(expected.terminalId.c_str(), actual.terminalId.c_str());
+  TEST_ASSERT_EQUAL_STRING(expected.configFingerprint.c_str(),
+                           actual.configFingerprint.c_str());
   TEST_ASSERT_EQUAL_UINT(expected.entries.size(), actual.entries.size());
   for (size_t index = 0; index < expected.entries.size(); ++index) {
     const auto& wanted = expected.entries[index];
@@ -78,6 +85,8 @@ void test_payload_corruption_is_detected() {
 
 void test_capacity_is_limited_to_thirty() {
   CacheSnapshot maximum;
+  maximum.terminalId = "terminal-a";
+  maximum.configFingerprint = std::string(64, 'a');
   for (size_t index = 0; index < CacheCodec::kCapacity; ++index) {
     char uid[9]{};
     std::snprintf(uid, sizeof(uid), "%08X", static_cast<unsigned>(index));
@@ -90,6 +99,8 @@ void test_capacity_is_limited_to_thirty() {
                         static_cast<int>(CacheCodec::encode(maximum, encoded)));
 
   CacheSnapshot snapshot;
+  snapshot.terminalId = "terminal-a";
+  snapshot.configFingerprint = std::string(64, 'a');
   snapshot.entries.resize(CacheCodec::kCapacity + 1);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::Capacity),
                         static_cast<int>(CacheCodec::encode(snapshot, encoded)));
@@ -107,7 +118,7 @@ void test_rejects_bad_magic_version_and_truncation() {
   TEST_ASSERT_EQUAL_UINT32(999, decoded.revision);
 
   auto badVersion = encoded;
-  badVersion[4] = 2;
+  badVersion[4] = 3;
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::Version),
                         static_cast<int>(CacheCodec::decode(badVersion, decoded)));
 
@@ -152,6 +163,11 @@ void test_rejects_invalid_entries_without_partial_mutation() {
   invalid.entries[0].displayName =
       std::string(CacheCodec::kMaxDisplayName + 1, 'n');
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::Capacity),
+                        static_cast<int>(CacheCodec::encode(invalid, encoded)));
+
+  invalid = fixture();
+  invalid.configFingerprint = std::string(64, 'A');
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::InvalidData),
                         static_cast<int>(CacheCodec::encode(invalid, encoded)));
 }
 

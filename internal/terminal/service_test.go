@@ -2,9 +2,121 @@ package terminal
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tests"
 )
+
+func TestTerminalListPagination(t *testing.T) {
+	tests := []struct {
+		name           string
+		rawPage        string
+		totalItems     int64
+		wantPage       int
+		wantTotalPages int
+		wantErr        bool
+	}{
+		{name: "defaults to first page", totalItems: 21, wantPage: 1, wantTotalPages: 3},
+		{name: "keeps requested page", rawPage: "2", totalItems: 21, wantPage: 2, wantTotalPages: 3},
+		{name: "clamps page after last item disappears", rawPage: "4", totalItems: 21, wantPage: 3, wantTotalPages: 3},
+		{name: "empty list stays on first page", rawPage: "8", totalItems: 0, wantPage: 1, wantTotalPages: 0},
+		{name: "rejects zero", rawPage: "0", totalItems: 21, wantErr: true},
+		{name: "rejects negative", rawPage: "-1", totalItems: 21, wantErr: true},
+		{name: "rejects text", rawPage: "next", totalItems: 21, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			page, totalPages, err := terminalListPagination(test.rawPage, test.totalItems)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("terminalListPagination() expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("terminalListPagination() unexpected error: %v", err)
+			}
+			if page != test.wantPage || totalPages != test.wantTotalPages {
+				t.Fatalf(
+					"terminalListPagination() = (%d, %d), want (%d, %d)",
+					page,
+					totalPages,
+					test.wantPage,
+					test.wantTotalPages,
+				)
+			}
+		})
+	}
+}
+
+func TestFindTerminalRecordsPageOrdersActiveThenNewestAndScopesOrganization(t *testing.T) {
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+
+	collection := core.NewBaseCollection("attendance_terminals")
+	collection.Fields.Add(
+		&core.TextField{Name: "organization", Required: true},
+		&core.TextField{Name: "name", Required: true},
+		&core.DateField{Name: "revokedAt"},
+		&core.DateField{Name: "created", Required: true},
+	)
+	if err := app.Save(collection); err != nil {
+		t.Fatal(err)
+	}
+
+	save := func(name, organization, created, revokedAt string) {
+		record := core.NewRecord(collection)
+		record.Set("name", name)
+		record.Set("organization", organization)
+		record.Set("created", created)
+		record.Set("revokedAt", revokedAt)
+		if err := app.Save(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for day := 1; day <= 11; day++ {
+		save(
+			fmt.Sprintf("active-%02d", day),
+			"organization-1",
+			fmt.Sprintf("2026-08-%02d 10:00:00.000Z", day),
+			"",
+		)
+	}
+	save("revoked-older", "organization-1", "2026-08-20 10:00:00.000Z", "2026-08-21 10:00:00.000Z")
+	save("revoked-newer", "organization-1", "2026-08-21 10:00:00.000Z", "2026-08-22 10:00:00.000Z")
+	save("other-organization", "organization-2", "2026-08-31 10:00:00.000Z", "")
+
+	first, err := findTerminalRecordsPage(app, "organization-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := findTerminalRecordsPage(app, "organization-1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstNames := make([]string, 0, len(first))
+	for _, record := range first {
+		firstNames = append(firstNames, record.GetString("name"))
+	}
+	secondNames := make([]string, 0, len(second))
+	for _, record := range second {
+		secondNames = append(secondNames, record.GetString("name"))
+	}
+	if got, want := fmt.Sprint(firstNames), "[active-11 active-10 active-09 active-08 active-07 active-06 active-05 active-04 active-03 active-02]"; got != want {
+		t.Fatalf("first page = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(secondNames), "[active-01 revoked-newer revoked-older]"; got != want {
+		t.Fatalf("second page = %s, want %s", got, want)
+	}
+}
 
 func TestSecureTerminalRequest(t *testing.T) {
 	tests := []struct {

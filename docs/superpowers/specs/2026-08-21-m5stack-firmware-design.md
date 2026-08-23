@@ -142,10 +142,13 @@ configuración, caché ni cola. Cambiar la API key queda bloqueado mientras
 existan acciones pendientes, porque esas acciones están firmadas para el
 terminal actual.
 
-El portal se cierra al completar la configuración o tras diez minutos sin
-actividad. La configuración se guarda sin cifrar en NVS por decisión expresa
-para esta unidad de desarrollo. La pantalla y el puerto serie nunca muestran
-contraseñas o tokens después del aprovisionamiento.
+El portal y el punto de acceso permanecen activos hasta completar una
+configuración válida. Tras diez minutos sin pulsar A, B o C sólo se apaga la
+pantalla; una pulsación la despierta, vuelve a mostrar el acceso y concede
+otros diez minutos. El ESP32, el DNS y el servidor HTTP continúan activos
+durante el reposo de pantalla. La configuración se guarda sin cifrar en NVS
+por decisión expresa para esta unidad de desarrollo. La pantalla y el puerto
+serie nunca muestran contraseñas o tokens después del aprovisionamiento.
 
 ## Arranque normal
 
@@ -250,13 +253,20 @@ acciones. Para cada respuesta:
 La compactación crea un journal nuevo con pendientes, valida su CRC y lo
 renombra atómicamente. Un corte durante compactación deja disponible el
 journal anterior o el nuevo, nunca una mezcla silenciosa.
+Todo fallo de lectura, conteo o replay posterior al arranque bloquea nuevos
+fichajes y muestra recuperación; el estado y la cadena local sólo se publican
+en memoria después de completar el replay entero.
+Los recorridos largos ceden al scheduler de forma periódica para mantener
+atendidos el watchdog y las demás tareas incluso con 10.000 registros.
 
 ## Hora y confianza
 
 NTP se ejecuta al conectar y después periódicamente. El firmware conserva la
 última hora NTP, la hora capturada y el identificador de arranque. Una unidad
 recién reiniciada sin NTP puede mostrar la caché y sincronizar registros
-anteriores, pero no crear nuevos fichajes offline.
+anteriores, pero no crear nuevos fichajes offline. Si la API está disponible,
+los fichajes online usan una hora monotónica anclada al `serverTime` recibido
+en `bootstrap`; esta referencia de servidor no concede confianza offline.
 
 Con el dispositivo encendido, la confianza offline caduca 24 horas después de
 la última sincronización. Los cambios manuales de hora solo afectan a
@@ -311,6 +321,13 @@ la memoria local.
 Reposo muestra hora, red, contador de pendientes y `Acerca tu tarjeta`. Cada
 pantalla incluye las etiquetas actuales de A/B/C en el borde inferior. Los
 mensajes ordinarios desaparecen tras cinco segundos y las acciones tras diez.
+
+En funcionamiento normal, diez minutos sin interacción física apagan sólo la
+pantalla; CPU, Wi-Fi, lector RFID, sincronización y cola permanecen activos. La
+primera pulsación despierta y repinta la pantalla, pero se consume hasta soltar
+todos los botones para evitar acciones a ciegas. Una lectura RFID despierta la
+pantalla y se procesa inmediatamente. Los temporizadores y las respuestas de
+red no reinician el plazo de actividad.
 
 Un pitido corto confirma una acción; un patrón doble indica error. El sonido
 se puede desactivar en el portal. Se muestran mensajes específicos para:

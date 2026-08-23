@@ -2,13 +2,16 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <esp_partition.h>
+#include <esp_sntp.h>
 #include <esp_system.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <new>
 #include <optional>
@@ -18,13 +21,16 @@
 #include "openjornada/app_controller.hpp"
 #include "openjornada/cache_store.hpp"
 #include "openjornada/config.hpp"
+#include "openjornada/display_power.hpp"
 #include "openjornada/gesture.hpp"
 #include "openjornada/hardware.hpp"
 #include "openjornada/network_worker.hpp"
 #include "openjornada/outbox.hpp"
 #include "openjornada/provisioning.hpp"
 #include "openjornada/screen.hpp"
+#include "openjornada/signature.hpp"
 #include "openjornada/storage_layout.hpp"
+#include "openjornada/timezone.hpp"
 #include "openjornada/uid_gate.hpp"
 
 namespace {
@@ -37,7 +43,10 @@ Hardware hardware;
 UidGate uidGate{300};
 LittleFsOutboxStorage outboxStorage;
 Outbox outbox{outboxStorage};
+ConfigStore configStore;
+CacheStore cacheStore;
 ScreenRenderer renderer;
+DisplayPowerPolicy displayPower{0};
 std::unique_ptr<Esp32ApiClient> apiClient;
 std::unique_ptr<NetworkWorker> networkWorker;
 std::unique_ptr<AppController> app;
@@ -46,6 +55,8 @@ bool terminalBlocked = false;
 bool soundEnabled = true;
 std::array<bool, 3> acceleratedHoldSent{};
 std::string appliedTimezone;
+std::atomic<bool> ntpSynchronizedThisBoot{false};
+std::atomic<std::time_t> lastNtpSyncEpoch{0};
 
 enum class BootChoice { Normal, Provisioning, FactoryReset };
 
@@ -156,7 +167,8 @@ bool performFactoryReset(ConfigStore& configStore, CacheStore& cacheStore) {
   return configStore.clear();
 }
 
-bool prepareTlsClock(const DeviceConfig& candidate, std::string& displayError) {
+bool prepareTlsClock(const DeviceConfig& candidate, std::string& displayError,
+                     const std::function<void()>& service) {
   if (candidate.baseUrl.rfind("https://", 0) != 0 ||
       std::time(nullptr) >= kEarliestTrustedTime) {
     return true;
@@ -165,7 +177,7 @@ bool prepareTlsClock(const DeviceConfig& candidate, std::string& displayError) {
   const uint32_t startedMs = millis();
   while (std::time(nullptr) < kEarliestTrustedTime &&
          millis() - startedMs < 10000U) {
-    M5.update();
+    service();
     delay(25);
   }
   if (std::time(nullptr) >= kEarliestTrustedTime) return true;
@@ -187,31 +199,50 @@ bool runProvisioning(ConfigStore& store, BuildProfile profile,
                      size_t pendingCount) {
   ProvisioningPortal portal(store, profile, active, pendingCount);
   Esp32ApiClient provisioningClient(profile);
+  NetworkWorker provisioningWorker(provisioningClient);
+  const bool workerReady = provisioningWorker.begin();
+  uint32_t nextJobId = 1;
   const auto result = portal.run(
-      [&](const DeviceConfig& candidate, std::string& displayError) {
-        if (!prepareTlsClock(candidate, displayError)) return false;
-        BootstrapResponse response;
-        const ApiCredentials credentials{candidate.baseUrl,
-                                         candidate.terminalToken};
-        const BootstrapRequest request{
+      [&](const DeviceConfig& candidate, std::string& displayError,
+          const std::function<void()>& service) {
+        if (!prepareTlsClock(candidate, displayError, service)) return false;
+        if (!workerReady) {
+          displayError = "No se pudo iniciar la comprobación del servidor.";
+          return false;
+        }
+
+        NetworkJob job;
+        job.id = nextJobId++;
+        job.kind = NetworkJobKind::Bootstrap;
+        job.credentials = {candidate.baseUrl, candidate.terminalToken};
+        job.bootstrap = {
             kTerminalProtocolVersion, "m5stack-1.0.0",
-            static_cast<uint32_t>(std::min(pendingCount,
-                                           OutboxCodec::kCapacity))};
-        ApiCallResult call;
-        try {
-          call = provisioningClient.bootstrap(credentials, request, response,
-                                              10000);
-        } catch (const std::bad_alloc&) {
-          displayError = "El terminal no tiene memoria suficiente para "
-                         "comprobar el servidor.";
+            static_cast<uint32_t>(
+                std::min(pendingCount, OutboxCodec::kCapacity))};
+        const uint32_t expectedJobId = job.id;
+        if (!provisioningWorker.enqueue(std::move(job))) {
+          displayError = "No se pudo iniciar la comprobación del servidor.";
           return false;
         }
-        if (!call.ok) {
-          displayError = call.failure.safeMessage.empty()
+
+        NetworkResult networkResult;
+        while (!provisioningWorker.poll(networkResult)) {
+          service();
+          delay(5);
+        }
+        if (networkResult.id != expectedJobId ||
+            networkResult.kind != NetworkJobKind::Bootstrap ||
+            networkResult.bootstrap == nullptr) {
+          displayError = "La comprobación del servidor no fue válida.";
+          return false;
+        }
+        if (!networkResult.call.ok) {
+          displayError = networkResult.call.failure.safeMessage.empty()
                              ? "No se pudo comprobar OpenJornada."
-                             : call.failure.safeMessage;
+                             : networkResult.call.failure.safeMessage;
           return false;
         }
+        const BootstrapResponse& response = *networkResult.bootstrap;
         Serial.printf("[OJ-NET] bootstrap=ok protocol=%u cache_revision=%lu\n",
                       static_cast<unsigned>(response.protocol.current),
                       static_cast<unsigned long>(response.cacheRevision));
@@ -228,36 +259,46 @@ std::string makeRebootId() {
   return value.data();
 }
 
-bool clockTrusted() { return std::time(nullptr) >= kEarliestTrustedTime; }
+void onNtpSynchronized(struct timeval*) {
+  lastNtpSyncEpoch.store(std::time(nullptr), std::memory_order_release);
+  ntpSynchronizedThisBoot.store(true, std::memory_order_release);
+}
+
+bool clockTrusted() {
+  return ntpSynchronizedThisBoot.load(std::memory_order_acquire) &&
+         std::time(nullptr) >= kEarliestTrustedTime;
+}
 
 void applyServerTimezone(const std::string& timezone) {
   if (timezone.empty() || timezone == appliedTimezone) return;
-  const char* posix = nullptr;
-  if (timezone == "Europe/Madrid") {
-    posix = "CET-1CEST,M3.5.0,M10.5.0/3";
-  } else if (timezone == "Atlantic/Canary") {
-    posix = "WET0WEST,M3.5.0/1,M10.5.0";
-  }
+  const char* posix = posixTimezone(timezone);
   if (posix == nullptr) return;
   setenv("TZ", posix, 1);
   tzset();
   appliedTimezone = timezone;
 }
 
-AppEvent baseEvent(AppEventKind kind) {
+AppEvent baseEvent(AppEventKind kind, bool includeButtonState = true) {
   AppEvent event;
   event.kind = kind;
   event.nowMs = millis();
   event.nowEpochSeconds = static_cast<int64_t>(std::time(nullptr));
   event.networkConnected = WiFi.status() == WL_CONNECTED;
   event.ntpTrusted = clockTrusted();
+  event.ntpSyncEpochSeconds = static_cast<int64_t>(
+      lastNtpSyncEpoch.load(std::memory_order_acquire));
+  if (includeButtonState) {
+    event.buttonADown = hardware.down(Button::A);
+    event.buttonBDown = hardware.down(Button::B);
+    event.buttonCDown = hardware.down(Button::C);
+  }
   if (event.ntpTrusted) event.timestamp = isoUtc(event.nowEpochSeconds);
   return event;
 }
 
-void dispatchButton(Button button) {
+void dispatchButton(Button button, bool pressed) {
   const size_t index = static_cast<size_t>(button);
-  if (hardware.pressed(button)) {
+  if (pressed) {
     AppEvent event = baseEvent(AppEventKind::ButtonPressed);
     event.button = button;
     app->tick(event);
@@ -274,6 +315,26 @@ void dispatchButton(Button button) {
   }
 }
 
+void applyDisplayPowerEvent(DisplayPowerEvent event, bool invalidateRenderer) {
+  switch (event) {
+    case DisplayPowerEvent::Sleep:
+      M5.Display.sleep();
+      break;
+    case DisplayPowerEvent::Wake:
+      M5.Display.wakeup();
+      if (invalidateRenderer) renderer.invalidate();
+      break;
+    case DisplayPowerEvent::None:
+      break;
+  }
+}
+
+void enterBlockedState() {
+  displayPower.reset(millis());
+  acceleratedHoldSent.fill(false);
+  terminalBlocked = true;
+}
+
 void emitFeedback() {
   const AppFeedback feedback = app->takeFeedback();
   if (!soundEnabled) return;
@@ -285,8 +346,6 @@ void emitFeedback() {
 
 void setup() {
   const bool rfidReady = hardware.begin();
-  ConfigStore configStore;
-  CacheStore cacheStore;
   const BuildProfile profile = currentBuildProfile();
   ConfigError configError = ConfigError::Storage;
   deviceConfig = configStore.load(profile, &configError);
@@ -312,7 +371,7 @@ void setup() {
     showFactoryResetResult(reset);
     delay(1200);
     if (reset) ESP.restart();
-    terminalBlocked = true;
+    enterBlockedState();
     return;
   }
 
@@ -336,7 +395,7 @@ void setup() {
           "No se borró ningún dato. Reinicia, mantén A+B+C 10 s, suelta "
           "todos y después mantén SOLO C 5 s.",
           true);
-      terminalBlocked = true;
+      enterBlockedState();
       return;
     }
     if (runProvisioning(configStore, profile, deviceConfig, pendingCount)) {
@@ -344,7 +403,7 @@ void setup() {
       ESP.restart();
     }
     if (!deviceConfig.has_value()) {
-      terminalBlocked = true;
+      enterBlockedState();
       return;
     }
   }
@@ -355,7 +414,7 @@ void setup() {
         "No se aceptarán fichajes. Usa el reinicio de fábrica o revisa la "
         "memoria antes de continuar.",
         true);
-    terminalBlocked = true;
+    enterBlockedState();
     return;
   }
   if (!rfidReady) {
@@ -363,15 +422,31 @@ void setup() {
                            "Comprueba el cable Grove A y reinicia el terminal.",
                            true);
     hardware.toneError();
-    terminalBlocked = true;
+    enterBlockedState();
     return;
   }
 
   soundEnabled = deviceConfig->soundEnabled;
-  applyServerTimezone("Europe/Madrid");
   WiFi.mode(WIFI_STA);
   WiFi.begin(deviceConfig->ssid.c_str(), deviceConfig->wifiPassword.c_str());
-  configTime(0, 0, "pool.ntp.org", "time.google.com");
+  sntp_set_time_sync_notification_cb(onNtpSynchronized);
+  const char* initialTimezone = posixTimezone("Europe/Madrid");
+  configTzTime(initialTimezone, "pool.ntp.org", "time.google.com");
+  appliedTimezone = "Europe/Madrid";
+
+  CacheSnapshot initialCache;
+  if (cacheStore.load(initialCache) != CacheError::None) initialCache = {};
+  const std::string configFingerprint = configurationFingerprint(
+      deviceConfig->baseUrl, deviceConfig->terminalToken);
+  auto runtime = configStore.loadRuntime();
+  if (!runtime.has_value() ||
+      runtime->configFingerprint != configFingerprint) {
+    runtime.reset();
+    initialCache = {};
+  } else if (initialCache.terminalId != runtime->terminalId ||
+             initialCache.configFingerprint != configFingerprint) {
+    initialCache = {};
+  }
 
   apiClient = std::make_unique<Esp32ApiClient>(profile);
   networkWorker = std::make_unique<NetworkWorker>(*apiClient);
@@ -380,40 +455,91 @@ void setup() {
         "Red no disponible",
         "No se pudo iniciar el proceso de conexión. Reinicia el terminal.",
         true);
-    terminalBlocked = true;
+    enterBlockedState();
     return;
   }
-  app = std::make_unique<AppController>(
-      *networkWorker, outbox,
-      AppControllerConfig{{deviceConfig->baseUrl, deviceConfig->terminalToken},
-                          "m5stack-1.0.0", makeRebootId()});
+  AppControllerConfig appConfig;
+  appConfig.credentials = {deviceConfig->baseUrl, deviceConfig->terminalToken};
+  appConfig.clientVersion = "m5stack-1.0.0";
+  appConfig.rebootId = makeRebootId();
+  appConfig.configFingerprint = configFingerprint;
+  appConfig.initialCache = std::move(initialCache);
+  if (runtime.has_value()) {
+    appConfig.terminalId = runtime->terminalId;
+    appConfig.clockSyncedAt = runtime->clockSyncedAt;
+    appConfig.lastNtpEpochSeconds = runtime->lastNtpEpochSeconds;
+  }
+  app = std::make_unique<AppController>(*networkWorker, outbox,
+                                        std::move(appConfig), &cacheStore,
+                                        &configStore);
   app->start(pendingCount, millis());
   app->tick(baseEvent(AppEventKind::Timer));
   renderer.render(app->screen(), std::time(nullptr));
+  displayPower.reset(millis());
 }
 
 void loop() {
+  constexpr std::array<Button, 3> kButtons{Button::A, Button::B, Button::C};
   if (terminalBlocked || app == nullptr) {
     hardware.update();
+    std::array<bool, 3> pressed{};
+    std::array<bool, 3> down{};
+    for (size_t index = 0; index < kButtons.size(); ++index) {
+      pressed[index] = hardware.pressed(kButtons[index]);
+      down[index] = hardware.down(kButtons[index]);
+    }
+    const auto uid = hardware.pollUid();
+    const DisplayPowerDecision decision = displayPower.update(
+        millis(), DisplayActivity{
+                      std::any_of(pressed.begin(), pressed.end(),
+                                  [](bool value) { return value; }),
+                      std::any_of(down.begin(), down.end(),
+                                  [](bool value) { return value; }),
+                      uid.has_value()});
+    applyDisplayPowerEvent(decision.power, false);
     delay(20);
     return;
   }
   hardware.update();
-  app->tick(baseEvent(AppEventKind::Timer));
-  applyServerTimezone(app->timezone());
-
-  dispatchButton(Button::A);
-  dispatchButton(Button::B);
-  dispatchButton(Button::C);
-
+  std::array<bool, 3> pressed{};
+  std::array<bool, 3> down{};
+  for (size_t index = 0; index < kButtons.size(); ++index) {
+    pressed[index] = hardware.pressed(kButtons[index]);
+    down[index] = hardware.down(kButtons[index]);
+  }
   const auto uid = hardware.pollUid();
   const bool present = hardware.tagPresent();
-  if (uid.has_value() && uidGate.accept(*uid, present, millis())) {
+  const bool acceptedUid =
+      uid.has_value() && uidGate.accept(*uid, present, millis());
+  if (!uid.has_value()) uidGate.accept("", present, millis());
+
+  const DisplayPowerDecision displayDecision = displayPower.update(
+      millis(), DisplayActivity{
+                    std::any_of(pressed.begin(), pressed.end(),
+                                [](bool value) { return value; }),
+                    std::any_of(down.begin(), down.end(),
+                                [](bool value) { return value; }),
+                    uid.has_value()});
+  applyDisplayPowerEvent(displayDecision.power, true);
+
+  // A button used to wake the screen must not leak into the timer event: the
+  // controller also observes held buttons there for the A+C admin gesture.
+  app->tick(baseEvent(AppEventKind::Timer,
+                      displayDecision.dispatchButtons));
+  applyServerTimezone(app->timezone());
+
+  if (displayDecision.dispatchButtons) {
+    for (size_t index = 0; index < kButtons.size(); ++index) {
+      dispatchButton(kButtons[index], pressed[index]);
+    }
+  } else {
+    acceleratedHoldSent.fill(false);
+  }
+
+  if (acceptedUid && displayDecision.dispatchTag) {
     AppEvent event = baseEvent(AppEventKind::TagScanned);
     event.uid = *uid;
     app->tick(event);
-  } else if (!uid.has_value()) {
-    uidGate.accept("", present, millis());
   }
 
   emitFeedback();
