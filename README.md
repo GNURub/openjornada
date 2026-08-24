@@ -420,5 +420,18 @@ AGENTS.md           guía de trabajo para agentes y contribuidores
   el esquema.
 - Lee [AGENTS.md](AGENTS.md) antes de modificar el proyecto.
 
-Este repositorio todavía no incluye un archivo `LICENSE`. Antes de distribuirlo
-como software libre debe elegirse y añadirse explícitamente una licencia.
+## Licencia
+
+OpenJornada es software con código disponible bajo Business Source License 1.1
+([BUSL-1.1](LICENSE)). El uso productivo es gratuito cuando el licenciatario y
+todas las entidades bajo control común suman como máximo diez trabajadores,
+incluidos empleados y contratistas aunque no tengan cuenta en OpenJornada. Con
+once o más trabajadores se necesita una licencia comercial o permiso previo por
+escrito.
+
+La versión incluida en esta revisión cambia a AGPL-3.0-or-later el 2030-08-24,
+o antes si así lo exige BSL 1.1. Estos términos se aplican a las revisiones y
+versiones que incluyen el archivo `LICENSE`; no reescriben etiquetas históricas.
+Consulta las [condiciones completas](LICENSE), la
+[explicación de uso comercial](COMMERCIAL-LICENSE.md) o escribe a
+[rubencidlara@gmail.com](mailto:rubencidlara@gmail.com?subject=Licencia%20comercial%20de%20OpenJornada).

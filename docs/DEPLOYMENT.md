@@ -17,6 +17,15 @@ La imagen instala la base IANA `tzdata`. Es necesaria para interpretar
 `PB_TIMEZONE` y las zonas horarias configuradas por empresa, incluidos los
 cambios de horario de verano; no debe eliminarse al endurecer la imagen.
 
+Antes de publicar cada versión:
+
+1. fija en `LICENSE` una `Change Date` que no supere cuatro años desde la fecha
+   de publicación de esa versión;
+2. conserva `AGPL-3.0-or-later` como `Change License`, salvo una decisión legal
+   documentada compatible con las condiciones de BSL 1.1;
+3. verifica que la etiqueta publicada contiene `LICENSE`, `NOTICE` y los avisos
+   de terceros.
+
 ## Imágenes publicadas en GitHub
 
 El workflow
