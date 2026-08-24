@@ -90,13 +90,14 @@ bool decodeProvisioningFormRequest(const CaptiveHttpRequest& request,
 
 struct ProvisioningResult {
   bool saved = false;
+  bool cancelled = false;
   DeviceConfig config;
   std::string displayError;
 };
 
 using CandidateValidator =
     std::function<bool(const DeviceConfig&, std::string& displayError,
-                       const std::function<void()>& service)>;
+                       const std::function<bool()>& service)>;
 
 bool canApplyProvisioningCandidate(
     const std::optional<DeviceConfig>& activeConfig,

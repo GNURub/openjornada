@@ -73,9 +73,10 @@ persiste localmente la configuración validada. Si el QR ya no está disponible,
 rota la key o utiliza la entrada manual.
 
 El punto de acceso y el portal permanecen disponibles hasta guardar una
-configuración válida. Si no se pulsa ningún botón durante diez minutos, sólo
-se apaga la pantalla: el portal sigue funcionando. Pulsa A, B o C para
-despertarla y disponer de otros diez minutos.
+configuración válida o cancelar manteniendo C durante tres segundos. Al
+cancelar, el terminal reinicia con la configuración anterior. Si no se pulsa
+ningún botón durante diez minutos, sólo se apaga la pantalla: el portal sigue
+funcionando. Pulsa brevemente A, B o C para despertarla.
 
 Para pruebas LAN, usa `m5stack_dev`, una IP RFC1918 del ordenador —nunca
 `127.0.0.1`— y activa de forma explícita en el backend tanto
@@ -99,8 +100,11 @@ otra pantalla frente a observadores.
 - A+C durante tres segundos abre el PIN de administración; la misma pulsación
   mantenida sale explícitamente del modo administrativo. La sesión dura cinco
   minutos de inactividad, sólo funciona con red y nunca se persiste.
-- A+B durante cinco segundos al arrancar reabre la configuración sin borrar
-  caché ni fichajes pendientes.
+- A+B durante cinco segundos reabre la configuración desde cualquier pantalla,
+  incluso si el terminal está esperando a la red o al servidor. Una cuenta
+  atrás permite cancelar soltando los botones. Conserva la URL, la API key, la
+  caché y los fichajes pendientes; en el portal basta con indicar la nueva
+  Wi-Fi y dejar vacíos los secretos que no cambien.
 - A+B+C durante diez segundos, soltar y mantener sólo C cinco segundos ejecuta
   el restablecimiento completo tras mostrar el número de pendientes. Es la
   única operación local que elimina la cola.

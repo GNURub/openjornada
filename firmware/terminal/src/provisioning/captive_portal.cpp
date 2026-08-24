@@ -1,6 +1,7 @@
 #include "openjornada/provisioning.hpp"
 
 #include "openjornada/display_power.hpp"
+#include "openjornada/gesture.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -742,9 +743,11 @@ ProvisioningResult ProvisioningPortal::run(
   }
 
   bool completed = false;
+  bool cancelRequested = false;
   server.begin();
   drawProvisioningAccess(apSsid, apPassword);
   DisplayPowerPolicy displayPower(millis());
+  ProvisioningCancelGesture cancelGesture;
   const auto serviceProvisioningDisplay = [&]() {
     M5.update();
     const bool buttonPressed = M5.BtnA.wasPressed() ||
@@ -752,6 +755,22 @@ ProvisioningResult ProvisioningPortal::run(
                                M5.BtnC.wasPressed();
     const bool buttonDown = M5.BtnA.isPressed() || M5.BtnB.isPressed() ||
                             M5.BtnC.isPressed();
+    const ProvisioningCancelDecision cancelDecision = cancelGesture.update(
+        {M5.BtnA.isPressed(), M5.BtnB.isPressed(), M5.BtnC.isPressed()},
+        millis());
+    if (cancelDecision.cancelRequested) {
+      cancelRequested = true;
+      drawProvisioningStatus(
+          "Configuración cancelada",
+          "Reiniciando sin cambiar la configuración guardada...", false);
+    } else if (cancelDecision.showCountdown) {
+      char detail[72]{};
+      snprintf(detail, sizeof(detail), "Mantén C. Cancelando en %u s.",
+               static_cast<unsigned>(cancelDecision.secondsRemaining));
+      drawProvisioningStatus("Cancelar configuración", detail, false);
+    } else if (cancelDecision.restoreScreen) {
+      drawProvisioningAccess(apSsid, apPassword);
+    }
     const DisplayPowerDecision decision = displayPower.update(
         millis(), DisplayActivity{buttonPressed, buttonDown, false});
     switch (decision.power) {
@@ -771,7 +790,7 @@ ProvisioningResult ProvisioningPortal::run(
     serviceProvisioningDisplay();
   };
 
-  while (!completed) {
+  while (!completed && !cancelRequested) {
     dns.processNextRequest();
     WiFiClient client = server.available();
     if (client) {
@@ -865,12 +884,16 @@ ProvisioningResult ProvisioningPortal::run(
                          candidate.wifiPassword.c_str());
               const uint32_t connectStartedMs = millis();
               while (WiFi.status() != WL_CONNECTED &&
-                     millis() - connectStartedMs < kConnectTimeoutMs) {
+                     millis() - connectStartedMs < kConnectTimeoutMs &&
+                     !cancelRequested) {
                 dns.processNextRequest();
                 serviceProvisioningDisplay();
                 delay(25);
               }
-              if (WiFi.status() != WL_CONNECTED) {
+              if (cancelRequested) {
+                responseSent = true;
+                client.stop();
+              } else if (WiFi.status() != WL_CONNECTED) {
                 WiFi.disconnect(false, false);
                 drawProvisioningAccess(apSsid, apPassword);
                 responseSent = sendResponse(
@@ -884,16 +907,22 @@ ProvisioningResult ProvisioningPortal::run(
                 if (!candidateValidator(candidate, bootstrapError, [&]() {
                       dns.processNextRequest();
                       serviceProvisioningDisplay();
+                      return !cancelRequested;
                     })) {
-                  WiFi.disconnect(false, false);
-                  drawProvisioningAccess(apSsid, apPassword);
-                  const std::string displayError =
-                      safeBootstrapError(candidate, bootstrapError);
-                  responseSent = sendResponse(
-                      client, 400, "text/html; charset=utf-8",
-                      portalPage(csrf, activeConfig_,
-                                 String(displayError.c_str())),
-                      serviceProvisioningIo);
+                  if (cancelRequested) {
+                    responseSent = true;
+                    client.stop();
+                  } else {
+                    WiFi.disconnect(false, false);
+                    drawProvisioningAccess(apSsid, apPassword);
+                    const std::string displayError =
+                        safeBootstrapError(candidate, bootstrapError);
+                    responseSent = sendResponse(
+                        client, 400, "text/html; charset=utf-8",
+                        portalPage(csrf, activeConfig_,
+                                   String(displayError.c_str())),
+                        serviceProvisioningIo);
+                  }
                 } else if (!store_.save(candidate, profile_)) {
                   WiFi.disconnect(false, false);
                   drawProvisioningAccess(apSsid, apPassword);
@@ -936,6 +965,10 @@ ProvisioningResult ProvisioningPortal::run(
     delay(10);
   }
 
+  if (cancelRequested) {
+    result.cancelled = true;
+    result.displayError = "Configuración cancelada.";
+  }
   const bool keepStation = completed && WiFi.status() == WL_CONNECTED;
   stopPortal(dns, server, keepStation);
   return result;

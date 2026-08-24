@@ -6,6 +6,8 @@ namespace {
 constexpr uint32_t kProvisioningHoldMs = 5000;
 constexpr uint32_t kFactoryRequestHoldMs = 10000;
 constexpr uint32_t kFactoryConfirmHoldMs = 5000;
+constexpr uint32_t kRuntimeChordGraceMs = 300;
+constexpr uint32_t kProvisioningCancelHoldMs = 3000;
 
 bool onlyAB(BootButtons buttons) {
   return buttons.a && buttons.b && !buttons.c;
@@ -103,6 +105,151 @@ void BootGestureDetector::resetCombo() {
 void BootGestureDetector::resetConfirmation() {
   confirmationTiming_ = false;
   confirmationStartedMs_ = 0;
+}
+
+RuntimeProvisioningDecision RuntimeProvisioningGesture::update(
+    BootButtons down, BootButtons pressed, bool applicationInputAllowed,
+    uint32_t nowMs) {
+  const bool exactAB = onlyAB(down);
+
+  if (!down.a && !down.b) individualSequenceCommitted_ = false;
+
+  if (state_ == State::Triggered) {
+    RuntimeProvisioningDecision decision;
+    decision.suppressButtons = true;
+    decision.provisioningRequested = true;
+    return decision;
+  }
+
+  if (state_ == State::HoldingAB) {
+    if (exactAB) return holdingDecision(nowMs);
+    state_ = State::SuppressUntilRelease;
+    clearPending();
+    RuntimeProvisioningDecision decision;
+    decision.suppressButtons = true;
+    return decision;
+  }
+
+  if (state_ == State::SuppressUntilRelease) {
+    RuntimeProvisioningDecision decision;
+    if (!down.a && !down.b) {
+      state_ = State::Ready;
+      decision.restoreScreen = true;
+    } else {
+      decision.suppressButtons = true;
+    }
+    return decision;
+  }
+
+  if (exactAB && !individualSequenceCommitted_) return startHolding(nowMs);
+  if (down.a && down.b && !individualSequenceCommitted_) {
+    // A+B+C is deliberately boot-only. Suppress it at runtime so a failed
+    // recovery attempt cannot become an attendance action.
+    state_ = State::SuppressUntilRelease;
+    clearPending();
+    RuntimeProvisioningDecision decision;
+    decision.suppressButtons = true;
+    return decision;
+  }
+
+  RuntimeProvisioningDecision decision;
+  if (!applicationInputAllowed) {
+    clearPending();
+    return decision;
+  }
+
+  if (pressed.a) {
+    pendingA_ = true;
+    pendingAAtMs_ = nowMs;
+  }
+  if (pressed.b) {
+    pendingB_ = true;
+    pendingBAtMs_ = nowMs;
+  }
+  if (pendingA_ &&
+      (!down.a || nowMs - pendingAAtMs_ >= kRuntimeChordGraceMs)) {
+    decision.dispatchA = true;
+    pendingA_ = false;
+    individualSequenceCommitted_ = true;
+  }
+  if (pendingB_ &&
+      (!down.b || nowMs - pendingBAtMs_ >= kRuntimeChordGraceMs)) {
+    decision.dispatchB = true;
+    pendingB_ = false;
+    individualSequenceCommitted_ = true;
+  }
+  return decision;
+}
+
+void RuntimeProvisioningGesture::clearPending() {
+  pendingA_ = false;
+  pendingB_ = false;
+  pendingAAtMs_ = 0;
+  pendingBAtMs_ = 0;
+}
+
+RuntimeProvisioningDecision RuntimeProvisioningGesture::startHolding(
+    uint32_t nowMs) {
+  state_ = State::HoldingAB;
+  holdStartedMs_ = nowMs;
+  clearPending();
+  return holdingDecision(nowMs);
+}
+
+RuntimeProvisioningDecision RuntimeProvisioningGesture::holdingDecision(
+    uint32_t nowMs) {
+  RuntimeProvisioningDecision decision;
+  decision.suppressButtons = true;
+  const uint32_t elapsed = nowMs - holdStartedMs_;
+  if (elapsed >= kProvisioningHoldMs) {
+    state_ = State::Triggered;
+    decision.provisioningRequested = true;
+    return decision;
+  }
+  decision.showCountdown = true;
+  decision.secondsRemaining = static_cast<uint8_t>(
+      (kProvisioningHoldMs - elapsed + 999U) / 1000U);
+  return decision;
+}
+
+ProvisioningCancelDecision ProvisioningCancelGesture::update(
+    BootButtons down, uint32_t nowMs) {
+  const bool anyDown = down.a || down.b || down.c;
+  const bool onlyC = !down.a && !down.b && down.c;
+  ProvisioningCancelDecision decision;
+
+  if (state_ == State::Triggered) {
+    decision.cancelRequested = true;
+    return decision;
+  }
+  if (state_ == State::AwaitRelease) {
+    if (!anyDown) state_ = State::Ready;
+    return decision;
+  }
+  if (state_ == State::HoldingC) {
+    if (!onlyC) {
+      state_ = anyDown ? State::AwaitRelease : State::Ready;
+      decision.restoreScreen = true;
+      return decision;
+    }
+    const uint32_t elapsed = nowMs - holdStartedMs_;
+    if (elapsed >= kProvisioningCancelHoldMs) {
+      state_ = State::Triggered;
+      decision.cancelRequested = true;
+      return decision;
+    }
+    decision.showCountdown = true;
+    decision.secondsRemaining = static_cast<uint8_t>(
+        (kProvisioningCancelHoldMs - elapsed + 999U) / 1000U);
+    return decision;
+  }
+  if (onlyC) {
+    state_ = State::HoldingC;
+    holdStartedMs_ = nowMs;
+    decision.showCountdown = true;
+    decision.secondsRemaining = 3;
+  }
+  return decision;
 }
 
 }  // namespace openjornada

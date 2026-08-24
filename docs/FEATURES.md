@@ -18,9 +18,16 @@ laboral, la trazabilidad y el aislamiento de datos entre empresas.
 | Aplicación          | SPA responsive e instalable como PWA, con manifiesto dinámico por empresa, iconos estándar y adaptativos generados automáticamente desde el logotipo corporativo, accesos rápidos y shell estático disponible sin conexión. Durante una jornada activa o pausada, un widget flotante persistente muestra el tiempo efectivo y permite pausar, reanudar o finalizar desde cualquier sección. Su asa permite recolocarlo temporalmente dentro del viewport mediante puntero o teclado. En navegadores de escritorio compatibles se puede trasladar mediante Document Picture-in-Picture a una ventana del sistema siempre visible. La preferencia local, activada inicialmente, permite abrirlo dentro del mismo clic de inicio de jornada; requiere contexto seguro. Las API autenticadas y los datos laborales no se almacenan en la caché PWA. |
 
 El portal de aprovisionamiento del terminal M5Stack permanece activo hasta
-guardar una configuración válida. La pantalla entra en reposo tras diez
-minutos sin pulsaciones, pero el punto de acceso sigue disponible; A, B o C la
-despiertan y reinician el plazo.
+guardar una configuración válida o cancelar manteniendo C tres segundos; al
+cancelar reinicia con la configuración anterior. La pantalla entra en reposo
+tras diez minutos sin pulsaciones, pero el punto de acceso sigue disponible;
+A, B o C la despiertan y reinician el plazo.
+
+El gesto A+B mantenido cinco segundos abre ese portal desde cualquier estado
+del terminal, también durante los reintentos de conexión. La cuenta atrás se
+cancela al soltar, no genera acciones de jornada y conserva credenciales,
+caché y cola local. El borrado completo sigue requiriendo el gesto físico
+separado A+B+C del arranque y su confirmación con C.
 
 Durante el funcionamiento normal, diez minutos sin botones ni lecturas RFID
 apagan únicamente la pantalla. Wi-Fi, RFID, sincronización y cola local siguen

@@ -47,18 +47,28 @@ ConfigStore configStore;
 CacheStore cacheStore;
 ScreenRenderer renderer;
 DisplayPowerPolicy displayPower{0};
+RuntimeProvisioningGesture runtimeProvisioningGesture;
 std::unique_ptr<Esp32ApiClient> apiClient;
 std::unique_ptr<NetworkWorker> networkWorker;
 std::unique_ptr<AppController> app;
 std::optional<DeviceConfig> deviceConfig;
 bool terminalBlocked = false;
 bool soundEnabled = true;
+size_t pendingCountForRecovery = OutboxCodec::kCapacity;
+uint8_t lastRecoveryCountdown = UINT8_MAX;
+struct BlockedScreenState {
+  std::string title;
+  std::string detail;
+  bool error = true;
+};
+std::optional<BlockedScreenState> blockedScreen;
 std::array<bool, 3> acceleratedHoldSent{};
 std::string appliedTimezone;
 std::atomic<bool> ntpSynchronizedThisBoot{false};
 std::atomic<std::time_t> lastNtpSyncEpoch{0};
 
 enum class BootChoice { Normal, Provisioning, FactoryReset };
+enum class ProvisioningOutcome { Saved, Cancelled, Failed };
 
 void drawBootScreen() {
   auto& display = M5.Display;
@@ -168,7 +178,7 @@ bool performFactoryReset(ConfigStore& configStore, CacheStore& cacheStore) {
 }
 
 bool prepareTlsClock(const DeviceConfig& candidate, std::string& displayError,
-                     const std::function<void()>& service) {
+                     const std::function<bool()>& service) {
   if (candidate.baseUrl.rfind("https://", 0) != 0 ||
       std::time(nullptr) >= kEarliestTrustedTime) {
     return true;
@@ -177,7 +187,10 @@ bool prepareTlsClock(const DeviceConfig& candidate, std::string& displayError,
   const uint32_t startedMs = millis();
   while (std::time(nullptr) < kEarliestTrustedTime &&
          millis() - startedMs < 10000U) {
-    service();
+    if (!service()) {
+      displayError = "Configuración cancelada.";
+      return false;
+    }
     delay(25);
   }
   if (std::time(nullptr) >= kEarliestTrustedTime) return true;
@@ -194,9 +207,19 @@ void showFactoryResetResult(bool success) {
       !success);
 }
 
-bool runProvisioning(ConfigStore& store, BuildProfile profile,
-                     const std::optional<DeviceConfig>& active,
-                     size_t pendingCount) {
+void drawRecoveryCountdown(uint8_t secondsRemaining) {
+  if (lastRecoveryCountdown == secondsRemaining) return;
+  lastRecoveryCountdown = secondsRemaining;
+  char detail[96]{};
+  snprintf(detail, sizeof(detail),
+           "Mantén A+B. Configuración Wi-Fi en %u s.",
+           static_cast<unsigned>(secondsRemaining));
+  drawProvisioningStatus("Recuperar conexión", detail, false);
+}
+
+ProvisioningOutcome runProvisioning(
+    ConfigStore& store, BuildProfile profile,
+    const std::optional<DeviceConfig>& active, size_t pendingCount) {
   ProvisioningPortal portal(store, profile, active, pendingCount);
   Esp32ApiClient provisioningClient(profile);
   NetworkWorker provisioningWorker(provisioningClient);
@@ -204,7 +227,7 @@ bool runProvisioning(ConfigStore& store, BuildProfile profile,
   uint32_t nextJobId = 1;
   const auto result = portal.run(
       [&](const DeviceConfig& candidate, std::string& displayError,
-          const std::function<void()>& service) {
+          const std::function<bool()>& service) {
         if (!prepareTlsClock(candidate, displayError, service)) return false;
         if (!workerReady) {
           displayError = "No se pudo iniciar la comprobación del servidor.";
@@ -227,7 +250,10 @@ bool runProvisioning(ConfigStore& store, BuildProfile profile,
 
         NetworkResult networkResult;
         while (!provisioningWorker.poll(networkResult)) {
-          service();
+          if (!service()) {
+            displayError = "Configuración cancelada.";
+            return false;
+          }
           delay(5);
         }
         if (networkResult.id != expectedJobId ||
@@ -248,7 +274,9 @@ bool runProvisioning(ConfigStore& store, BuildProfile profile,
                       static_cast<unsigned long>(response.cacheRevision));
         return true;
       });
-  return result.saved;
+  if (result.saved) return ProvisioningOutcome::Saved;
+  if (result.cancelled) return ProvisioningOutcome::Cancelled;
+  return ProvisioningOutcome::Failed;
 }
 
 std::string makeRebootId() {
@@ -329,10 +357,53 @@ void applyDisplayPowerEvent(DisplayPowerEvent event, bool invalidateRenderer) {
   }
 }
 
-void enterBlockedState() {
+void enterBlockedState(std::string title, std::string detail, bool error) {
+  blockedScreen = {std::move(title), std::move(detail), error};
+  drawProvisioningStatus(blockedScreen->title, blockedScreen->detail,
+                         blockedScreen->error);
   displayPower.reset(millis());
   acceleratedHoldSent.fill(false);
   terminalBlocked = true;
+}
+
+size_t currentPendingCountForRecovery() {
+  size_t pendingCount = pendingCountForRecovery;
+  size_t storedPendingCount = 0;
+  if (outbox.pendingCount(storedPendingCount) == OutboxError::None) {
+    pendingCount = storedPendingCount;
+  }
+  return pendingCount;
+}
+
+[[noreturn]] void enterRuntimeProvisioning() {
+  const size_t pendingCount = currentPendingCountForRecovery();
+  drawProvisioningStatus(
+      "Configurar nueva Wi-Fi",
+      "Preparando el portal. No se borrarán fichajes ni credenciales...",
+      false);
+
+  // Stop all API activity before the portal takes ownership of Wi-Fi. The
+  // outbox and the active configuration remain stored and untouched.
+  app.reset();
+  networkWorker.reset();
+  apiClient.reset();
+
+  const ProvisioningOutcome outcome =
+      runProvisioning(configStore, currentBuildProfile(), deviceConfig,
+                      pendingCount);
+  const char* resultTitle =
+      outcome == ProvisioningOutcome::Saved
+          ? "Configuración guardada"
+          : outcome == ProvisioningOutcome::Cancelled
+                ? "Configuración cancelada"
+                : "No se pudo configurar";
+  drawProvisioningStatus(
+      resultTitle,
+      "Reiniciando el terminal con la configuración disponible...",
+      outcome == ProvisioningOutcome::Failed);
+  delay(800);
+  ESP.restart();
+  while (true) delay(1000);
 }
 
 void emitFeedback() {
@@ -363,6 +434,7 @@ void setup() {
   OutboxReadiness outboxReadiness = assessOutboxReadiness(
       storageMounted, beginResult, pendingResult, pendingCount);
   pendingCount = outboxReadiness.pendingForSafety;
+  pendingCountForRecovery = pendingCount;
 
   const BootChoice choice = detectBootChoice(pendingCount);
   if (choice == BootChoice::FactoryReset) {
@@ -371,7 +443,9 @@ void setup() {
     showFactoryResetResult(reset);
     delay(1200);
     if (reset) ESP.restart();
-    enterBlockedState();
+    enterBlockedState(
+        "No se pudo borrar",
+        "Los datos no se borraron por completo. Reinicia y repite.", true);
     return;
   }
 
@@ -386,43 +460,53 @@ void setup() {
     outboxReadiness = assessOutboxReadiness(
         storageMounted, beginResult, pendingResult, pendingCount);
     pendingCount = outboxReadiness.pendingForSafety;
+    pendingCountForRecovery = pendingCount;
   }
 
   if (choice == BootChoice::Provisioning || !deviceConfig.has_value()) {
     if (!storageMounted && !deviceConfig.has_value()) {
-      drawProvisioningStatus(
+      enterBlockedState(
           "Inicialización necesaria",
           "No se borró ningún dato. Reinicia, mantén A+B+C 10 s, suelta "
           "todos y después mantén SOLO C 5 s.",
           true);
-      enterBlockedState();
       return;
     }
-    if (runProvisioning(configStore, profile, deviceConfig, pendingCount)) {
+    const ProvisioningOutcome outcome =
+        runProvisioning(configStore, profile, deviceConfig, pendingCount);
+    if (outcome == ProvisioningOutcome::Saved) {
+      delay(800);
+      ESP.restart();
+    }
+    if (outcome == ProvisioningOutcome::Cancelled) {
+      drawProvisioningStatus(
+          "Configuración cancelada",
+          "Reiniciando con la configuración guardada...", false);
       delay(800);
       ESP.restart();
     }
     if (!deviceConfig.has_value()) {
-      enterBlockedState();
+      enterBlockedState(
+          "Configuración necesaria",
+          "Mantén A+B durante 5 s para volver a abrir el portal Wi-Fi.",
+          false);
       return;
     }
   }
 
   if (!outboxReadiness.operational) {
-    drawProvisioningStatus(
+    enterBlockedState(
         "Cola local no disponible",
         "No se aceptarán fichajes. Usa el reinicio de fábrica o revisa la "
         "memoria antes de continuar.",
         true);
-    enterBlockedState();
     return;
   }
   if (!rfidReady) {
-    drawProvisioningStatus("RFID2 no detectado",
-                           "Comprueba el cable Grove A y reinicia el terminal.",
-                           true);
+    enterBlockedState("RFID2 no detectado",
+                      "Comprueba el cable Grove A y reinicia el terminal.",
+                      true);
     hardware.toneError();
-    enterBlockedState();
     return;
   }
 
@@ -451,11 +535,10 @@ void setup() {
   apiClient = std::make_unique<Esp32ApiClient>(profile);
   networkWorker = std::make_unique<NetworkWorker>(*apiClient);
   if (!networkWorker->begin()) {
-    drawProvisioningStatus(
+    enterBlockedState(
         "Red no disponible",
         "No se pudo iniciar el proceso de conexión. Reinicia el terminal.",
         true);
-    enterBlockedState();
     return;
   }
   AppControllerConfig appConfig;
@@ -480,26 +563,6 @@ void setup() {
 
 void loop() {
   constexpr std::array<Button, 3> kButtons{Button::A, Button::B, Button::C};
-  if (terminalBlocked || app == nullptr) {
-    hardware.update();
-    std::array<bool, 3> pressed{};
-    std::array<bool, 3> down{};
-    for (size_t index = 0; index < kButtons.size(); ++index) {
-      pressed[index] = hardware.pressed(kButtons[index]);
-      down[index] = hardware.down(kButtons[index]);
-    }
-    const auto uid = hardware.pollUid();
-    const DisplayPowerDecision decision = displayPower.update(
-        millis(), DisplayActivity{
-                      std::any_of(pressed.begin(), pressed.end(),
-                                  [](bool value) { return value; }),
-                      std::any_of(down.begin(), down.end(),
-                                  [](bool value) { return value; }),
-                      uid.has_value()});
-    applyDisplayPowerEvent(decision.power, false);
-    delay(20);
-    return;
-  }
   hardware.update();
   std::array<bool, 3> pressed{};
   std::array<bool, 3> down{};
@@ -508,10 +571,6 @@ void loop() {
     down[index] = hardware.down(kButtons[index]);
   }
   const auto uid = hardware.pollUid();
-  const bool present = hardware.tagPresent();
-  const bool acceptedUid =
-      uid.has_value() && uidGate.accept(*uid, present, millis());
-  if (!uid.has_value()) uidGate.accept("", present, millis());
 
   const DisplayPowerDecision displayDecision = displayPower.update(
       millis(), DisplayActivity{
@@ -520,7 +579,41 @@ void loop() {
                     std::any_of(down.begin(), down.end(),
                                 [](bool value) { return value; }),
                     uid.has_value()});
-  applyDisplayPowerEvent(displayDecision.power, true);
+  const bool applicationAvailable = !terminalBlocked && app != nullptr;
+  applyDisplayPowerEvent(displayDecision.power, applicationAvailable);
+
+  const RuntimeProvisioningDecision recovery =
+      runtimeProvisioningGesture.update(
+          {down[0], down[1], down[2]},
+          {pressed[0], pressed[1], pressed[2]},
+          displayDecision.dispatchButtons && applicationAvailable, millis());
+  if (recovery.provisioningRequested) enterRuntimeProvisioning();
+  if (recovery.showCountdown) {
+    drawRecoveryCountdown(recovery.secondsRemaining);
+  }
+  if (recovery.restoreScreen) {
+    lastRecoveryCountdown = UINT8_MAX;
+    if (applicationAvailable) {
+      renderer.invalidate();
+    } else if (blockedScreen.has_value()) {
+      drawProvisioningStatus(blockedScreen->title, blockedScreen->detail,
+                             blockedScreen->error);
+    }
+  }
+  if (recovery.suppressButtons) {
+    acceleratedHoldSent.fill(false);
+    delay(20);
+    return;
+  }
+  if (!applicationAvailable) {
+    delay(20);
+    return;
+  }
+
+  const bool present = hardware.tagPresent();
+  const bool acceptedUid =
+      uid.has_value() && uidGate.accept(*uid, present, millis());
+  if (!uid.has_value()) uidGate.accept("", present, millis());
 
   // A button used to wake the screen must not leak into the timer event: the
   // controller also observes held buttons there for the A+C admin gesture.
@@ -529,9 +622,9 @@ void loop() {
   applyServerTimezone(app->timezone());
 
   if (displayDecision.dispatchButtons) {
-    for (size_t index = 0; index < kButtons.size(); ++index) {
-      dispatchButton(kButtons[index], pressed[index]);
-    }
+    dispatchButton(Button::A, recovery.dispatchA);
+    dispatchButton(Button::B, recovery.dispatchB);
+    dispatchButton(Button::C, pressed[2]);
   } else {
     acceleratedHoldSent.fill(false);
   }

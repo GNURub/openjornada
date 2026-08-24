@@ -45,7 +45,7 @@ void drawProvisioningAccess(const std::string& ssid,
   display.drawString("3. Abre http://192.168.4.1", 10, 146);
   display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   display.drawString("Pantalla: reposo tras 10 min", 10, 174);
-  display.drawString("Pulsa A, B o C para reactivarla", 10, 198);
+  display.drawString("Mantén C 3 s para cancelar", 10, 198);
 
   const std::string qr = "WIFI:T:WPA;S:" + wifiQrEscape(ssid) +
                          ";P:" + wifiQrEscape(password) + ";H:false;;";
