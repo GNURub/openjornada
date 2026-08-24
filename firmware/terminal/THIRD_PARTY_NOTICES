@@ -1,0 +1,49 @@
+OpenJornada M5Stack firmware third-party notices
+
+Scope
+-----
+
+This inventory applies to `.pio/build/m5stack_release/firmware.bin`. It does
+not apply to the OpenJornada container image. Distribute this file and the
+complete `LICENSES/` directory with every firmware binary.
+
+The pre-existing `LICENSES/DejaVu-Fonts.txt` applies only to the bitmap subset
+generated from DejaVu Sans and embedded in
+`include/openjornada/assets/spanish_font.hpp`; it is not a license for the
+firmware or for the libraries below.
+
+Linked components
+-----------------
+
+- Arduino-ESP32 2.0.16, packaged by PlatformIO as
+  `framework-arduinoespressif32` 3.20016.0: LGPL-2.1-or-later, with individual
+  framework files also carrying their own Apache-2.0 or MIT notices. Its
+  precompiled SDK is based on ESP-IDF 4.4.7, whose project license is
+  Apache-2.0 and whose bundled components retain file-level notices. See
+  `LICENSES/Arduino-ESP32-LGPL-2.1.md` and `LICENSES/Apache-2.0.txt`.
+- ArduinoJson 7.4.2: MIT. See `LICENSES/ArduinoJson-MIT.txt`.
+- M5GFX 0.2.11 and M5Unified 0.2.8: MIT. See
+  `LICENSES/M5Stack-MIT.txt`.
+- MFRC522_I2C commit `8152dddc93cf743397ac225e34bf268698326664`:
+  the pinned source contains a public-domain declaration and author history but
+  no separate license file. The exact declaration is preserved in
+  `LICENSES/MFRC522-I2C-PUBLIC-DOMAIN.txt`; no different license is inferred.
+- GCC runtime and Newlib material linked by the PlatformIO Xtensa toolchain:
+  see `LICENSES/GCC-GPL-3.0.txt`,
+  `LICENSES/GCC-RUNTIME-LIBRARY-EXCEPTION-3.1.txt` and
+  `LICENSES/Newlib-NOTICES.txt`.
+- The TLS certificate bundle embedded by Arduino-ESP32 is described upstream
+  as root certificates obtained from Mozilla. Certificates and third-party
+  data retain the rights and notices of their issuers; this inventory does not
+  infer a software license for that data.
+
+PlatformIO itself, esptool and filesystem-image utilities are build tools and
+are not part of `firmware.bin`.
+
+Source and relinking obligations
+--------------------------------
+
+License notices alone do not satisfy source-code, object-file, relinking or
+written-offer obligations that may apply when distributing a statically linked
+firmware binary. A distributor must review and provide the corresponding
+materials required by the component licenses for the exact firmware build.

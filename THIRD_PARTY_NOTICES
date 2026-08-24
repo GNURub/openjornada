@@ -1,0 +1,37 @@
+OpenJornada third-party notices
+
+This file is the distribution index for third-party material used by
+OpenJornada. It does not replace or alter any third-party license.
+
+Container image
+---------------
+
+The final image stores the project LICENSE and NOTICE at /app and the following
+machine-generated, version-specific license bundles under /app/licenses:
+
+- FRONTEND_THIRD_PARTY_LICENSES.txt is produced by the Angular production build
+  from the packages actually included in the browser bundle.
+- GO_THIRD_PARTY_LICENSES.txt is produced by
+  scripts/generate-go-third-party-notices.go from every external module linked
+  into the OpenJornada/PocketBase executable, plus the Go standard library.
+
+The Alpine base image and packages retain their own package metadata and remain
+subject to their respective upstream licenses. They are not relicensed by
+OpenJornada.
+
+Firmware
+--------
+
+The M5Stack firmware is a separate artifact and is not included in the
+container image. Its dependency inventory and license texts are in
+firmware/terminal/THIRD_PARTY_NOTICES and firmware/terminal/LICENSES/. The
+existing DejaVu font notice applies only to the bitmap font subset embedded in
+the firmware.
+
+Build tools
+-----------
+
+Node.js, pnpm, the Angular build toolchain, Go compilers, PlatformIO, esptool
+and other build-only tools are not shipped as part of the OpenJornada
+application artifacts unless a distributor includes them separately. Their
+licenses still apply to any separately distributed copies.

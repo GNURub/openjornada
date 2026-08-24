@@ -19,12 +19,26 @@ cambios de horario de verano; no debe eliminarse al endurecer la imagen.
 
 Antes de publicar cada versión:
 
-1. fija en `LICENSE` una `Change Date` que no supere cuatro años desde la fecha
-   de publicación de esa versión;
+1. fija en `LICENSE` una `Change Date` que no supere cuatro años desde la
+   primera distribución pública bajo BSL de esa versión;
 2. conserva `AGPL-3.0-or-later` como `Change License`, salvo una decisión legal
    documentada compatible con las condiciones de BSL 1.1;
-3. verifica que la etiqueta publicada contiene `LICENSE`, `NOTICE` y los avisos
-   de terceros.
+3. verifica que la etiqueta publicada contiene `LICENSE`, `NOTICE`,
+   `THIRD_PARTY_NOTICES` y los avisos de terceros;
+4. construye la imagen y comprueba documentalmente el artefacto final:
+
+   ```bash
+   docker build -t openjornada:license-audit .
+   docker run --rm --entrypoint sh openjornada:license-audit -c \
+     'test -s /app/LICENSE && test -s /app/NOTICE && \
+      test -s /app/THIRD_PARTY_NOTICES && \
+      test -s /app/licenses/FRONTEND_THIRD_PARTY_LICENSES.txt && \
+      test -s /app/licenses/GO_THIRD_PARTY_LICENSES.txt'
+   ```
+
+El informe del frontend procede del bundle de producción real de Angular. El
+informe Go se genera desde los módulos que `go list -deps` confirma enlazados en
+el binario, no desde todas las entradas posibles de `go.mod`.
 
 ## Imágenes publicadas en GitHub
 
@@ -101,6 +115,11 @@ La release sólo admite HTTPS y usa el bundle de CA del firmware. No existe OTA:
 las actualizaciones v1 se hacen por USB. Consulta el procedimiento operativo,
 el cableado Grove A y los gestos de recuperación en
 [`firmware/terminal/README.md`](../firmware/terminal/README.md).
+Si distribuyes `firmware.bin`, acompáñalo con
+[`firmware/terminal/THIRD_PARTY_NOTICES`](../firmware/terminal/THIRD_PARTY_NOTICES)
+y el directorio completo [`firmware/terminal/LICENSES/`](../firmware/terminal/LICENSES/).
+Los avisos no sustituyen las obligaciones de código fuente u objetos
+relocalizables que puedan exigir las licencias del build exacto.
 
 ## Despliegue en proveedores gestionados
 

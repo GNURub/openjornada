@@ -15,6 +15,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY scripts/generate-go-third-party-notices.go ./scripts/generate-go-third-party-notices.go
+RUN go run ./scripts/generate-go-third-party-notices.go \
+    -target ./cmd/openjornada \
+    -output /out/GO_THIRD_PARTY_LICENSES.txt
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pocketbase ./cmd/openjornada
 
 FROM alpine:3.23
@@ -24,6 +28,9 @@ COPY --from=backend-builder /out/pocketbase ./pocketbase
 COPY backend/pb_migrations ./pb_migrations
 COPY backend/pb_hooks ./pb_hooks
 COPY --from=web-builder /app/web/dist/web/browser ./pb_public
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES ./
+COPY --from=backend-builder /out/GO_THIRD_PARTY_LICENSES.txt ./licenses/GO_THIRD_PARTY_LICENSES.txt
+COPY --from=web-builder /app/web/dist/web/3rdpartylicenses.txt ./licenses/FRONTEND_THIRD_PARTY_LICENSES.txt
 EXPOSE 8090
 VOLUME ["/app/pb_data"]
 CMD ["sh", "-c", "/app/pocketbase migrate up --dir=/app/pb_data --migrationsDir=/app/pb_migrations --hooksDir=/app/pb_hooks --encryptionEnv=PB_ENCRYPTION_KEY && exec /app/pocketbase serve --http=0.0.0.0:8090 --dir=/app/pb_data --migrationsDir=/app/pb_migrations --hooksDir=/app/pb_hooks --encryptionEnv=PB_ENCRYPTION_KEY"]
