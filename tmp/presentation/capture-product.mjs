@@ -17,7 +17,7 @@ async function waitForApp() {
   await page.waitForTimeout(800);
 }
 
-async function capture(pathname, heading, filename) {
+async function capture(pathname, heading, filename, prepare) {
   await page.goto(`${baseURL}${pathname}`);
   await waitForApp();
   await page.addStyleTag({
@@ -33,6 +33,10 @@ async function capture(pathname, heading, filename) {
   if (heading) {
     await page.getByRole('heading', { name: heading, exact: false }).first().waitFor();
   }
+  if (prepare) {
+    await prepare(page);
+    await page.waitForTimeout(500);
+  }
   await page.screenshot({ path: `${outputDir}/${filename}`, fullPage: false });
 }
 
@@ -47,5 +51,14 @@ await capture('/registros', 'Mi control horario', '02-control-horario.png');
 await capture('/ausencias', 'Ausencias', '03-ausencias.png');
 await capture('/informes', 'Informe mensual', '04-informes.png');
 await capture('/equipo', 'Tu equipo', '05-equipo.png');
+await capture('/tareas', 'Tareas del equipo', '06-tareas.png', async (currentPage) => {
+  await currentPage.getByRole('button', { name: 'Asignar tarea' }).click();
+  await currentPage.getByRole('heading', { name: 'Nueva tarea' }).waitFor();
+});
+await capture('/documentos', 'Documentos', '07-documentos.png', async (currentPage) => {
+  await currentPage.getByRole('button', { name: 'Subir documento' }).click();
+  await currentPage.getByRole('heading', { name: 'Nuevo documento' }).waitFor();
+});
+await capture('/gastos', 'Gastos del equipo', '08-gastos.png');
 
 await browser.close();

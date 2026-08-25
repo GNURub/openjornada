@@ -47,7 +47,7 @@ const diagnostics = await page.evaluate(() => {
   return { slideCount: slides.length, missingImages, outside };
 });
 
-if (diagnostics.slideCount !== 12) errors.push(`slideCount: ${diagnostics.slideCount}`);
+if (diagnostics.slideCount !== 16) errors.push(`slideCount: ${diagnostics.slideCount}`);
 if (diagnostics.missingImages.length) errors.push(`missingImages: ${diagnostics.missingImages.join(', ')}`);
 if (diagnostics.outside.length) errors.push(`outside: ${JSON.stringify(diagnostics.outside)}`);
 
@@ -57,4 +57,4 @@ if (errors.length) {
   throw new Error(errors.join('\n'));
 }
 
-console.log('Layout validado: 12 diapositivas, recursos cargados y texto dentro del lienzo.');
+console.log('Layout validado: 16 diapositivas, recursos cargados y texto dentro del lienzo.');

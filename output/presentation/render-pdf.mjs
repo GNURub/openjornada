@@ -40,7 +40,7 @@ await page.evaluate(async () => {
 
 const slides = page.locator('.slide');
 const slideCount = await slides.count();
-if (slideCount !== 12) throw new Error(`Se esperaban 12 diapositivas y se encontraron ${slideCount}.`);
+if (slideCount !== 16) throw new Error(`Se esperaban 16 diapositivas y se encontraron ${slideCount}.`);
 
 for (let index = 0; index < slideCount; index += 1) {
   await slides.nth(index).screenshot({

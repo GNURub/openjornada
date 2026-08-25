@@ -447,5 +447,6 @@ La versión incluida en esta revisión cambia a AGPL-3.0-or-later el 2030-08-24,
 o antes si así lo exige BSL 1.1. Estos términos se aplican a las revisiones y
 versiones que incluyen el archivo `LICENSE`; no reescriben etiquetas históricas.
 Consulta las [condiciones completas](LICENSE), la
-[explicación de uso comercial](COMMERCIAL-LICENSE.md) o escribe a
-[rubencidlara@gmail.com](mailto:rubencidlara@gmail.com?subject=Licencia%20comercial%20de%20OpenJornada).
+[explicación de uso comercial](COMMERCIAL-LICENSE.md), la
+[política inicial de precios](docs/PRICING.md) o escribe a
+[hello@di-seo.com](mailto:hello@di-seo.com?subject=OpenJornada%20-%20consulta%20comercial).

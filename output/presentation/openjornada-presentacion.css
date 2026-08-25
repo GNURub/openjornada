@@ -493,7 +493,7 @@ h3,
 .solution::after {
   content: "";
   position: absolute;
-  inset: 0 44% 0 0;
+  inset: 0 48% 0 0;
   background: linear-gradient(90deg, transparent 70%, var(--white));
 }
 
@@ -711,7 +711,275 @@ h3,
   font-weight: 800;
 }
 
-/* 10 — Management outcome */
+/* 10 — HR capabilities */
+.capabilities {
+  background:
+    linear-gradient(135deg, rgba(239, 77, 50, 0.07), transparent 42%),
+    var(--white);
+}
+
+.capabilities .lead {
+  max-width: 9.7in;
+  margin-bottom: 0;
+}
+
+.capabilities-list {
+  display: grid;
+  margin-top: 0.38in;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 0.72in;
+}
+
+.capabilities-list article {
+  display: grid;
+  grid-template-columns: 0.42in 1fr;
+  gap: 0.14in;
+  border-top: 1px solid var(--stone-300);
+  padding: 0.15in 0 0.16in;
+}
+
+.capabilities-list article > span {
+  color: var(--coral);
+  font-family: var(--display);
+  font-size: 13pt;
+  font-weight: 900;
+}
+
+.capabilities-list h3 {
+  margin: 0;
+  font-size: 18pt;
+  line-height: 1.15;
+}
+
+.capabilities-list p {
+  margin: 0.04in 0 0;
+  color: var(--stone-500);
+  font-size: 12.5pt;
+  line-height: 1.35;
+}
+
+/* 11 — Leave and vacations */
+.leave-focus {
+  background: var(--cream);
+}
+
+.leave-focus-layout {
+  display: grid;
+  height: 100%;
+  grid-template-columns: 41% 59%;
+}
+
+.leave-focus-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.62in 0.45in 0.62in 0.72in;
+}
+
+.leave-focus-copy h2 {
+  margin-bottom: 0.35in;
+  font-size: 37pt;
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+
+.leave-points > div {
+  border-top: 1px solid var(--stone-300);
+  padding: 0.16in 0;
+}
+
+.leave-points strong {
+  display: block;
+  margin-bottom: 0.05in;
+  font-size: 16pt;
+}
+
+.leave-points span {
+  color: var(--stone-500);
+  font-size: 13.5pt;
+  line-height: 1.4;
+}
+
+.leave-focus-visual {
+  position: relative;
+  overflow: hidden;
+  background: var(--coral-soft);
+}
+
+.leave-focus-visual .screen-frame {
+  position: absolute;
+  top: 0.78in;
+  left: 0.28in;
+  width: 7.25in;
+  height: 5.75in;
+  border-color: rgba(239, 77, 50, 0.18);
+  box-shadow: 0 0.28in 0.65in rgba(88, 42, 30, 0.18);
+}
+
+.leave-focus-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+
+/* 12 — Tasks and documents */
+.work-docs {
+  background: var(--white);
+}
+
+.work-docs .slide-title {
+  max-width: 11.4in;
+  margin-bottom: 0.24in;
+}
+
+.work-docs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.34in;
+}
+
+.work-docs-grid .screen-frame {
+  height: 3.12in;
+  border-color: var(--stone-200);
+  box-shadow: 0 0.15in 0.34in rgba(28, 25, 23, 0.14);
+}
+
+.work-docs-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+
+.work-docs-grid h3 {
+  margin: 0.16in 0 0.05in;
+  font-size: 19pt;
+}
+
+.work-docs-grid p {
+  margin: 0;
+  color: var(--stone-500);
+  font-size: 13pt;
+  line-height: 1.35;
+}
+
+.signature-note {
+  margin: 0.2in 0 0;
+  border-left: 4px solid var(--coral);
+  padding-left: 0.17in;
+  color: var(--stone-700);
+  font-size: 11pt;
+  line-height: 1.35;
+}
+
+/* 13 — Pricing */
+.pricing {
+  background:
+    radial-gradient(circle at 88% 12%, rgba(239, 77, 50, 0.28), transparent 24%),
+    var(--ink);
+  color: var(--white);
+}
+
+.pricing .eyebrow {
+  color: #ff9e8a;
+}
+
+.pricing .slide-title {
+  margin-bottom: 0.12in;
+}
+
+.pricing-intro {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 17pt;
+}
+
+.pricing-grid {
+  display: grid;
+  margin-top: 0.34in;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.34in;
+}
+
+.pricing-grid article {
+  border-top: 2px solid rgba(255, 255, 255, 0.32);
+  padding: 0.2in 0.08in 0 0;
+}
+
+.pricing-grid article.featured-plan {
+  border-color: var(--coral);
+}
+
+.plan-name {
+  margin: 0;
+  color: #ff9e8a;
+  font-size: 11pt;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.plan-price {
+  display: flex;
+  min-height: 0.68in;
+  align-items: baseline;
+  gap: 0.09in;
+  margin: 0.12in 0 0;
+}
+
+.plan-price strong {
+  font-family: var(--display);
+  font-size: 34pt;
+  letter-spacing: -0.04em;
+}
+
+.plan-price span {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11pt;
+}
+
+.plan-scope {
+  margin: 0.08in 0 0.12in;
+  font-size: 15pt;
+  font-weight: 800;
+}
+
+.pricing-grid article > p:last-child {
+  max-width: 3.4in;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 12.5pt;
+  line-height: 1.4;
+}
+
+.founders-offer {
+  display: grid;
+  grid-template-columns: 3.4in 1fr;
+  gap: 0.28in;
+  align-items: center;
+  margin-top: 0.35in;
+  border-radius: 0.16in;
+  background: var(--coral);
+  padding: 0.18in 0.24in;
+}
+
+.founders-offer strong {
+  font-family: var(--display);
+  font-size: 15pt;
+}
+
+.founders-offer span {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11.5pt;
+  line-height: 1.4;
+}
+
+.pricing-note {
+  margin: 0.11in 0 0;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 8.5pt;
+}
+
+/* 14 — Management outcome */
 .management-layout {
   display: grid;
   height: 100%;
@@ -788,7 +1056,7 @@ h3,
   line-height: 1.35;
 }
 
-/* 11 — Trust */
+/* 15 — Trust */
 .trust {
   background:
     linear-gradient(135deg, rgba(239, 77, 50, 0.08), transparent 38%),
@@ -841,7 +1109,7 @@ h3,
   line-height: 1.4;
 }
 
-/* 12 — Close */
+/* 16 — Close */
 .closing {
   background:
     radial-gradient(circle at 78% 35%, rgba(239, 77, 50, 0.32), transparent 23%),

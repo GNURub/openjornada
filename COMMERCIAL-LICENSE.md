@@ -27,7 +27,8 @@ Ejemplos:
 
 ## Solicitar licencia o permiso
 
-Escribe a [rubencidlara@gmail.com](mailto:rubencidlara@gmail.com?subject=Licencia%20comercial%20de%20OpenJornada).
+Consulta la [política inicial de precios](docs/PRICING.md) y escribe a
+[hello@di-seo.com](mailto:hello@di-seo.com?subject=Licencia%20comercial%20de%20OpenJornada).
 Este documento explica el modelo, pero no es un contrato comercial ni sustituye
 las condiciones que se acuerden por escrito.
 
