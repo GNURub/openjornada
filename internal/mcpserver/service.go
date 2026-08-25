@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GNURub/openjornada/internal/saasaccess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -199,6 +200,10 @@ func (s *Service) authenticate(header string) (*principal, error) {
 		!actor.GetBool("active") ||
 		(actor.GetString("role") != "admin" && actor.GetString("role") != "manager") {
 		return nil, errors.New("invalid actor")
+	}
+	organization, err := s.app.FindRecordById("organizations", token.GetString("organization"))
+	if err != nil || !saasaccess.Operational(organization) {
+		return nil, errors.New("organization access disabled")
 	}
 	return &principal{token: token, actor: actor}, nil
 }

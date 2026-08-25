@@ -48,6 +48,18 @@ e2e/                recorridos Playwright
 La API se resuelve contra `127.0.0.1:8090` en desarrollo y contra el mismo origen
 que sirve la SPA en producción.
 
+## SaaS y facturación
+
+- `/registro` ofrece el alta pública cuando `PB_SELF_SIGNUP_ENABLED=true`; no
+  solicita tarjeta y la prueba empieza al aceptar la invitación.
+- `/proveedor/login` y `/proveedor` usan un cliente PocketBase y almacenamiento
+  propios. El acceso exige contraseña y OTP; soporte sólo lee y administración
+  puede aprovisionar y cambiar estados.
+- **Ajustes → Suscripción** consume los endpoints protegidos de estado,
+  Checkout y Customer Portal. Sigue disponible para `admin` en `read_only`,
+  aunque el servidor rechace el resto de escrituras.
+- El navegador nunca recibe claves de Stripe ni cuerpos de webhook.
+
 ## Integraciones MCP
 
 La ruta protegida `/integraciones` está disponible para `admin` y `manager`.

@@ -7,8 +7,31 @@ import {
   reportViewerGuard,
   teamManagerGuard,
 } from './core/auth.guard';
+import { platformAuthGuard, platformGuestGuard } from './core/platform-auth.guard';
 
 export const routes: Routes = [
+  {
+    path: 'proveedor/login',
+    canActivate: [platformGuestGuard],
+    loadComponent: () =>
+      import('./features/platform/platform-login.component').then(
+        (component) => component.PlatformLoginComponent,
+      ),
+  },
+  {
+    path: 'proveedor',
+    canActivate: [platformAuthGuard],
+    loadComponent: () =>
+      import('./features/platform/platform-dashboard.component').then(
+        (component) => component.PlatformDashboardComponent,
+      ),
+  },
+  {
+    path: 'registro',
+    canActivate: [guestGuard],
+    loadComponent: () =>
+      import('./features/signup/signup.component').then((component) => component.SignupComponent),
+  },
   ...(isDevMode()
     ? [
         {

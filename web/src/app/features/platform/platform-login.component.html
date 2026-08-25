@@ -1,0 +1,94 @@
+<main class="grid min-h-dvh place-items-center bg-stone-950 px-5 py-10 text-stone-100">
+  <section
+    class="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.06] p-7 shadow-2xl backdrop-blur sm:p-10"
+  >
+    <div class="mb-10 flex items-center gap-3">
+      <div
+        class="grid size-11 place-items-center rounded-2xl bg-coral-500 font-display text-lg font-black"
+      >
+        OJ
+      </div>
+      <div>
+        <p class="font-display text-lg font-bold">OpenJornada</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">
+          Área de proveedor
+        </p>
+      </div>
+    </div>
+
+    <p class="text-sm font-bold uppercase tracking-[0.2em] text-coral-400">
+      {{ auth.otpRequired() ? 'Segundo factor' : 'Acceso restringido' }}
+    </p>
+    <h1 class="mt-3 font-display text-4xl font-bold tracking-tight">
+      {{ auth.otpRequired() ? 'Revisa tu correo' : 'Gestiona el servicio' }}
+    </h1>
+    <p class="mt-4 leading-7 text-stone-400">
+      {{
+        auth.otpRequired()
+          ? 'Introduce el código temporal que acabamos de enviarte.'
+          : 'Este acceso está separado de las cuentas de empresa y exige verificación en dos pasos.'
+      }}
+    </p>
+
+    <form (ngSubmit)="submit()" class="mt-8 space-y-5">
+      @if (!auth.otpRequired()) {
+        <label class="block">
+          <span class="mb-2 block text-sm font-bold text-stone-300">Correo</span>
+          <input
+            [(ngModel)]="email"
+            name="email"
+            type="email"
+            autocomplete="username"
+            required
+            class="field-input border-white/15 bg-white/10 text-white placeholder:text-stone-600"
+          />
+        </label>
+        <label class="block">
+          <span class="mb-2 block text-sm font-bold text-stone-300">Contraseña</span>
+          <input
+            [(ngModel)]="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            minlength="12"
+            required
+            class="field-input border-white/15 bg-white/10 text-white placeholder:text-stone-600"
+          />
+        </label>
+      } @else {
+        <label class="block">
+          <span class="mb-2 block text-sm font-bold text-stone-300">Código de un solo uso</span>
+          <input
+            [(ngModel)]="otp"
+            name="otp"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            required
+            autofocus
+            class="field-input border-white/15 bg-white/10 text-center font-mono text-xl tracking-[0.35em] text-white"
+          />
+        </label>
+      }
+
+      @if (auth.error()) {
+        <p role="alert" class="rounded-xl bg-red-950/60 px-4 py-3 text-sm font-medium text-red-200">
+          {{ auth.error() }}
+        </p>
+      }
+      <button type="submit" [disabled]="auth.loading()" class="btn-primary w-full">
+        {{
+          auth.loading() ? 'Comprobando…' : auth.otpRequired() ? 'Verificar código' : 'Continuar'
+        }}
+      </button>
+    </form>
+    @if (auth.otpRequired()) {
+      <button
+        type="button"
+        (click)="auth.cancelOtp(); otp = ''"
+        class="mt-5 w-full text-sm font-semibold text-stone-400 hover:text-white"
+      >
+        Volver a introducir las credenciales
+      </button>
+    }
+  </section>
+</main>

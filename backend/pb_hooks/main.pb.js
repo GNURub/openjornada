@@ -13,6 +13,17 @@ onBootstrap((e) => {
   settings.logs.logAuthId = true;
   settings.logs.logIP = false;
   settings.rateLimits.enabled = true;
+  const signupRateLabel = "/api/openjornada/signup";
+  if (
+    !settings.rateLimits.rules.some((rule) => rule.label === signupRateLabel)
+  ) {
+    settings.rateLimits.rules.unshift({
+      label: signupRateLabel,
+      audience: "",
+      duration: 60,
+      maxRequests: 5,
+    });
+  }
 
   const smtpHost = $os.getenv("PB_SMTP_HOST");
   if (smtpHost) {
@@ -88,6 +99,7 @@ onBootstrap((e) => {
     );
     organization.set("manualTimeApprovalRequired", false);
     organization.set("timeCorrectionApprovalRequired", true);
+    organization.set("accessStatus", "active");
     e.app.save(organization);
   }
 
@@ -139,6 +151,32 @@ onBootstrap((e) => {
     admin.set("privacyNoticeAcknowledgedVersion", "");
     admin.set("privacyNoticeAcknowledgedAt", "");
     e.app.save(admin);
+  }
+
+  try {
+    e.app.findFirstRecordByFilter(
+      "organization_subscriptions",
+      "organization = {:organization}",
+      { organization: organization.id },
+    );
+  } catch (_) {
+    try {
+      const plan = e.app.findFirstRecordByData(
+        "saas_plans",
+        "code",
+        "managed-manual",
+      );
+      const subscription = new Record(
+        e.app.findCollectionByNameOrId("organization_subscriptions"),
+      );
+      subscription.set("organization", organization.id);
+      subscription.set("plan", plan.id);
+      subscription.set("billingStatus", "manual_active");
+      subscription.set("declaredHeadcount", 1);
+      e.app.save(subscription);
+    } catch (_) {
+      // Permite arrancar durante una migración inicial anterior al esquema SaaS.
+    }
   }
 
   if (($os.getenv("PB_DEMO_ENABLED") || "false") === "true") {
@@ -241,9 +279,14 @@ onRecordCreateRequest((e) => {
     .getString("adjustmentReason")
     .trim();
   e.record.set("employee", employeeId);
-  e.record.set("organization", e.auth.getString("organization"));
+  const organizationId = e.auth.getString("organization");
+  const organization = e.app.findRecordById("organizations", organizationId);
+  e.record.set("organization", organizationId);
   e.record.set("createdBy", e.auth.id);
-  e.record.set("timezone", $os.getenv("PB_TIMEZONE") || "Europe/Madrid");
+  e.record.set(
+    "timezone",
+    organization.getString("timezone") || "Europe/Madrid",
+  );
   e.record.set("recordedAt", recordedAt);
   e.record.set("adjustmentSeconds", 0);
   e.record.set("adjustmentReason", "");
@@ -297,9 +340,7 @@ onRecordCreateRequest((e) => {
       throw new BadRequestError("La hora final no puede estar en el futuro.");
     }
     if (latestByTime.length) {
-      const latestAt = new Date(
-        latestByTime[0].getString("occurredAt"),
-      );
+      const latestAt = new Date(latestByTime[0].getString("occurredAt"));
       if (reviewedEnd.getTime() < latestAt.getTime()) {
         if (latestAt.getTime() - reviewedEnd.getTime() < 1_000) {
           reviewedEnd = latestAt;
@@ -461,6 +502,21 @@ onRecordCreateRequest((e) => {
     "flexibleWeekdays",
     normalizedWeekdays.length ? normalizedWeekdays : [1, 2, 3, 4, 5],
   );
+  require(`${__hooks}/saas_plan_helpers.js`).ensureCapacity(
+    e.app,
+    e.auth.getString("organization"),
+    1,
+  );
+  e.next();
+}, "users");
+
+onRecordAfterCreateSuccess((e) => {
+  if (e.record.getBool("active")) {
+    require(`${__hooks}/saas_plan_helpers.js`).raiseDeclaredHeadcount(
+      e.app,
+      e.record.getString("organization"),
+    );
+  }
   e.next();
 }, "users");
 
@@ -560,5 +616,23 @@ onRecordUpdateRequest((e) => {
     Math.max(0, e.record.getFloat("contractedWeeklyMinutes") / 60),
   );
 
+  if (!original.getBool("active") && e.record.getBool("active")) {
+    require(`${__hooks}/saas_plan_helpers.js`).ensureCapacity(
+      e.app,
+      original.getString("organization"),
+      1,
+    );
+  }
+
+  e.next();
+}, "users");
+
+onRecordAfterUpdateSuccess((e) => {
+  if (e.record.getBool("active")) {
+    require(`${__hooks}/saas_plan_helpers.js`).raiseDeclaredHeadcount(
+      e.app,
+      e.record.getString("organization"),
+    );
+  }
   e.next();
 }, "users");

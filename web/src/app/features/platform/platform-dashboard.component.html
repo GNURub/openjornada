@@ -1,0 +1,261 @@
+<main class="min-h-dvh bg-stone-100 text-stone-900">
+  <header class="border-b border-stone-200 bg-stone-950 text-white">
+    <div class="mx-auto flex max-w-[1500px] items-center justify-between gap-5 px-5 py-5 sm:px-8">
+      <div class="flex items-center gap-3">
+        <div
+          class="grid size-10 place-items-center rounded-xl bg-coral-500 font-display font-black"
+        >
+          OJ
+        </div>
+        <div>
+          <p class="font-display text-lg font-bold">Área de proveedor</p>
+          <p class="text-xs text-stone-400">
+            {{ auth.operator()?.name }} ·
+            {{ auth.operator()?.role === 'admin' ? 'Administración' : 'Soporte en lectura' }}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        (click)="auth.logout()"
+        class="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold hover:bg-white/10"
+      >
+        Cerrar sesión
+      </button>
+    </div>
+  </header>
+
+  <div class="mx-auto max-w-[1500px] px-5 py-8 sm:px-8">
+    <div class="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+      <div>
+        <p class="text-sm font-bold uppercase tracking-[0.18em] text-coral-600">Control SaaS</p>
+        <h1 class="mt-2 font-display text-4xl font-bold tracking-tight">Empresas y acceso</h1>
+        <p class="mt-2 text-stone-500">Sólo se muestran metadatos operativos y cifras agregadas.</p>
+      </div>
+      @if (auth.canWrite()) {
+        <button type="button" (click)="formOpen.set(!formOpen())" class="btn-primary">
+          {{ formOpen() ? 'Cerrar alta' : 'Nueva empresa' }}
+        </button>
+      }
+    </div>
+
+    @if (error()) {
+      <p role="alert" class="mt-6 rounded-2xl bg-red-50 px-5 py-4 font-medium text-red-700">
+        {{ error() }}
+      </p>
+    }
+    @if (success()) {
+      <p
+        role="status"
+        class="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 font-medium text-emerald-700"
+      >
+        {{ success() }}
+      </p>
+    }
+
+    @if (summary(); as data) {
+      <section class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <article class="rounded-2xl border border-stone-200 bg-white p-5">
+          <p class="text-sm font-bold text-stone-500">Empresas</p>
+          <p class="mt-2 font-display text-4xl font-black">{{ data.organizations }}</p>
+        </article>
+        <article class="rounded-2xl border border-stone-200 bg-white p-5">
+          <p class="text-sm font-bold text-stone-500">Personas activas</p>
+          <p class="mt-2 font-display text-4xl font-black">{{ data.activeUsers }}</p>
+        </article>
+        <article class="rounded-2xl border border-stone-200 bg-white p-5">
+          <p class="text-sm font-bold text-stone-500">En cortesía / lectura</p>
+          <p class="mt-2 font-display text-4xl font-black">
+            {{ data.byStatus.grace + data.byStatus.read_only }}
+          </p>
+        </article>
+        <article class="rounded-2xl border border-stone-200 bg-white p-5">
+          <p class="text-sm font-bold text-stone-500">Suspendidas</p>
+          <p class="mt-2 font-display text-4xl font-black">{{ data.byStatus.suspended }}</p>
+        </article>
+      </section>
+    }
+
+    @if (formOpen() && auth.canWrite()) {
+      <section class="mt-8 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+        <h2 class="font-display text-2xl font-bold">Alta gestionada</h2>
+        <p class="mt-2 text-sm text-stone-500">
+          La empresa, su responsable y la suscripción manual se crean en una única transacción.
+        </p>
+        <form (ngSubmit)="create()" class="mt-7 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <label
+            ><span class="field-label">Empresa</span
+            ><input
+              [(ngModel)]="newOrganization.name"
+              name="name"
+              required
+              maxlength="160"
+              class="field-input"
+          /></label>
+          <label
+            ><span class="field-label">NIF/CIF</span
+            ><input
+              [(ngModel)]="newOrganization.taxId"
+              name="taxId"
+              required
+              maxlength="24"
+              class="field-input uppercase"
+          /></label>
+          <label
+            ><span class="field-label">Zona horaria IANA</span
+            ><input
+              [(ngModel)]="newOrganization.timezone"
+              name="timezone"
+              required
+              class="field-input"
+          /></label>
+          <label
+            ><span class="field-label">Responsable</span
+            ><input
+              [(ngModel)]="newOrganization.ownerName"
+              name="ownerName"
+              required
+              maxlength="160"
+              class="field-input"
+          /></label>
+          <label
+            ><span class="field-label">Correo responsable</span
+            ><input
+              [(ngModel)]="newOrganization.ownerEmail"
+              name="ownerEmail"
+              type="email"
+              required
+              class="field-input"
+          /></label>
+          <label
+            ><span class="field-label">Contacto de privacidad</span
+            ><input
+              [(ngModel)]="newOrganization.privacyContact"
+              name="privacyContact"
+              type="email"
+              required
+              class="field-input"
+          /></label>
+          <label
+            ><span class="field-label">Plantilla declarada</span
+            ><input
+              [(ngModel)]="newOrganization.declaredHeadcount"
+              name="declaredHeadcount"
+              type="number"
+              min="1"
+              required
+              class="field-input"
+          /></label>
+          <div class="flex items-end">
+            <button type="submit" [disabled]="saving()" class="btn-primary w-full">
+              {{ saving() ? 'Creando…' : 'Crear e invitar' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    }
+
+    <section class="mt-8 rounded-[2rem] border border-stone-200 bg-white p-5 shadow-sm sm:p-7">
+      <div class="flex flex-col gap-4 lg:flex-row">
+        <input
+          [(ngModel)]="search"
+          (keyup.enter)="load()"
+          aria-label="Buscar empresa"
+          placeholder="Buscar por empresa o NIF/CIF"
+          class="field-input lg:max-w-md"
+        />
+        <select
+          [(ngModel)]="status"
+          (change)="load()"
+          aria-label="Filtrar por estado"
+          class="field-input lg:max-w-56"
+        >
+          <option value="">Todos los estados</option>
+          <option value="trialing">Prueba</option>
+          <option value="active">Activo</option>
+          <option value="grace">Cortesía</option>
+          <option value="read_only">Sólo lectura</option>
+          <option value="suspended">Suspendido</option>
+        </select>
+        <button type="button" (click)="load()" class="btn-secondary">Buscar</button>
+      </div>
+
+      <div class="mt-6 overflow-x-auto">
+        <table class="w-full min-w-[980px] text-left text-sm">
+          <thead class="border-b border-stone-200 text-xs uppercase tracking-wide text-stone-500">
+            <tr>
+              <th class="px-3 py-3">Empresa</th>
+              <th class="px-3 py-3">Acceso</th>
+              <th class="px-3 py-3">Facturación</th>
+              <th class="px-3 py-3">Personas</th>
+              <th class="px-3 py-3">Plan</th>
+              <th class="px-3 py-3 text-right">Acciones</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-stone-100">
+            @for (organization of organizations(); track organization.id) {
+              <tr>
+                <td class="px-3 py-4">
+                  <p class="font-bold">{{ organization.name }}</p>
+                  <p class="mt-1 text-xs text-stone-500">
+                    {{ organization.taxId }} · {{ organization.timezone }}
+                  </p>
+                </td>
+                <td class="px-3 py-4">
+                  <span class="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold">{{
+                    statusLabel(organization.accessStatus)
+                  }}</span>
+                </td>
+                <td class="px-3 py-4">{{ organization.billingStatus || 'Sin ficha' }}</td>
+                <td class="px-3 py-4">
+                  {{ organization.activeUsers }} activas / {{ organization.totalUsers }} total
+                </td>
+                <td class="px-3 py-4">
+                  {{ organization.planName || '—' }}
+                  <p class="text-xs text-stone-500">
+                    Declarada: {{ organization.declaredHeadcount }}
+                  </p>
+                </td>
+                <td class="px-3 py-4 text-right">
+                  @if (auth.canWrite()) {
+                    <div class="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        (click)="resendInvitation(organization)"
+                        [disabled]="saving()"
+                        class="rounded-lg border border-stone-200 px-3 py-2 text-xs font-bold hover:bg-stone-50"
+                      >
+                        Reenviar invitación
+                      </button>
+                      <select
+                        [ngModel]="organization.accessStatus"
+                        (ngModelChange)="changeAccess(organization, $event)"
+                        [disabled]="saving()"
+                        aria-label="Cambiar estado de acceso"
+                        class="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold"
+                      >
+                        <option value="trialing">Prueba</option>
+                        <option value="active">Activo</option>
+                        <option value="grace">Cortesía</option>
+                        <option value="read_only">Sólo lectura</option>
+                        <option value="suspended">Suspendido</option>
+                      </select>
+                    </div>
+                  } @else {
+                    <span class="text-xs text-stone-400">Sólo lectura</span>
+                  }
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="6" class="px-3 py-12 text-center text-stone-500">
+                  {{ loading() ? 'Cargando…' : 'No hay empresas para este filtro.' }}
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>

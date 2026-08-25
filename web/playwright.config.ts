@@ -10,7 +10,7 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: 'http://127.0.0.1:4217',
+    baseURL: process.env['OPENJORNADA_E2E_APP_URL'] ?? 'http://127.0.0.1:4217',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

@@ -1,0 +1,137 @@
+<main class="min-h-dvh bg-[#f7f4ef] px-5 py-10 sm:px-8">
+  <div class="mx-auto max-w-5xl">
+    <a href="/login" class="font-display text-xl font-black text-stone-900">OpenJornada</a>
+    @if (sent()) {
+      <section
+        class="mx-auto mt-20 max-w-xl rounded-[2rem] border border-stone-200 bg-white p-8 text-center shadow-xl shadow-stone-200/60 sm:p-12"
+      >
+        <div
+          class="mx-auto grid size-16 place-items-center rounded-full bg-emerald-100 text-3xl text-emerald-700"
+        >
+          ✓
+        </div>
+        <h1 class="mt-7 font-display text-4xl font-bold">Revisa tu correo</h1>
+        <p class="mt-4 leading-7 text-stone-500">
+          @if (invitationSent()) {
+            Te hemos enviado un enlace para verificar el correo y crear tu contraseña. La prueba de
+            14 días empieza cuando completes ese paso.
+          } @else {
+            La empresa se ha creado, pero el correo no pudo enviarse. Contacta con soporte para que
+            reenvíe la invitación; la prueba todavía no ha empezado.
+          }
+        </p>
+      </section>
+    } @else {
+      <div class="mt-12 grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+        <section class="lg:sticky lg:top-10">
+          <p class="text-sm font-bold uppercase tracking-[0.2em] text-coral-600">
+            14 días sin tarjeta
+          </p>
+          <h1 class="mt-3 font-display text-5xl font-bold leading-tight tracking-tight">
+            Una sola instalación para toda tu empresa.
+          </h1>
+          <p class="mt-5 text-lg leading-8 text-stone-500">
+            Verifica tu correo, crea la contraseña y empieza la prueba. No se realiza ningún cargo
+            durante el alta.
+          </p>
+          <ul class="mt-8 space-y-3 text-sm font-semibold text-stone-700">
+            <li>✓ Datos separados por empresa</li>
+            <li>✓ Registro horario y auditoría inmutables</li>
+            <li>✓ Exportación disponible antes de cualquier suspensión</li>
+          </ul>
+        </section>
+        <section
+          class="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-xl shadow-stone-200/50 sm:p-9"
+        >
+          <h2 class="font-display text-2xl font-bold">Crea tu espacio</h2>
+          <form (ngSubmit)="submit()" class="mt-7 grid gap-5 sm:grid-cols-2">
+            <label class="sm:col-span-2"
+              ><span class="field-label">Empresa</span
+              ><input
+                [(ngModel)]="form.organizationName"
+                name="organizationName"
+                required
+                maxlength="160"
+                class="field-input"
+            /></label>
+            <label
+              ><span class="field-label">NIF/CIF</span
+              ><input
+                [(ngModel)]="form.taxId"
+                name="taxId"
+                required
+                maxlength="24"
+                class="field-input uppercase"
+            /></label>
+            <label
+              ><span class="field-label">Personas en plantilla</span
+              ><input
+                [(ngModel)]="form.declaredHeadcount"
+                name="declaredHeadcount"
+                type="number"
+                min="1"
+                required
+                class="field-input"
+            /></label>
+            <label
+              ><span class="field-label">Tu nombre</span
+              ><input
+                [(ngModel)]="form.ownerName"
+                name="ownerName"
+                required
+                maxlength="160"
+                class="field-input"
+            /></label>
+            <label
+              ><span class="field-label">Correo de administración</span
+              ><input
+                [(ngModel)]="form.ownerEmail"
+                name="ownerEmail"
+                type="email"
+                required
+                class="field-input"
+            /></label>
+            <label
+              ><span class="field-label">Zona horaria IANA</span
+              ><input [(ngModel)]="form.timezone" name="timezone" required class="field-input"
+            /></label>
+            <label
+              ><span class="field-label">Plan previsto</span
+              ><select [(ngModel)]="form.planCode" name="planCode" required class="field-input">
+                <option value="" disabled>Selecciona un plan</option>
+                @for (plan of plans(); track plan.code) {
+                  <option [value]="plan.code">
+                    {{ plan.name }} ·
+                    {{ plan.billingModel === 'fixed' ? 'cuota fija' : 'por tramos'
+                    }}{{ plan.headcountLimit ? ' · hasta ' + plan.headcountLimit : '' }}
+                  </option>
+                }
+              </select></label
+            >
+            @if (error()) {
+              <p
+                role="alert"
+                class="sm:col-span-2 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+              >
+                {{ error() }}
+              </p>
+            }
+            <div class="sm:col-span-2">
+              <button
+                type="submit"
+                [disabled]="loading() || !form.planCode"
+                class="btn-primary w-full"
+              >
+                {{ loading() ? 'Creando espacio…' : 'Empezar prueba' }}
+              </button>
+              <p class="mt-3 text-center text-xs leading-5 text-stone-400">
+                Al continuar solicitas el alta del servicio. La prueba comienza tras verificar el
+                correo.
+              </p>
+            </div>
+          </form>
+        </section>
+      </div>
+    }
+  </div>
+</main>

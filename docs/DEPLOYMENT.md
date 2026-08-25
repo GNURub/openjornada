@@ -5,6 +5,106 @@ HTTPS. Para alta disponibilidad hacen falta almacenamiento compartido, una
 estrategia de consistencia y pruebas adicionales; PocketBase no debe escalarse
 horizontalmente copiando el mismo volumen entre contenedores.
 
+## Despliegue SaaS sin romper la instalación existente
+
+Las migraciones SaaS son aditivas. No cambian los identificadores de empresas,
+personas, fichajes ni auditorías. La empresa existente recibe `accessStatus =
+active`, una suscripción `manual_active` y conserva su zona horaria. La
+unicidad de RFID pasa de global a `(organization, fingerprint)`, sin modificar
+los fingerprints almacenados.
+
+Activa el cambio en ventanas separadas:
+
+1. Toma una instantánea cifrada y restaurable de `/app/pb_data`. Mantén
+   `PB_PLATFORM_ENABLED`, `PB_SELF_SIGNUP_ENABLED` y `PB_SAAS_ENFORCEMENT` en
+   `false`.
+2. Despliega la imagen y deja que `migrate up` aplique el esquema. Comprueba que
+   la empresa actual, sus usuarios y fichajes mantienen sus IDs y que existe
+   exactamente una suscripción `manual_active` para ella.
+3. Crea el primer operador desde un terminal interactivo. La contraseña no se
+   admite como argumento ni variable:
+
+   ```bash
+   docker compose -f docker-compose.production.yml exec app \
+     /app/pocketbase platform operator create \
+     --dir=/app/pb_data \
+     --email=operaciones@example.com \
+     --name="Operaciones"
+   ```
+
+4. Activa `PB_PLATFORM_ENABLED=true`, reinicia y valida `/proveedor` con
+   contraseña y OTP. `support` sólo lee; `admin` aprovisiona y cambia estados.
+   Ningún rol puede suplantar una cuenta laboral.
+5. Activa `PB_SAAS_ENFORCEMENT=true`. Verifica que el tenant original sigue
+   activo y que uno de prueba en `read_only` sólo permite a su `admin` consultar,
+   exportar y acceder a facturación. Terminales y MCP se bloquean porque ambos
+   protocolos incluyen escrituras.
+6. Con SMTP validado, habilita `PB_SELF_SIGNUP_ENABLED=true`. La prueba de 14
+   días empieza al aceptar la invitación, no al enviar el formulario.
+7. Configura Stripe y registra el webhook firmado antes de anunciar la
+   contratación autoservicio.
+
+Para detener el cambio sin tocar datos, devuelve los tres flags a `false` y
+reinicia. No ejecutes `migrate down` en producción: el esquema es compatible
+hacia atrás. Restaura la instantánea sólo ante corrupción o pérdida de
+integridad comprobada.
+
+### Estados y conservación
+
+El ciclo automático es `trialing → grace → read_only → suspended`: 14 días de
+prueba, 7 de cortesía y 30 adicionales de lectura administrativa. Un pago
+confirmado vuelve a `active`. `suspended` bloquea el acceso, pero nunca purga
+información; la retención mínima y las preservaciones legales siguen mandando.
+
+### Stripe
+
+Configura mediante el gestor de secretos del proveedor:
+
+```dotenv
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_API_VERSION=
+STRIPE_PRICE_STARTER_FIXED=
+STRIPE_PRICE_GROWTH_TIERED=
+```
+
+El webhook es `POST /api/openjornada/stripe/webhook`. OpenJornada valida el
+cuerpo original, HMAC y antigüedad, guarda sólo ID, tipo y hash del evento y
+rechaza actualizaciones anteriores a la última aplicada. No registres cuerpos
+de webhook ni claves. Fija `STRIPE_API_VERSION` a la versión probada por la
+cuenta antes de producción.
+
+### Instantáneas, RPO y restauración
+
+Configura instantáneas del volumen cada hora, cifradas y copiadas fuera del VPS.
+Como punto de partida conserva 48 horarias y 30 diarias, revisando el plazo con
+la política de privacidad. El objetivo es RPO ≤ 1 hora y RTO ≤ 4 horas.
+
+Trimestralmente restaura una instantánea en un entorno aislado, sin SMTP,
+webhooks ni DNS público. Comprueba migraciones, `/api/health`, conteos por
+colección y una muestra de cadenas de integridad; registra duración, resultado
+y responsable. Una marca de “completada” del proveedor no sustituye esta prueba.
+
+### Capacidad y salida de un único nodo
+
+La referencia inicial es 100 empresas, 5.000 usuarios y 500 sesiones
+concurrentes, condicionada por la medición del VPS real. Ejecuta desde otra
+máquina:
+
+```bash
+OPENJORNADA_BASE_URL=https://jornada.example.com \
+  k6 run scripts/load/saas-capacity.js
+```
+
+El escenario exige menos de 1 % de errores, p95 < 750 ms y p99 < 1,5 s. Abre
+el proyecto de salida de SQLite/PocketBase cuando se alcance sostenidamente el
+70 % de CPU o memoria, p95 > 500 ms en horas punta, el volumen supere el 70 % o
+el RTO ensayado se acerque a cuatro horas. No añadas una segunda réplica
+escritora compartiendo el volumen.
+
+La monitorización externa sólo necesita `GET /api/health`; no publiques `/_/`
+para obtener métricas.
+
 ## Requisitos
 
 - Servidor Linux con Docker 26+ y Compose 2.26+.

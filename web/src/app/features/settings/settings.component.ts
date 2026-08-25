@@ -26,6 +26,18 @@ import { PocketBaseService } from '../../core/pocketbase.service';
 
 const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
+interface BillingStatus {
+  billingStatus: string;
+  planName: string;
+  declaredHeadcount: number;
+  trialEndsAt: string;
+  graceEndsAt: string;
+  readOnlyUntil: string;
+  currentPeriodEnd: string;
+  checkoutAvailable: boolean;
+  portalAvailable: boolean;
+}
+
 @Component({
   selector: 'app-settings',
   imports: [FormsModule],
@@ -58,10 +70,9 @@ export class SettingsComponent {
   protected readonly previewingCalendar = signal(false);
   protected readonly importingCalendar = signal(false);
   protected readonly calendarError = signal('');
-  protected readonly calendarYears = [
-    new Date().getFullYear(),
-    new Date().getFullYear() + 1,
-  ];
+  protected readonly billing = signal<BillingStatus | null>(null);
+  protected readonly openingBilling = signal(false);
+  protected readonly calendarYears = [new Date().getFullYear(), new Date().getFullYear() + 1];
   protected calendarYear = new Date().getFullYear();
   protected newBreakTypeName = '';
   protected newBreakTypePaid = false;
@@ -75,6 +86,36 @@ export class SettingsComponent {
 
   constructor() {
     void this.load();
+  }
+
+  protected async openCheckout(): Promise<void> {
+    await this.openBillingURL('/api/openjornada/billing/checkout');
+  }
+
+  protected async openBillingPortal(): Promise<void> {
+    await this.openBillingURL('/api/openjornada/billing/portal');
+  }
+
+  protected billingDate(value: string): string {
+    if (!value) return '—';
+    return new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium' }).format(new Date(value));
+  }
+
+  private async openBillingURL(path: string): Promise<void> {
+    if (this.openingBilling()) return;
+    this.openingBilling.set(true);
+    this.error.set('');
+    try {
+      const response = await this.pb.send<{ url: string }>(path, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      });
+      window.location.assign(response.url);
+    } catch (error) {
+      this.error.set(this.responseMessage(error, 'No se pudo abrir la facturación.'));
+    } finally {
+      this.openingBilling.set(false);
+    }
   }
 
   protected async selectLogo(event: Event): Promise<void> {
@@ -197,8 +238,8 @@ export class SettingsComponent {
     const organization = this.organization();
     return Boolean(
       organization?.autonomousCommunitySlug &&
-        organization.provinceSlug &&
-        organization.municipalitySlug,
+      organization.provinceSlug &&
+      organization.municipalitySlug,
     );
   }
 
@@ -580,6 +621,13 @@ export class SettingsComponent {
       this.breakTypes.set(breakTypes as BreakTypeRecord[]);
       this.legalHolds.set(legalHolds as LegalHoldRecord[]);
       this.members.set(members as UserRecord[]);
+      try {
+        this.billing.set(
+          await this.pb.send<BillingStatus>('/api/openjornada/billing/status', { method: 'GET' }),
+        );
+      } catch {
+        this.billing.set(null);
+      }
       await this.loadCommunities(true);
       if (record.autonomousCommunitySlug) await this.loadProvinces(true);
       if (record.provinceSlug) await this.loadMunicipalities(true);

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import PocketBase from 'pocketbase';
 
-function resolveApiUrl(): string {
+export function resolveApiUrl(): string {
   if (typeof window === 'undefined') {
     return 'http://127.0.0.1:8090';
   }

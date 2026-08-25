@@ -408,7 +408,11 @@ func (s *Service) assignRFID(e *core.RequestEvent, organization, employeeID, raw
 				return fmt.Errorf("rfid_capacity_reached")
 			}
 		}
-		if existing, findErr := tx.FindFirstRecordByFilter("users", "rfidUidFingerprint = {:fingerprint}", map[string]any{"fingerprint": fingerprint}); findErr == nil && existing.Id != employee.Id {
+		if existing, findErr := tx.FindFirstRecordByFilter(
+			"users",
+			"organization = {:organization} && rfidUidFingerprint = {:fingerprint}",
+			map[string]any{"organization": organization, "fingerprint": fingerprint},
+		); findErr == nil && existing.Id != employee.Id {
 			return fmt.Errorf("uid_in_use")
 		}
 		employee.Set("rfidUidFingerprint", fingerprint)

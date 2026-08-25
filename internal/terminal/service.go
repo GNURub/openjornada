@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GNURub/openjornada/internal/saasaccess"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -88,7 +89,7 @@ func (s *Service) authenticateTerminal(e *core.RequestEvent) (*terminalPrincipal
 		return nil, errors.New("invalid terminal")
 	}
 	organization, err := e.App.FindRecordById("organizations", terminal.GetString("organization"))
-	if err != nil {
+	if err != nil || !saasaccess.Operational(organization) {
 		return nil, errors.New("invalid organization")
 	}
 	signingKey, err := terminalSigningKey(terminal.GetString("signingMaterial"))

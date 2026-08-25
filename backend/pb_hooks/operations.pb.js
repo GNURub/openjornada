@@ -28,9 +28,7 @@ onRecordUpdateRequest((e) => {
 onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next();
   if (!e.auth || e.auth.getString("role") !== "admin") {
-    throw new ForbiddenError(
-      "Sólo administración puede crear tipos de pausa.",
-    );
+    throw new ForbiddenError("Sólo administración puede crear tipos de pausa.");
   }
   const name = e.record.getString("name").trim();
   if (name.length < 2) {
@@ -58,10 +56,7 @@ onRecordUpdateRequest((e) => {
   if (name.length < 2) {
     throw new BadRequestError("El nombre del tipo de pausa no es válido.");
   }
-  e.record.set(
-    "organization",
-    e.record.original().getString("organization"),
-  );
+  e.record.set("organization", e.record.original().getString("organization"));
   e.record.set("name", name);
   e.next();
 }, "break_types");
@@ -140,8 +135,9 @@ onRecordCreateRequest((e) => {
     const scheduleMode = scheduleHelper.scheduleMode(employee);
     const flexibleWeekdays = scheduleHelper.flexibleWeekdays(employee);
     const timezone =
-      e.app.findRecordById("organizations", organization).getString("timezone") ||
-      "Europe/Madrid";
+      e.app
+        .findRecordById("organizations", organization)
+        .getString("timezone") || "Europe/Madrid";
     const holidayRecords = e.app.findRecordsByFilter(
       "public_holidays",
       "organization = {:organization} && date >= {:start} && date <= {:end}",
@@ -197,8 +193,8 @@ onRecordCreateRequest((e) => {
         isWorkingDay = selectedSchedule
           ? true
           : schedules.some((schedule) =>
-              scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone),
-            )
+                scheduleHelper.scheduleAppliesOnDate(schedule, key, timezone),
+              )
             ? false
             : weekday !== 0 && weekday !== 6;
       }
@@ -669,7 +665,14 @@ onRecordAfterUpdateSuccess((e) => {
       correction.set("kind", "correction");
       correction.set("correctedKind", e.record.getString("requestedKind"));
       correction.set("occurredAt", e.record.getString("requestedOccurredAt"));
-      correction.set("timezone", $os.getenv("PB_TIMEZONE") || "Europe/Madrid");
+      const organization = e.app.findRecordById(
+        "organizations",
+        e.record.getString("organization"),
+      );
+      correction.set(
+        "timezone",
+        organization.getString("timezone") || "Europe/Madrid",
+      );
       correction.set("source", "admin");
       correction.set(
         "note",
@@ -696,9 +699,7 @@ onRecordAfterUpdateSuccess((e) => {
             "correction",
             e.record.getString("requestedKind"),
             e.record.getString("workEvent"),
-            new Date(
-              e.record.getString("requestedOccurredAt"),
-            ).toISOString(),
+            new Date(e.record.getString("requestedOccurredAt")).toISOString(),
             new Date(recordedAt).toISOString(),
             0,
             "",

@@ -187,6 +187,124 @@ function issueInvitation(app, actor, userId) {
   };
 }
 
+function issueManagedInvitation(app, userId, platformOperatorId) {
+  if (!app.settings().smtp.enabled) {
+    throw new BadRequestError(
+      "El correo SMTP no está configurado. Revisa la configuración antes de enviar la invitación.",
+    );
+  }
+
+  const user = app.findRecordById("users", userId);
+  if (
+    user.getString("role") !== "admin" ||
+    !user.getBool("active") ||
+    !user.email()
+  ) {
+    throw new BadRequestError(
+      "La persona administradora no puede recibir la invitación.",
+    );
+  }
+
+  const token = $security.randomString(64);
+  const sentAt = new Date();
+  const expiresAt = new Date(sentAt.getTime() + 72 * 60 * 60 * 1000);
+  const invitation = new Record(
+    app.findCollectionByNameOrId("user_invitations"),
+  );
+  invitation.set("organization", user.getString("organization"));
+  invitation.set("user", user.id);
+  invitation.set("email", user.email());
+  invitation.set("tokenHash", $security.sha256(token));
+  invitation.set("status", "pending");
+  invitation.set("sentAt", sentAt.toISOString());
+  invitation.set("expiresAt", expiresAt.toISOString());
+  invitation.set("platformOperator", platformOperatorId || "");
+  app.save(invitation);
+
+  const link = publicURL(app, token);
+  const appName = app.settings().meta.appName;
+  const name = user.getString("name");
+  try {
+    app.newMailClient().send(
+      new MailerMessage({
+        from: {
+          address: app.settings().meta.senderAddress,
+          name: app.settings().meta.senderName,
+        },
+        to: [{ address: user.email(), name }],
+        subject: "Tu invitación a " + appName,
+        text:
+          "Hola " +
+          name +
+          ". Tu empresa te ha invitado a " +
+          appName +
+          ". Crea tu contraseña en " +
+          link +
+          ". El enlace caduca en 72 horas y sólo puede utilizarse una vez.",
+        html:
+          "<p>Hola " +
+          htmlEscape(name) +
+          ",</p><p>Tu empresa te ha invitado a " +
+          htmlEscape(appName) +
+          '.</p><p><a class="btn" href="' +
+          htmlEscape(link) +
+          '" target="_blank" rel="noopener">Crear mi contraseña</a></p>' +
+          "<p>El enlace caduca en 72 horas y sólo puede utilizarse una vez.</p>",
+      }),
+    );
+  } catch (_) {
+    try {
+      app.delete(invitation);
+    } catch (_) {
+      invitation.set("status", "revoked");
+      app.save(invitation);
+    }
+    throw new BadRequestError("No se pudo enviar la invitación.");
+  }
+
+  const previous = app.findRecordsByFilter(
+    "user_invitations",
+    "user = {:targetUser} && status = 'pending'",
+    "-sentAt",
+    100,
+    0,
+    { targetUser: user.id },
+  );
+  for (const item of previous) {
+    if (item.id === invitation.id) continue;
+    item.set("status", "revoked");
+    app.save(item);
+  }
+  user.set("invitationStatus", "pending");
+  user.set("invitationSentAt", sentAt.toISOString());
+  user.set("invitationExpiresAt", expiresAt.toISOString());
+  user.set("invitationAcceptedAt", "");
+  app.save(user);
+
+  return {
+    userId: user.id,
+    status: "pending",
+    sentAt: sentAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+function issuePlatformInvitation(app, operator, userId) {
+  if (
+    !operator ||
+    operator.collection().name !== "platform_operators" ||
+    operator.getString("role") !== "admin" ||
+    !operator.getBool("active")
+  ) {
+    throw new ForbiddenError("No tienes permisos para enviar esta invitación.");
+  }
+  return issueManagedInvitation(app, userId, operator.id);
+}
+
+function issueSignupInvitation(app, userId) {
+  return issueManagedInvitation(app, userId, "");
+}
+
 function invitationDetails(app, token) {
   const invitation = pendingInvitation(app, token);
   const user = app.findRecordById("users", invitation.getString("user"));
@@ -255,6 +373,40 @@ function acceptInvitation(app, token, passwordValue, confirmationValue) {
     user.set("invitationAcceptedAt", acceptedAt);
     txApp.save(user);
 
+    if (user.getString("role") === "admin") {
+      let subscription = null;
+      try {
+        subscription = txApp.findFirstRecordByFilter(
+          "organization_subscriptions",
+          "organization = {:organization} && billingStatus = 'trialing'",
+          { organization: user.getString("organization") },
+        );
+      } catch (_) {}
+      if (subscription && !subscription.getString("trialEndsAt")) {
+        const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+        subscription.set("trialEndsAt", trialEndsAt.toISOString());
+        subscription.set(
+          "graceEndsAt",
+          new Date(
+            trialEndsAt.getTime() + 7 * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        );
+        subscription.set(
+          "readOnlyUntil",
+          new Date(
+            trialEndsAt.getTime() + 37 * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        );
+        txApp.save(subscription);
+        const organization = txApp.findRecordById(
+          "organizations",
+          user.getString("organization"),
+        );
+        organization.set("accessStatus", "trialing");
+        txApp.save(organization);
+      }
+    }
+
     currentInvitation.set("status", "accepted");
     currentInvitation.set("acceptedAt", acceptedAt);
     txApp.save(currentInvitation);
@@ -281,4 +433,6 @@ module.exports = {
   acceptInvitation,
   invitationDetails,
   issueInvitation,
+  issuePlatformInvitation,
+  issueSignupInvitation,
 };

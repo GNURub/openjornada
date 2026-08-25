@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/GNURub/openjornada/internal/billing"
 	"github.com/GNURub/openjornada/internal/laborcalendar"
 	"github.com/GNURub/openjornada/internal/mcpserver"
+	"github.com/GNURub/openjornada/internal/platformcmd"
 	"github.com/GNURub/openjornada/internal/terminal"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
@@ -38,6 +40,7 @@ func main() {
 	app.RootCmd.PersistentFlags().StringVar(&publicDir, "publicDir", defaultPublicDir(), "the static frontend directory")
 	var indexFallback bool
 	app.RootCmd.PersistentFlags().BoolVar(&indexFallback, "indexFallback", true, "serve index.html for unknown frontend routes")
+	platformcmd.Register(app, app.RootCmd)
 	app.RootCmd.ParseFlags(os.Args[1:])
 
 	jsvm.MustRegister(app, jsvm.Config{
@@ -53,9 +56,11 @@ func main() {
 	})
 
 	mcpService := mcpserver.New(app)
+	billingService := billing.New(app)
 	laborCalendarService := laborcalendar.New(app)
 	terminalService := terminal.New(app)
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		billingService.Register(e)
 		mcpService.Register(e)
 		laborCalendarService.Register(e)
 		terminalService.Register(e)

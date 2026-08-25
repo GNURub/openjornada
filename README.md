@@ -10,6 +10,12 @@ cada versión publicada.
 La aplicación usa Angular 22, Tailwind CSS 4 y PocketBase 0.39.10. Frontend,
 API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 
+También puede operar como SaaS multiempresa desde una sola instalación. El
+área `/proveedor` usa identidades separadas con MFA, no permite suplantar
+usuarios y expone únicamente metadatos operativos y cifras agregadas. Las
+instalaciones existentes se conservan como el primer tenant mediante una
+migración aditiva y flags desactivados por defecto.
+
 ## Funcionalidad
 
 - Autenticación, recuperación de contraseña e invitaciones por correo de un solo
@@ -55,9 +61,17 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
 - PWA instalable con manifiesto por empresa, iconos adaptativos y shell disponible
   sin conexión.
 - SMTP opcional, límites de peticiones y cifrado de secretos de PocketBase.
+- Plano de control SaaS con alta idempotente, auditoría separada, roles de
+  proveedor `admin` y `support`, alta pública opcional con 14 días sin tarjeta,
+  ciclo de acceso sin borrado y facturación mensual fija o por tramos mediante
+  Stripe Checkout y Customer Portal.
 
 La cobertura funcional detallada está en
 [docs/FEATURES.md](docs/FEATURES.md).
+
+La activación SaaS, el primer operador, Stripe, las instantáneas y la
+restauración se documentan en
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#despliegue-saas-sin-romper-la-instalación-existente).
 
 ## Inicio rápido en modo demo
 
@@ -214,30 +228,30 @@ instancia. Consulta la
 
 ## Variables de entorno
 
-| Variable                      | Obligatoria     | Uso                                                                           |
-| ----------------------------- | --------------- | ----------------------------------------------------------------------------- |
-| `PB_APP_NAME`                 | Sí              | Nombre mostrado en PocketBase y correos.                                      |
-| `PB_PUBLIC_URL`               | Sí              | URL pública completa; HTTPS en producción.                                    |
-| `PB_ENCRYPTION_KEY`           | Sí              | Clave de exactamente 32 caracteres. No debe rotarse sin un plan de migración. |
-| `PB_MCP_ENABLED`              | No              | Activa MCP; usa `false` como corte de emergencia. Por defecto está activo.    |
-| `PB_MCP_INTERNAL_URL`         | No              | URL HTTP interna de PocketBase; sólo acepta `127.0.0.1`.                      |
-| `PB_ORGANIZATION_NAME`        | Sí              | Empresa creada durante el bootstrap inicial.                                  |
-| `PB_ORGANIZATION_TAX_ID`      | Sí              | NIF usado al crear la empresa inicial; después se gestiona desde la UI.        |
-| `PB_TIMEZONE`                 | Sí              | Zona IANA, por ejemplo `Europe/Madrid`.                                       |
-| `PB_BOOTSTRAP_ADMIN_EMAIL`    | Sí              | Correo de la primera cuenta administradora.                                   |
-| `PB_BOOTSTRAP_ADMIN_PASSWORD` | Sí              | Contraseña inicial robusta.                                                   |
-| `PB_BOOTSTRAP_ADMIN_NAME`     | No              | Nombre visible de la cuenta administradora.                                   |
-| `PB_MAIL_SENDER_NAME`         | No              | Nombre visible del remitente; usa `PB_APP_NAME` si se omite.                  |
-| `PB_MAIL_SENDER_ADDRESS`      | No              | Dirección remitente autorizada por el proveedor SMTP.                         |
-| `PB_SMTP_HOST`                | Para correo     | Host SMTP. Un valor no vacío activa el envío SMTP.                            |
-| `PB_SMTP_PORT`                | Para correo     | Puerto SMTP; usa `587` si se omite. Debe coincidir con el proveedor.          |
-| `PB_SMTP_USERNAME`            | Según proveedor | Usuario SMTP; puede ser una cuenta, un identificador o una clave.             |
-| `PB_SMTP_PASSWORD`            | Según proveedor | Contraseña de aplicación o secreto SMTP. Nunca debe añadirse a Git.           |
-| `PB_SMTP_TLS`                 | Para correo     | `true` obliga TLS; `false` intenta STARTTLS y deja la decisión al servidor.   |
-| `PB_DEMO_ENABLED`             | No              | Crea una empleada de ejemplo cuando vale `true`.                              |
-| `PB_TERMINAL_DEV_INSECURE_HTTP` | No            | Permite HTTP RFID sólo en demo y red privada; debe ser `false` en producción. |
-| `PB_DEMO_EMAIL`               | Demo            | Correo de la empleada de ejemplo.                                             |
-| `PB_DEMO_PASSWORD`            | Demo            | Contraseña de la empleada de ejemplo.                                         |
+| Variable                        | Obligatoria     | Uso                                                                           |
+| ------------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `PB_APP_NAME`                   | Sí              | Nombre mostrado en PocketBase y correos.                                      |
+| `PB_PUBLIC_URL`                 | Sí              | URL pública completa; HTTPS en producción.                                    |
+| `PB_ENCRYPTION_KEY`             | Sí              | Clave de exactamente 32 caracteres. No debe rotarse sin un plan de migración. |
+| `PB_MCP_ENABLED`                | No              | Activa MCP; usa `false` como corte de emergencia. Por defecto está activo.    |
+| `PB_MCP_INTERNAL_URL`           | No              | URL HTTP interna de PocketBase; sólo acepta `127.0.0.1`.                      |
+| `PB_ORGANIZATION_NAME`          | Sí              | Empresa creada durante el bootstrap inicial.                                  |
+| `PB_ORGANIZATION_TAX_ID`        | Sí              | NIF usado al crear la empresa inicial; después se gestiona desde la UI.       |
+| `PB_TIMEZONE`                   | Sí              | Zona IANA, por ejemplo `Europe/Madrid`.                                       |
+| `PB_BOOTSTRAP_ADMIN_EMAIL`      | Sí              | Correo de la primera cuenta administradora.                                   |
+| `PB_BOOTSTRAP_ADMIN_PASSWORD`   | Sí              | Contraseña inicial robusta.                                                   |
+| `PB_BOOTSTRAP_ADMIN_NAME`       | No              | Nombre visible de la cuenta administradora.                                   |
+| `PB_MAIL_SENDER_NAME`           | No              | Nombre visible del remitente; usa `PB_APP_NAME` si se omite.                  |
+| `PB_MAIL_SENDER_ADDRESS`        | No              | Dirección remitente autorizada por el proveedor SMTP.                         |
+| `PB_SMTP_HOST`                  | Para correo     | Host SMTP. Un valor no vacío activa el envío SMTP.                            |
+| `PB_SMTP_PORT`                  | Para correo     | Puerto SMTP; usa `587` si se omite. Debe coincidir con el proveedor.          |
+| `PB_SMTP_USERNAME`              | Según proveedor | Usuario SMTP; puede ser una cuenta, un identificador o una clave.             |
+| `PB_SMTP_PASSWORD`              | Según proveedor | Contraseña de aplicación o secreto SMTP. Nunca debe añadirse a Git.           |
+| `PB_SMTP_TLS`                   | Para correo     | `true` obliga TLS; `false` intenta STARTTLS y deja la decisión al servidor.   |
+| `PB_DEMO_ENABLED`               | No              | Crea una empleada de ejemplo cuando vale `true`.                              |
+| `PB_TERMINAL_DEV_INSECURE_HTTP` | No              | Permite HTTP RFID sólo en demo y red privada; debe ser `false` en producción. |
+| `PB_DEMO_EMAIL`                 | Demo            | Correo de la empleada de ejemplo.                                             |
+| `PB_DEMO_PASSWORD`              | Demo            | Contraseña de la empleada de ejemplo.                                         |
 
 Las variables de bootstrap crean registros si no existen; no sobrescriben
 contraseñas ni datos ya guardados. En instalaciones existentes, la empresa se
