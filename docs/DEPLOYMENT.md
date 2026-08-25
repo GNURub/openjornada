@@ -40,7 +40,9 @@ Activa el cambio en ventanas separadas:
    exportar y acceder a facturación. Terminales y MCP se bloquean porque ambos
    protocolos incluyen escrituras.
 6. Con SMTP validado, habilita `PB_SELF_SIGNUP_ENABLED=true`. La prueba de 14
-   días empieza al aceptar la invitación, no al enviar el formulario.
+   días empieza al aceptar la invitación, no al enviar el formulario. Reintentar
+   una reserva pendiente conserva el enlace vigente o emite uno nuevo si ya
+   caducó, sin crear otra empresa.
 7. Configura Stripe, registra el webhook firmado y sólo entonces activa
    `PB_BILLING_ENABLED=true` antes de anunciar la contratación autoservicio.
 
@@ -57,7 +59,9 @@ confirmado vuelve a `active`, salvo que un operador haya fijado manualmente el
 estado; esa suspensión o restricción prevalece sobre la facturación.
 El operador puede devolver explícitamente la empresa a gestión automática desde
 `/proveedor`; el cambio queda auditado y reconcilia inmediatamente el estado
-efectivo con la suscripción.
+efectivo con la suscripción. Una suscripción heredada `manual_active` vuelve a
+`active` al retirar el override. El cron pagina todas las empresas, sin un límite
+global de 1.000 registros.
 `suspended` bloquea el acceso, pero nunca purga
 información; la retención mínima y las preservaciones legales siguen mandando.
 

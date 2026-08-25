@@ -78,6 +78,104 @@ function encryptionKey() {
   return key;
 }
 
+function reservationNeedsInvitation(app, result) {
+  if (!result.ownerId || !result.organizationId) return false;
+  let owner;
+  let subscription;
+  try {
+    owner = app.findRecordById("users", result.ownerId);
+    subscription = app.findFirstRecordByFilter(
+      "organization_subscriptions",
+      "organization = {:organization} && billingStatus = 'trialing'",
+      { organization: result.organizationId },
+    );
+  } catch (_) {
+    return false;
+  }
+  return (
+    owner.getString("invitationStatus") === "pending" &&
+    !subscription.getString("trialEndsAt")
+  );
+}
+
+function hasUsablePendingInvitation(app, result) {
+  if (!result.ownerId) return false;
+  let invitations = [];
+  try {
+    invitations = app.findRecordsByFilter(
+      "user_invitations",
+      "user = {:user} && status = 'pending'",
+      "-expiresAt",
+      100,
+      0,
+      { user: result.ownerId },
+    );
+  } catch (_) {}
+  return invitations.some(
+    (invitation) =>
+      new Date(invitation.getString("expiresAt")).getTime() > Date.now(),
+  );
+}
+
+function reopenInvitationDelivery(app, scope, key) {
+  app.runInTransaction((txApp) => {
+    const stored = txApp.findFirstRecordByFilter(
+      "platform_idempotency",
+      "scope = {:scope} && key = {:key}",
+      { scope, key },
+    );
+    const result = plainResult(stored.get("result"));
+    result.invitationSent = false;
+    stored.set("result", result);
+    stored.set("deliveryStatus", "pending");
+    stored.set("deliveryClaimedAt", "");
+    stored.set(
+      "deliveryTokenCiphertext",
+      $security.encrypt($security.randomString(64), encryptionKey()),
+    );
+    stored.set(
+      "expiresAt",
+      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    );
+    txApp.save(stored);
+  });
+}
+
+function ensureInvitation(app, scope, key, ownerEmail) {
+  const stored = app.findFirstRecordByFilter(
+    "platform_idempotency",
+    "scope = {:scope} && key = {:key}",
+    { scope, key },
+  );
+  const result = plainResult(stored.get("result"));
+  if (!result.ownerId) {
+    const owner = app.findAuthRecordByEmail("users", ownerEmail);
+    result.ownerId = owner.id;
+    result.organizationId = owner.getString("organization");
+  }
+  const deliveryStatus = stored.getString("deliveryStatus");
+  if (deliveryStatus === "sending") {
+    return deliverInvitation(app, scope, key, ownerEmail);
+  }
+  if (hasUsablePendingInvitation(app, result)) {
+    result.invitationSent = true;
+    stored.set("result", result);
+    stored.set("deliveryStatus", "sent");
+    stored.set("deliveryClaimedAt", "");
+    app.save(stored);
+    return result;
+  }
+  if (!reservationNeedsInvitation(app, result)) return result;
+  if (
+    result.invitationSent ||
+    deliveryStatus === "sent" ||
+    new Date(stored.getString("expiresAt")).getTime() <= Date.now()
+  ) {
+    reopenInvitationDelivery(app, scope, key);
+  }
+  return deliverInvitation(app, scope, key, ownerEmail);
+}
+
 function deliverInvitation(app, scope, key, ownerEmail) {
   let claim = null;
   app.runInTransaction((txApp) => {
@@ -173,7 +271,7 @@ function deliverInvitation(app, scope, key, ownerEmail) {
   return claim.result;
 }
 
-function recoverIncompleteSignup(app, scope, ownerEmail) {
+function recoverReservedSignup(app, scope, ownerEmail) {
   const records = app.findRecordsByFilter(
     "platform_idempotency",
     "scope = {:scope}",
@@ -184,11 +282,8 @@ function recoverIncompleteSignup(app, scope, ownerEmail) {
   );
   for (const record of records) {
     const result = plainResult(record.get("result"));
-    if (
-      !result.invitationSent &&
-      record.getString("deliveryStatus") !== "sent"
-    ) {
-      return deliverInvitation(app, scope, record.getString("key"), ownerEmail);
+    if (reservationNeedsInvitation(app, result)) {
+      return ensureInvitation(app, scope, record.getString("key"), ownerEmail);
     }
   }
   return null;
@@ -214,9 +309,10 @@ function signup(app, body) {
     const previousResult = plainResult(previous.get("result"));
     if (
       new Date(previous.getString("expiresAt")).getTime() > Date.now() ||
-      !previousResult.invitationSent
+      !previousResult.invitationSent ||
+      reservationNeedsInvitation(app, previousResult)
     ) {
-      return deliverInvitation(
+      return ensureInvitation(
         app,
         scope,
         input.idempotencyKey,
@@ -244,14 +340,14 @@ function signup(app, body) {
       );
     } catch (_) {}
     if (replay) {
-      return deliverInvitation(
+      return ensureInvitation(
         app,
         scope,
         input.idempotencyKey,
         input.ownerEmail,
       );
     }
-    const recovered = recoverIncompleteSignup(app, scope, input.ownerEmail);
+    const recovered = recoverReservedSignup(app, scope, input.ownerEmail);
     if (recovered) return recovered;
     throw new BadRequestError("Ya existe una empresa con ese NIF/CIF.");
   }
@@ -270,14 +366,14 @@ function signup(app, body) {
       );
     } catch (_) {}
     if (replay) {
-      return deliverInvitation(
+      return ensureInvitation(
         app,
         scope,
         input.idempotencyKey,
         input.ownerEmail,
       );
     }
-    const recovered = recoverIncompleteSignup(app, scope, input.ownerEmail);
+    const recovered = recoverReservedSignup(app, scope, input.ownerEmail);
     if (recovered) return recovered;
     throw new BadRequestError("Ya existe una cuenta con ese correo.");
   }
@@ -382,7 +478,7 @@ function signup(app, body) {
         "scope = {:scope} && key = {:key}",
         { scope, key: input.idempotencyKey },
       );
-      return deliverInvitation(
+      return ensureInvitation(
         app,
         scope,
         input.idempotencyKey,
@@ -393,7 +489,7 @@ function signup(app, body) {
     }
   }
 
-  return deliverInvitation(app, scope, input.idempotencyKey, input.ownerEmail);
+  return ensureInvitation(app, scope, input.idempotencyKey, input.ownerEmail);
 }
 
 module.exports = { plans, signup };

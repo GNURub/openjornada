@@ -452,7 +452,7 @@ function updateAccess(app, operator, organizationId, body) {
       },
     );
   });
-  if (automatic) reconcileLifecycle(app);
+  if (automatic) reconcileOrganizationLifecycle(app, organizationId);
   return organizationView(
     app,
     app.findRecordById("organizations", organizationId),
@@ -491,52 +491,72 @@ function listAudit(app, operator, query) {
     }));
 }
 
-function reconcileLifecycle(app) {
-  const subscriptions = app.findRecordsByFilter(
-    "organization_subscriptions",
-    "billingStatus != 'manual_active'",
-    "id",
-    1000,
-    0,
+function reconcileSubscriptionLifecycle(app, subscription, now) {
+  const organizationId = subscription.getString("organization");
+  let organization;
+  try {
+    organization = app.findRecordById("organizations", organizationId);
+  } catch (_) {
+    return;
+  }
+  if (organization.getString("accessOverride")) return;
+  let next = organization.getString("accessStatus") || "trialing";
+  const billingStatus = subscription.getString("billingStatus");
+  const trial = new Date(subscription.getString("trialEndsAt")).getTime();
+  const grace = new Date(subscription.getString("graceEndsAt")).getTime();
+  const readOnly = new Date(subscription.getString("readOnlyUntil")).getTime();
+  if (billingStatus === "manual_active" || billingStatus === "active")
+    next = "active";
+  else if (Number.isFinite(readOnly) && now > readOnly) next = "suspended";
+  else if (Number.isFinite(grace) && now > grace) next = "read_only";
+  else if (Number.isFinite(trial) && now > trial) next = "grace";
+  else if (billingStatus === "trialing") next = "trialing";
+  if (next === organization.getString("accessStatus")) return;
+  const previous = organization.getString("accessStatus");
+  organization.set("accessStatus", next);
+  app.save(organization);
+  audit(
+    app,
+    null,
+    "organization.lifecycle_changed",
+    "organization",
+    organization.id,
+    organization.id,
+    "Transición automática del ciclo de suscripción.",
+    "",
+    { previous, current: next },
   );
+}
+
+function reconcileOrganizationLifecycle(app, organizationId) {
+  let subscription;
+  try {
+    subscription = app.findFirstRecordByFilter(
+      "organization_subscriptions",
+      "organization = {:organization}",
+      { organization: organizationId },
+    );
+  } catch (_) {
+    return;
+  }
+  reconcileSubscriptionLifecycle(app, subscription, Date.now());
+}
+
+function reconcileLifecycle(app) {
+  const pageSize = 500;
   const now = Date.now();
-  for (const subscription of subscriptions) {
-    const organizationId = subscription.getString("organization");
-    let organization;
-    try {
-      organization = app.findRecordById("organizations", organizationId);
-    } catch (_) {
-      continue;
+  for (let offset = 0; ; offset += pageSize) {
+    const subscriptions = app.findRecordsByFilter(
+      "organization_subscriptions",
+      "id != ''",
+      "id",
+      pageSize,
+      offset,
+    );
+    for (const subscription of subscriptions) {
+      reconcileSubscriptionLifecycle(app, subscription, now);
     }
-    if (organization.getString("accessOverride")) continue;
-    let next = organization.getString("accessStatus") || "trialing";
-    const trial = new Date(subscription.getString("trialEndsAt")).getTime();
-    const grace = new Date(subscription.getString("graceEndsAt")).getTime();
-    const readOnly = new Date(
-      subscription.getString("readOnlyUntil"),
-    ).getTime();
-    if (subscription.getString("billingStatus") === "active") next = "active";
-    else if (Number.isFinite(readOnly) && now > readOnly) next = "suspended";
-    else if (Number.isFinite(grace) && now > grace) next = "read_only";
-    else if (Number.isFinite(trial) && now > trial) next = "grace";
-    else if (subscription.getString("billingStatus") === "trialing")
-      next = "trialing";
-    if (next !== organization.getString("accessStatus")) {
-      const previous = organization.getString("accessStatus");
-      organization.set("accessStatus", next);
-      app.save(organization);
-      audit(
-        app,
-        null,
-        "organization.lifecycle_changed",
-        "organization",
-        organization.id,
-        organization.id,
-        "Transición automática del ciclo de suscripción.",
-        "",
-        { previous, current: next },
-      );
-    }
+    if (subscriptions.length < pageSize) break;
   }
 }
 

@@ -25,6 +25,7 @@ const (
 	stripeAPIBase      = "https://api.stripe.com/v1"
 	maxWebhookBodySize = 1 << 20
 	webhookTolerance   = 5 * time.Minute
+	quantitySyncMarker = "__openjornadaQuantitySync"
 )
 
 type Service struct {
@@ -128,6 +129,9 @@ func (s *Service) Register(e *core.ServeEvent) {
 
 func (s *Service) Bind() {
 	s.app.OnRecordAfterUpdateSuccess("organization_subscriptions").BindFunc(func(e *core.RecordEvent) error {
+		if e.Record.GetBool(quantitySyncMarker) {
+			return e.Next()
+		}
 		_ = s.syncQuantity(context.Background(), e.App, e.Record)
 		return e.Next()
 	})
@@ -529,6 +533,12 @@ func quantityIdempotencyKey(subscriptionID string, revision int) string {
 	return fmt.Sprintf("quantity:%s:%d", subscriptionID, revision)
 }
 
+func saveQuantityRecord(app core.App, record *core.Record) error {
+	record.SetRaw(quantitySyncMarker, true)
+	defer record.SetRaw(quantitySyncMarker, false)
+	return app.Save(record)
+}
+
 func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *core.Record) error {
 	s.quantityMu.Lock()
 	defer s.quantityMu.Unlock()
@@ -560,7 +570,7 @@ func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *
 	if desired == subscription.GetInt("stripeQuantitySynced") {
 		if subscription.GetInt("stripeQuantityPending") != 0 {
 			subscription.Set("stripeQuantityPending", 0)
-			return app.Save(subscription)
+			return saveQuantityRecord(app, subscription)
 		}
 		return nil
 	}
@@ -569,7 +579,7 @@ func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *
 		revision++
 		subscription.Set("stripeQuantityRevision", revision)
 		subscription.Set("stripeQuantityPending", desired)
-		if err := app.Save(subscription); err != nil {
+		if err := saveQuantityRecord(app, subscription); err != nil {
 			return err
 		}
 	}
@@ -595,7 +605,7 @@ func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *
 	}
 	current.Set("stripeQuantitySynced", desired)
 	current.Set("stripeQuantityPending", 0)
-	return app.Save(current)
+	return saveQuantityRecord(app, current)
 }
 
 func (s *Service) syncPendingQuantities(ctx context.Context, app core.App) error {
