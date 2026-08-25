@@ -117,30 +117,6 @@ function hasUsablePendingInvitation(app, result) {
   );
 }
 
-function reopenInvitationDelivery(app, scope, key) {
-  app.runInTransaction((txApp) => {
-    const stored = txApp.findFirstRecordByFilter(
-      "platform_idempotency",
-      "scope = {:scope} && key = {:key}",
-      { scope, key },
-    );
-    const result = plainResult(stored.get("result"));
-    result.invitationSent = false;
-    stored.set("result", result);
-    stored.set("deliveryStatus", "pending");
-    stored.set("deliveryClaimedAt", "");
-    stored.set(
-      "deliveryTokenCiphertext",
-      $security.encrypt($security.randomString(64), encryptionKey()),
-    );
-    stored.set(
-      "expiresAt",
-      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    );
-    txApp.save(stored);
-  });
-}
-
 function ensureInvitation(app, scope, key, ownerEmail) {
   const stored = app.findFirstRecordByFilter(
     "platform_idempotency",
@@ -153,26 +129,7 @@ function ensureInvitation(app, scope, key, ownerEmail) {
     result.ownerId = owner.id;
     result.organizationId = owner.getString("organization");
   }
-  const deliveryStatus = stored.getString("deliveryStatus");
-  if (deliveryStatus === "sending") {
-    return deliverInvitation(app, scope, key, ownerEmail);
-  }
-  if (hasUsablePendingInvitation(app, result)) {
-    result.invitationSent = true;
-    stored.set("result", result);
-    stored.set("deliveryStatus", "sent");
-    stored.set("deliveryClaimedAt", "");
-    app.save(stored);
-    return result;
-  }
   if (!reservationNeedsInvitation(app, result)) return result;
-  if (
-    result.invitationSent ||
-    deliveryStatus === "sent" ||
-    new Date(stored.getString("expiresAt")).getTime() <= Date.now()
-  ) {
-    reopenInvitationDelivery(app, scope, key);
-  }
   return deliverInvitation(app, scope, key, ownerEmail);
 }
 
@@ -190,9 +147,20 @@ function deliverInvitation(app, scope, key, ownerEmail) {
       result.ownerId = owner.id;
       result.organizationId = owner.getString("organization");
     }
+    const deliveryStatus = stored.getString("deliveryStatus");
+    const claimedAt = new Date(stored.getString("deliveryClaimedAt")).getTime();
     if (
-      result.invitationSent ||
-      stored.getString("deliveryStatus") === "sent"
+      deliveryStatus === "sending" &&
+      Number.isFinite(claimedAt) &&
+      Date.now() - claimedAt < 5 * 60 * 1000
+    ) {
+      throw new BadRequestError(
+        "La invitación se está enviando. Espera unos segundos antes de reintentar.",
+      );
+    }
+    if (
+      deliveryStatus !== "sending" &&
+      hasUsablePendingInvitation(txApp, result)
     ) {
       result.invitationSent = true;
       stored.set("result", result);
@@ -202,23 +170,24 @@ function deliverInvitation(app, scope, key, ownerEmail) {
       claim = { result, sent: true, token: "" };
       return;
     }
-    const claimedAt = new Date(stored.getString("deliveryClaimedAt")).getTime();
-    if (
-      stored.getString("deliveryStatus") === "sending" &&
-      Number.isFinite(claimedAt) &&
-      Date.now() - claimedAt < 5 * 60 * 1000
-    ) {
-      throw new BadRequestError(
-        "La invitación se está enviando. Espera unos segundos antes de reintentar.",
-      );
-    }
     let ciphertext = stored.getString("deliveryTokenCiphertext");
-    if (!ciphertext) {
+    const rotateToken =
+      result.invitationSent ||
+      deliveryStatus === "sent" ||
+      new Date(stored.getString("expiresAt")).getTime() <= Date.now();
+    if (!ciphertext || rotateToken) {
       ciphertext = $security.encrypt(
         $security.randomString(64),
         encryptionKey(),
       );
       stored.set("deliveryTokenCiphertext", ciphertext);
+    }
+    if (rotateToken) {
+      result.invitationSent = false;
+      stored.set(
+        "expiresAt",
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      );
     }
     stored.set("deliveryStatus", "sending");
     stored.set("deliveryClaimedAt", new Date().toISOString());
