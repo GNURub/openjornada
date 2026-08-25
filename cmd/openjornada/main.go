@@ -57,6 +57,7 @@ func main() {
 
 	mcpService := mcpserver.New(app)
 	billingService := billing.New(app)
+	billingService.Bind()
 	laborCalendarService := laborcalendar.New(app)
 	terminalService := terminal.New(app)
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {

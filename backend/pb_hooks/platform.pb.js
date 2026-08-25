@@ -161,8 +161,8 @@ if (($os.getenv("PB_PLATFORM_ENABLED") || "false") === "true") {
     },
     $apis.requireAuth("platform_operators"),
   );
-
-  cronAdd("openjornada-saas-lifecycle", "*/15 * * * *", () => {
-    require(`${__hooks}/platform_helpers.js`).reconcileLifecycle($app);
-  });
 }
+
+cronAdd("openjornada-saas-lifecycle", "*/15 * * * *", () => {
+  require(`${__hooks}/platform_helpers.js`).reconcileLifecycle($app);
+});

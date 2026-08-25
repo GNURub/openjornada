@@ -452,7 +452,7 @@ onRecordCreateRequest((e) => {
   e.record.set("role", role);
   e.record.set("active", true);
   e.record.set("verified", false);
-  e.record.set("invitationStatus", "");
+  e.record.set("invitationStatus", "pending");
   e.record.set("invitationSentAt", "");
   e.record.set("invitationExpiresAt", "");
   e.record.set("invitationAcceptedAt", "");

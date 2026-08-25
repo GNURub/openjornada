@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestNormalizeStripeObjectSupportsCurrentInvoiceParent(t *testing.T) {
@@ -25,6 +27,71 @@ func TestNormalizeStripeObjectSupportsCurrentInvoiceParent(t *testing.T) {
 	normalizeStripeObject(&object)
 	if object.Subscription != "sub_test" || object.Metadata["organizationId"] != "org_test" || object.CurrentPeriodEnd != 1789000000 {
 		t.Fatalf("normalizeStripeObject() = %#v", object)
+	}
+}
+
+func TestManualAccessOverrideSurvivesActiveBillingStatus(t *testing.T) {
+	t.Parallel()
+	organizations := core.NewBaseCollection("organizations")
+	organizations.Fields.Add(
+		&core.SelectField{Name: "accessStatus", Values: []string{"active", "suspended"}, MaxSelect: 1},
+		&core.SelectField{Name: "accessOverride", Values: []string{"active", "suspended"}, MaxSelect: 1},
+	)
+	subscriptions := core.NewBaseCollection("organization_subscriptions")
+	subscriptions.Fields.Add(
+		&core.SelectField{Name: "billingStatus", Values: []string{"active", "past_due"}, MaxSelect: 1},
+		&core.DateField{Name: "graceEndsAt"},
+		&core.DateField{Name: "readOnlyUntil"},
+	)
+	organization := core.NewRecord(organizations)
+	organization.Set("accessStatus", "suspended")
+	organization.Set("accessOverride", "suspended")
+	subscription := core.NewRecord(subscriptions)
+
+	applySubscriptionStatus(subscription, organization, "active", time.Now())
+
+	if got := organization.GetString("accessStatus"); got != "suspended" {
+		t.Fatalf("accessStatus = %q, want suspended", got)
+	}
+	if got := subscription.GetString("billingStatus"); got != "active" {
+		t.Fatalf("billingStatus = %q, want active", got)
+	}
+}
+
+func TestInvoiceSnapshotDoesNotReactivateSubscription(t *testing.T) {
+	t.Parallel()
+	organizations := core.NewBaseCollection("organizations")
+	organizations.Fields.Add(&core.SelectField{Name: "accessStatus", Values: []string{"active", "grace"}, MaxSelect: 1})
+	subscriptions := core.NewBaseCollection("organization_subscriptions")
+	subscriptions.Fields.Add(
+		&core.SelectField{Name: "billingStatus", Values: []string{"active", "past_due"}, MaxSelect: 1},
+		&core.DateField{Name: "lastStripeEventAt"},
+	)
+	organization := core.NewRecord(organizations)
+	organization.Set("accessStatus", "grace")
+	subscription := core.NewRecord(subscriptions)
+	subscription.Set("billingStatus", "past_due")
+
+	outcome := applyStripeObject(subscription, organization, "invoice.paid", stripeObject{}, time.Now())
+
+	if outcome != "ignored" || subscription.GetString("billingStatus") != "past_due" || organization.GetString("accessStatus") != "grace" {
+		t.Fatalf("invoice snapshot changed lifecycle: outcome=%q billing=%q access=%q", outcome, subscription.GetString("billingStatus"), organization.GetString("accessStatus"))
+	}
+}
+
+func TestCheckoutRequiresCompleteBillingConfiguration(t *testing.T) {
+	t.Parallel()
+	service := &Service{enabled: true, secretKey: "sk_test", publicURL: "https://example.com"}
+	if service.checkoutConfigured() {
+		t.Fatal("checkout configured without webhook secret")
+	}
+	service.webhookSecret = "whsec_test"
+	if !service.checkoutConfigured() {
+		t.Fatal("complete billing configuration was rejected")
+	}
+	service.enabled = false
+	if service.checkoutConfigured() {
+		t.Fatal("checkout configured while billing flag is disabled")
 	}
 }
 

@@ -58,6 +58,8 @@ que sirve la SPA en producción.
 - **Ajustes → Suscripción** consume los endpoints protegidos de estado,
   Checkout y Customer Portal. Sigue disponible para `admin` en `read_only`,
   aunque el servidor rechace el resto de escrituras.
+- Checkout sólo se ofrece cuando `PB_BILLING_ENABLED=true` y la clave, el
+  webhook, la URL pública y el precio del plan están configurados.
 - El navegador nunca recibe claves de Stripe ni cuerpos de webhook.
 
 ## Integraciones MCP

@@ -12,6 +12,11 @@ onRecordUpdateRequest((e) => {
     throw new BadRequestError("El NIF de la empresa es obligatorio.");
   }
   e.record.set("taxId", taxId);
+  e.record.set("accessStatus", e.record.original().getString("accessStatus"));
+  e.record.set(
+    "accessOverride",
+    e.record.original().getString("accessOverride"),
+  );
   const colorPattern = /^#[0-9a-fA-F]{6}$/;
   for (const field of ["brandPrimaryColor", "brandSecondaryColor"]) {
     const color = e.record.getString(field);

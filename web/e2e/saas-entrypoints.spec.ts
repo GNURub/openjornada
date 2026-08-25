@@ -64,7 +64,8 @@ test('el área de proveedor está separada y protegida', async ({ page }) => {
 });
 
 test('el alta pública crea una prueba sin pedir tarjeta', async ({ page }) => {
-  const smtp = await startSmtpServer();
+  test.skip(test.info().project.name !== 'desktop-chromium', 'El flujo completo se ejecuta una vez.');
+  let smtp: Awaited<ReturnType<typeof startSmtpServer>> | null = null;
   const suffix = `${Date.now()}-${test.info().project.name.replace(/\W/g, '')}`;
   const taxId = `T${Date.now().toString(36).toUpperCase()}`;
   try {
@@ -75,12 +76,16 @@ test('el alta pública crea una prueba sin pedir tarjeta', async ({ page }) => {
     await page.getByLabel('Personas en plantilla').fill('4');
     await page.getByLabel('Tu nombre').fill('Responsable SaaS');
     await page.getByLabel('Correo de administración').fill(`saas-${suffix}@example.com`);
+    await page.getByRole('button', { name: 'Empezar prueba' }).click();
+    await expect(page.getByRole('alert')).toContainText('La empresa se ha reservado');
+
+    smtp = await startSmtpServer();
     const message = smtp.message();
     await page.getByRole('button', { name: 'Empezar prueba' }).click();
     await expect(page.getByRole('heading', { name: 'Revisa tu correo' })).toBeVisible();
     await expect(page.getByText('La prueba de 14 días empieza')).toBeVisible();
     await expect(message).resolves.toContain('/invitacion/');
   } finally {
-    await smtp.close();
+    await smtp?.close();
   }
 });

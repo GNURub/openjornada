@@ -60,6 +60,43 @@ function plans(app) {
     }));
 }
 
+function plainResult(value) {
+  if (typeof value === "string") return JSON.parse(value || "{}");
+  if (Array.isArray(value) && value.every((item) => typeof item === "number")) {
+    return JSON.parse(String.fromCharCode.apply(null, value));
+  }
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function deliverInvitation(app, scope, key, result, ownerEmail) {
+  result = plainResult(result);
+  if (!result.ownerId) {
+    const owner = app.findAuthRecordByEmail("users", ownerEmail);
+    result.ownerId = owner.id;
+    result.organizationId = owner.getString("organization");
+  }
+  if (result.invitationSent) return result;
+  try {
+    require(`${__hooks}/invitations_helpers.js`).issueSignupInvitation(
+      app,
+      result.ownerId,
+    );
+  } catch (_) {
+    throw new BadRequestError(
+      "La empresa se ha reservado, pero no se pudo enviar la invitación. Reintenta el alta con los mismos datos.",
+    );
+  }
+  result.invitationSent = true;
+  const stored = app.findFirstRecordByFilter(
+    "platform_idempotency",
+    "scope = {:scope} && key = {:key}",
+    { scope, key },
+  );
+  stored.set("result", result);
+  app.save(stored);
+  return result;
+}
+
 function signup(app, body) {
   if (!app.settings().smtp.enabled) {
     throw new BadRequestError(
@@ -68,16 +105,26 @@ function signup(app, body) {
   }
   const input = validate(body);
   const scope = "signup:" + $security.sha256(input.ownerEmail);
+  let previous = null;
   try {
-    const previous = app.findFirstRecordByFilter(
+    previous = app.findFirstRecordByFilter(
       "platform_idempotency",
       "scope = {:scope} && key = {:key}",
       { scope, key: input.idempotencyKey },
     );
-    if (new Date(previous.getString("expiresAt")).getTime() > Date.now()) {
-      return previous.get("result");
-    }
   } catch (_) {}
+  if (previous) {
+    if (new Date(previous.getString("expiresAt")).getTime() > Date.now()) {
+      return deliverInvitation(
+        app,
+        scope,
+        input.idempotencyKey,
+        previous.get("result"),
+        input.ownerEmail,
+      );
+    }
+    app.delete(previous);
+  }
 
   let duplicate = null;
   try {
@@ -87,119 +134,166 @@ function signup(app, body) {
       input.taxId,
     );
   } catch (_) {}
-  if (duplicate)
+  if (duplicate) {
+    let replay = null;
+    try {
+      replay = app.findFirstRecordByFilter(
+        "platform_idempotency",
+        "scope = {:scope} && key = {:key}",
+        { scope, key: input.idempotencyKey },
+      );
+    } catch (_) {}
+    if (replay) {
+      return deliverInvitation(
+        app,
+        scope,
+        input.idempotencyKey,
+        replay.get("result"),
+        input.ownerEmail,
+      );
+    }
     throw new BadRequestError("Ya existe una empresa con ese NIF/CIF.");
+  }
   try {
     duplicate = app.findAuthRecordByEmail("users", input.ownerEmail);
   } catch (_) {
     duplicate = null;
   }
-  if (duplicate)
-    throw new BadRequestError("Ya existe una cuenta con ese correo.");
-
-  let result = null;
-  app.runInTransaction((txApp) => {
-    const plan = txApp.findFirstRecordByData(
-      "saas_plans",
-      "code",
-      input.planCode,
-    );
-    if (
-      !plan.getBool("active") ||
-      plan.getString("code") === "managed-manual"
-    ) {
-      throw new BadRequestError("El plan seleccionado no está disponible.");
-    }
-    const limit = plan.getFloat("headcountLimit");
-    if (limit > 0 && input.declaredHeadcount > limit) {
-      throw new BadRequestError(
-        "La plantilla declarada supera el límite del plan.",
+  if (duplicate) {
+    let replay = null;
+    try {
+      replay = app.findFirstRecordByFilter(
+        "platform_idempotency",
+        "scope = {:scope} && key = {:key}",
+        { scope, key: input.idempotencyKey },
+      );
+    } catch (_) {}
+    if (replay) {
+      return deliverInvitation(
+        app,
+        scope,
+        input.idempotencyKey,
+        replay.get("result"),
+        input.ownerEmail,
       );
     }
+    throw new BadRequestError("Ya existe una cuenta con ese correo.");
+  }
 
-    const organization = new Record(
-      txApp.findCollectionByNameOrId("organizations"),
-    );
-    organization.set("name", input.organizationName);
-    organization.set("taxId", input.taxId);
-    organization.set("timezone", input.timezone);
-    organization.set("retentionYears", 4);
-    organization.set("privacyContact", input.ownerEmail);
-    organization.set("privacyNoticeVersion", "2026-07-30");
-    organization.set("brandPrimaryColor", "#ef4d32");
-    organization.set("brandSecondaryColor", "#1c1917");
-    organization.set("pwaName", input.organizationName);
-    organization.set("pwaShortName", input.organizationName.slice(0, 20));
-    organization.set("manualTimeApprovalRequired", false);
-    organization.set("timeCorrectionApprovalRequired", true);
-    organization.set("accessStatus", "trialing");
-    txApp.save(organization);
-
-    const owner = new Record(txApp.findCollectionByNameOrId("users"));
-    const temporaryPassword = $security.randomString(48);
-    owner.set("email", input.ownerEmail);
-    owner.set("password", temporaryPassword);
-    owner.set("passwordConfirm", temporaryPassword);
-    owner.set("verified", false);
-    owner.set("name", input.ownerName);
-    owner.set("organization", organization.id);
-    owner.set("role", "admin");
-    owner.set("active", true);
-    owner.set("employeeCode", "ADMIN");
-    owner.set("weeklyHours", 40);
-    owner.set("employmentType", "full_time");
-    owner.set("contractedWeeklyMinutes", 2400);
-    owner.set("complementaryHoursAgreement", false);
-    owner.set("scheduleMode", "scheduled");
-    owner.set("flexibleWeekdays", [1, 2, 3, 4, 5]);
-    owner.set("invitationStatus", "");
-    owner.set("privacyNoticeAcknowledgedVersion", "");
-    owner.set("privacyNoticeAcknowledgedAt", "");
-    txApp.save(owner);
-
-    const subscription = new Record(
-      txApp.findCollectionByNameOrId("organization_subscriptions"),
-    );
-    subscription.set("organization", organization.id);
-    subscription.set("plan", plan.id);
-    subscription.set("billingStatus", "trialing");
-    subscription.set("declaredHeadcount", input.declaredHeadcount);
-    txApp.save(subscription);
-
-    result = {
-      organizationId: organization.id,
-      ownerId: owner.id,
-      invitationSent: false,
-      trialStartsAfterVerification: true,
-    };
-    const idempotency = new Record(
-      txApp.findCollectionByNameOrId("platform_idempotency"),
-    );
-    idempotency.set("scope", scope);
-    idempotency.set("key", input.idempotencyKey);
-    idempotency.set("result", result);
-    idempotency.set(
-      "expiresAt",
-      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    );
-    txApp.save(idempotency);
-  });
-
+  let result = null;
   try {
-    require(`${__hooks}/invitations_helpers.js`).issueSignupInvitation(
-      app,
-      result.ownerId,
-    );
-    result.invitationSent = true;
-    const stored = app.findFirstRecordByFilter(
-      "platform_idempotency",
-      "scope = {:scope} && key = {:key}",
-      { scope, key: input.idempotencyKey },
-    );
-    stored.set("result", result);
-    app.save(stored);
-  } catch (_) {}
-  return result;
+    app.runInTransaction((txApp) => {
+      const plan = txApp.findFirstRecordByData(
+        "saas_plans",
+        "code",
+        input.planCode,
+      );
+      if (
+        !plan.getBool("active") ||
+        plan.getString("code") === "managed-manual"
+      ) {
+        throw new BadRequestError("El plan seleccionado no está disponible.");
+      }
+      const limit = plan.getFloat("headcountLimit");
+      if (limit > 0 && input.declaredHeadcount > limit) {
+        throw new BadRequestError(
+          "La plantilla declarada supera el límite del plan.",
+        );
+      }
+
+      const organization = new Record(
+        txApp.findCollectionByNameOrId("organizations"),
+      );
+      organization.set("name", input.organizationName);
+      organization.set("taxId", input.taxId);
+      organization.set("timezone", input.timezone);
+      organization.set("retentionYears", 4);
+      organization.set("privacyContact", input.ownerEmail);
+      organization.set("privacyNoticeVersion", "2026-07-30");
+      organization.set("brandPrimaryColor", "#ef4d32");
+      organization.set("brandSecondaryColor", "#1c1917");
+      organization.set("pwaName", input.organizationName);
+      organization.set("pwaShortName", input.organizationName.slice(0, 20));
+      organization.set("manualTimeApprovalRequired", false);
+      organization.set("timeCorrectionApprovalRequired", true);
+      organization.set("accessStatus", "trialing");
+      txApp.save(organization);
+
+      const owner = new Record(txApp.findCollectionByNameOrId("users"));
+      const temporaryPassword = $security.randomString(48);
+      owner.set("email", input.ownerEmail);
+      owner.set("password", temporaryPassword);
+      owner.set("passwordConfirm", temporaryPassword);
+      owner.set("verified", false);
+      owner.set("name", input.ownerName);
+      owner.set("organization", organization.id);
+      owner.set("role", "admin");
+      owner.set("active", true);
+      owner.set("employeeCode", "ADMIN");
+      owner.set("weeklyHours", 40);
+      owner.set("employmentType", "full_time");
+      owner.set("contractedWeeklyMinutes", 2400);
+      owner.set("complementaryHoursAgreement", false);
+      owner.set("scheduleMode", "scheduled");
+      owner.set("flexibleWeekdays", [1, 2, 3, 4, 5]);
+      owner.set("invitationStatus", "pending");
+      owner.set("privacyNoticeAcknowledgedVersion", "");
+      owner.set("privacyNoticeAcknowledgedAt", "");
+      txApp.save(owner);
+
+      const subscription = new Record(
+        txApp.findCollectionByNameOrId("organization_subscriptions"),
+      );
+      subscription.set("organization", organization.id);
+      subscription.set("plan", plan.id);
+      subscription.set("billingStatus", "trialing");
+      subscription.set("declaredHeadcount", input.declaredHeadcount);
+      txApp.save(subscription);
+
+      result = {
+        organizationId: organization.id,
+        ownerId: owner.id,
+        invitationSent: false,
+        trialStartsAfterVerification: true,
+      };
+      const idempotency = new Record(
+        txApp.findCollectionByNameOrId("platform_idempotency"),
+      );
+      idempotency.set("scope", scope);
+      idempotency.set("key", input.idempotencyKey);
+      idempotency.set("result", result);
+      idempotency.set(
+        "expiresAt",
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      );
+      txApp.save(idempotency);
+    });
+  } catch (error) {
+    try {
+      const replay = app.findFirstRecordByFilter(
+        "platform_idempotency",
+        "scope = {:scope} && key = {:key}",
+        { scope, key: input.idempotencyKey },
+      );
+      return deliverInvitation(
+        app,
+        scope,
+        input.idempotencyKey,
+        replay.get("result"),
+        input.ownerEmail,
+      );
+    } catch (_) {
+      throw error;
+    }
+  }
+
+  return deliverInvitation(
+    app,
+    scope,
+    input.idempotencyKey,
+    result,
+    input.ownerEmail,
+  );
 }
 
 module.exports = { plans, signup };

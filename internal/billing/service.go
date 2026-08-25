@@ -29,6 +29,7 @@ const (
 type Service struct {
 	app           core.App
 	client        *http.Client
+	enabled       bool
 	secretKey     string
 	webhookSecret string
 	publicURL     string
@@ -64,7 +65,9 @@ type stripeObject struct {
 	} `json:"parent"`
 	Items struct {
 		Data []struct {
-			CurrentPeriodEnd int64 `json:"current_period_end"`
+			ID               string `json:"id"`
+			Quantity         int    `json:"quantity"`
+			CurrentPeriodEnd int64  `json:"current_period_end"`
 		} `json:"data"`
 	} `json:"items"`
 }
@@ -96,6 +99,7 @@ func New(app core.App) *Service {
 	return &Service{
 		app:           app,
 		client:        &http.Client{Timeout: 15 * time.Second},
+		enabled:       strings.EqualFold(strings.TrimSpace(os.Getenv("PB_BILLING_ENABLED")), "true"),
 		secretKey:     strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")),
 		webhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")),
 		publicURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("PB_PUBLIC_URL")), "/"),
@@ -118,6 +122,16 @@ func (s *Service) Register(e *core.ServeEvent) {
 		Bind(apis.SkipSuccessActivityLog())
 }
 
+func (s *Service) Bind() {
+	s.app.OnRecordAfterUpdateSuccess("organization_subscriptions").BindFunc(func(e *core.RecordEvent) error {
+		_ = s.syncQuantity(context.Background(), e.App, e.Record)
+		return e.Next()
+	})
+	_ = s.app.Cron().Add("openjornada-stripe-quantity", "7,22,37,52 * * * *", func() {
+		_ = s.syncPendingQuantities(context.Background(), s.app)
+	})
+}
+
 func (s *Service) status(e *core.RequestEvent) error {
 	if err := requireTenantAdmin(e.Auth); err != nil {
 		return e.ForbiddenError(err.Error(), nil)
@@ -135,6 +149,7 @@ func (s *Service) status(e *core.RequestEvent) error {
 	if plan != nil {
 		planName = plan.GetString("name")
 	}
+	checkoutAvailable := s.checkoutConfigured() && plan != nil && s.priceID(plan) != ""
 	return e.JSON(http.StatusOK, map[string]any{
 		"billingStatus":     subscription.GetString("billingStatus"),
 		"planName":          planName,
@@ -143,7 +158,7 @@ func (s *Service) status(e *core.RequestEvent) error {
 		"graceEndsAt":       subscription.GetDateTime("graceEndsAt").String(),
 		"readOnlyUntil":     subscription.GetDateTime("readOnlyUntil").String(),
 		"currentPeriodEnd":  subscription.GetDateTime("currentPeriodEnd").String(),
-		"checkoutAvailable": s.checkoutConfigured(),
+		"checkoutAvailable": checkoutAvailable,
 		"portalAvailable":   s.checkoutConfigured() && subscription.GetString("stripeCustomerId") != "",
 	})
 }
@@ -175,10 +190,7 @@ func (s *Service) checkout(e *core.RequestEvent) error {
 	if err != nil {
 		return e.BadRequestError("El plan configurado ya no está disponible.", err)
 	}
-	priceID := s.priceByPlan[plan.GetString("code")]
-	if priceID == "" {
-		priceID = plan.GetString("stripePriceId")
-	}
+	priceID := s.priceID(plan)
 	if priceID == "" {
 		return e.Error(http.StatusServiceUnavailable, "El precio de este plan no está configurado.", nil)
 	}
@@ -245,7 +257,7 @@ func (s *Service) portal(e *core.RequestEvent) error {
 }
 
 func (s *Service) webhook(e *core.RequestEvent) error {
-	if s.webhookSecret == "" {
+	if !s.enabled || s.webhookSecret == "" || s.secretKey == "" {
 		return e.Error(http.StatusServiceUnavailable, "Webhook no configurado.", nil)
 	}
 	payload, err := io.ReadAll(io.LimitReader(e.Request.Body, maxWebhookBodySize+1))
@@ -262,20 +274,46 @@ func (s *Service) webhook(e *core.RequestEvent) error {
 	if _, err := e.App.FindFirstRecordByData("stripe_webhook_events", "eventId", event.ID); err == nil {
 		return e.JSON(http.StatusOK, map[string]bool{"received": true})
 	}
+	var canonical *stripeObject
+	if strings.HasPrefix(event.Type, "customer.subscription.") || strings.HasPrefix(event.Type, "invoice.") {
+		var preview stripeObject
+		if err := json.Unmarshal(event.Data.Object, &preview); err != nil {
+			return e.BadRequestError("El evento de Stripe no es válido.", err)
+		}
+		normalizeStripeObject(&preview)
+		subscriptionID := string(preview.Subscription)
+		if strings.HasPrefix(event.Type, "customer.subscription.") {
+			subscriptionID = preview.ID
+		}
+		if subscriptionID == "" {
+			return e.BadRequestError("El evento no identifica la suscripción.", nil)
+		}
+		current := new(stripeObject)
+		if err := s.getStripe(e.Request.Context(), "/subscriptions/"+url.PathEscape(subscriptionID), current); err != nil {
+			return e.Error(http.StatusBadGateway, "No se pudo reconciliar la suscripción con Stripe.", err)
+		}
+		normalizeStripeObject(current)
+		canonical = current
+	}
 	payloadHash := sha256.Sum256(payload)
-	outcome, err := s.applyEvent(e.App, event, hex.EncodeToString(payloadHash[:]))
+	outcome, err := s.applyEvent(e.App, event, hex.EncodeToString(payloadHash[:]), canonical)
 	if err != nil {
 		return e.InternalServerError("No se pudo aplicar el evento de facturación.", err)
 	}
 	return e.JSON(http.StatusOK, map[string]any{"received": true, "outcome": outcome})
 }
 
-func (s *Service) applyEvent(app core.App, event stripeEvent, payloadHash string) (string, error) {
+func (s *Service) applyEvent(app core.App, event stripeEvent, payloadHash string, canonical ...*stripeObject) (string, error) {
 	var object stripeObject
 	if err := json.Unmarshal(event.Data.Object, &object); err != nil {
 		return "", err
 	}
 	normalizeStripeObject(&object)
+	applyType := event.Type
+	if len(canonical) > 0 && canonical[0] != nil {
+		object = *canonical[0]
+		applyType = "customer.subscription.updated"
+	}
 	outcome := "ignored"
 	err := app.RunInTransaction(func(tx core.App) error {
 		if _, err := tx.FindFirstRecordByData("stripe_webhook_events", "eventId", event.ID); err == nil {
@@ -287,7 +325,7 @@ func (s *Service) applyEvent(app core.App, event stripeEvent, payloadHash string
 			last := subscription.GetDateTime("lastStripeEventAt").Time()
 			eventTime := time.Unix(event.Created, 0).UTC()
 			if last.IsZero() || !eventTime.Before(last) {
-				outcome = applyStripeObject(subscription, organization, event.Type, object, eventTime)
+				outcome = applyStripeObject(subscription, organization, applyType, object, eventTime)
 				if outcome == "applied" {
 					if err := tx.Save(subscription); err != nil {
 						return err
@@ -344,11 +382,13 @@ func applyStripeObject(subscription, organization *core.Record, eventType string
 		if object.CurrentPeriodEnd > 0 {
 			subscription.Set("currentPeriodEnd", time.Unix(object.CurrentPeriodEnd, 0).UTC().Format(time.RFC3339Nano))
 		}
+		if len(object.Items.Data) > 0 && object.Items.Data[0].ID != "" {
+			subscription.Set("stripeSubscriptionItemId", object.Items.Data[0].ID)
+			subscription.Set("stripeQuantitySynced", object.Items.Data[0].Quantity)
+		}
 		applySubscriptionStatus(subscription, organization, object.Status, eventTime)
-	case "invoice.payment_failed":
-		applySubscriptionStatus(subscription, organization, "past_due", eventTime)
-	case "invoice.paid", "invoice.payment_succeeded":
-		applySubscriptionStatus(subscription, organization, "active", eventTime)
+	case "invoice.payment_failed", "invoice.paid", "invoice.payment_succeeded":
+		return "ignored"
 	default:
 		return "ignored"
 	}
@@ -357,23 +397,32 @@ func applyStripeObject(subscription, organization *core.Record, eventType string
 }
 
 func applySubscriptionStatus(subscription, organization *core.Record, status string, now time.Time) {
+	manualOverride := organization.GetString("accessOverride") != ""
 	switch status {
 	case "active":
 		subscription.Set("billingStatus", "active")
 		subscription.Set("graceEndsAt", "")
 		subscription.Set("readOnlyUntil", "")
-		organization.Set("accessStatus", "active")
+		if !manualOverride {
+			organization.Set("accessStatus", "active")
+		}
 	case "trialing":
 		subscription.Set("billingStatus", "trialing")
-		organization.Set("accessStatus", "trialing")
+		if !manualOverride {
+			organization.Set("accessStatus", "trialing")
+		}
 	case "past_due", "unpaid", "paused", "incomplete":
 		subscription.Set("billingStatus", "past_due")
 		setGraceDates(subscription, now)
-		organization.Set("accessStatus", "grace")
+		if !manualOverride {
+			organization.Set("accessStatus", "grace")
+		}
 	case "canceled", "incomplete_expired":
 		subscription.Set("billingStatus", "canceled")
 		setGraceDates(subscription, now)
-		organization.Set("accessStatus", "grace")
+		if !manualOverride {
+			organization.Set("accessStatus", "grace")
+		}
 	}
 }
 
@@ -438,6 +487,101 @@ func (s *Service) postStripe(ctx context.Context, path string, values url.Values
 	return json.NewDecoder(limited).Decode(destination)
 }
 
+func (s *Service) getStripe(ctx context.Context, path string, destination any) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeAPIBase+path, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+s.secretKey)
+	if s.apiVersion != "" {
+		request.Header.Set("Stripe-Version", s.apiVersion)
+	}
+	response, err := s.client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	limited := io.LimitReader(response.Body, 1<<20)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, limited)
+		return fmt.Errorf("stripe returned status %d", response.StatusCode)
+	}
+	return json.NewDecoder(limited).Decode(destination)
+}
+
+func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *core.Record) error {
+	if !s.checkoutConfigured() || subscription.GetString("stripeSubscriptionItemId") == "" {
+		return nil
+	}
+	plan, err := app.FindRecordById("saas_plans", subscription.GetString("plan"))
+	if err != nil || plan.GetString("billingModel") != "tiered" {
+		return err
+	}
+	activeUsers, err := app.FindRecordsByFilter(
+		"users",
+		"organization = {:organization} && active = true",
+		"id",
+		100000,
+		0,
+		dbxParams("organization", subscription.GetString("organization")),
+	)
+	if err != nil {
+		return err
+	}
+	desired := max(1, subscription.GetInt("declaredHeadcount"), len(activeUsers))
+	if desired == subscription.GetInt("stripeQuantitySynced") {
+		return nil
+	}
+	var response stripeResponse
+	if err := s.postStripe(
+		ctx,
+		"/subscription_items/"+url.PathEscape(subscription.GetString("stripeSubscriptionItemId")),
+		url.Values{"quantity": {strconv.Itoa(desired)}},
+		&response,
+		fmt.Sprintf("quantity:%s:%d", subscription.Id, desired),
+	); err != nil {
+		return err
+	}
+	current, err := app.FindRecordById("organization_subscriptions", subscription.Id)
+	if err != nil {
+		return err
+	}
+	current.Set("stripeQuantitySynced", desired)
+	return app.Save(current)
+}
+
+func (s *Service) syncPendingQuantities(ctx context.Context, app core.App) error {
+	if !s.checkoutConfigured() {
+		return nil
+	}
+	records, err := app.FindRecordsByFilter(
+		"organization_subscriptions",
+		"stripeSubscriptionItemId != ''",
+		"updated",
+		1000,
+		0,
+	)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if err := s.syncQuantity(ctx, app, record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) priceID(plan *core.Record) string {
+	if plan == nil {
+		return ""
+	}
+	if configured := s.priceByPlan[plan.GetString("code")]; configured != "" {
+		return configured
+	}
+	return plan.GetString("stripePriceId")
+}
+
 func validIdempotencyKey(value string) bool {
 	if len(value) < 16 || len(value) > 80 {
 		return false
@@ -455,7 +599,7 @@ func validIdempotencyKey(value string) bool {
 }
 
 func (s *Service) checkoutConfigured() bool {
-	if s.secretKey == "" || s.publicURL == "" {
+	if !s.enabled || s.secretKey == "" || s.webhookSecret == "" || s.publicURL == "" {
 		return false
 	}
 	parsed, err := url.Parse(s.publicURL)

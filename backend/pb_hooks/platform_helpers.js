@@ -100,6 +100,7 @@ function organizationView(app, organization) {
     taxId: organization.getString("taxId"),
     timezone: organization.getString("timezone"),
     accessStatus: organization.getString("accessStatus") || "active",
+    accessOverride: organization.getString("accessOverride"),
     billingStatus: subscription ? subscription.getString("billingStatus") : "",
     planCode,
     planName,
@@ -243,8 +244,17 @@ function existingIdempotency(app, scope, key) {
       { scope, key },
     );
     if (new Date(record.getString("expiresAt")).getTime() > Date.now()) {
-      return record.get("result");
+      const value = record.get("result");
+      if (typeof value === "string") return JSON.parse(value || "{}");
+      if (
+        Array.isArray(value) &&
+        value.every((item) => typeof item === "number")
+      ) {
+        return JSON.parse(String.fromCharCode.apply(null, value));
+      }
+      return JSON.parse(JSON.stringify(value || {}));
     }
+    app.delete(record);
   } catch (_) {}
   return null;
 }
@@ -266,6 +276,8 @@ function createOrganization(app, operator, event, body) {
     );
   } catch (_) {}
   if (existingOrganization) {
+    const replayAfterRace = existingIdempotency(app, scope, key);
+    if (replayAfterRace) return { replay: true, result: replayAfterRace };
     throw new BadRequestError("Ya existe una empresa con ese NIF/CIF.");
   }
   let existingOwner = null;
@@ -273,105 +285,116 @@ function createOrganization(app, operator, event, body) {
     existingOwner = app.findAuthRecordByEmail("users", input.ownerEmail);
   } catch (_) {}
   if (existingOwner) {
+    const replayAfterRace = existingIdempotency(app, scope, key);
+    if (replayAfterRace) return { replay: true, result: replayAfterRace };
     throw new BadRequestError(
       "Ese correo ya pertenece a una cuenta existente.",
     );
   }
 
   let result = null;
-  app.runInTransaction((txApp) => {
-    const plan = txApp.findFirstRecordByData(
-      "saas_plans",
-      "code",
-      input.planCode,
-    );
-    if (!plan.getBool("active")) {
-      throw new BadRequestError("El plan seleccionado no está disponible.");
-    }
+  try {
+    app.runInTransaction((txApp) => {
+      const plan = txApp.findFirstRecordByData(
+        "saas_plans",
+        "code",
+        input.planCode,
+      );
+      if (!plan.getBool("active")) {
+        throw new BadRequestError("El plan seleccionado no está disponible.");
+      }
 
-    const organization = new Record(
-      txApp.findCollectionByNameOrId("organizations"),
-    );
-    organization.set("name", input.name);
-    organization.set("taxId", input.taxId);
-    organization.set("timezone", input.timezone);
-    organization.set("retentionYears", 4);
-    organization.set("privacyContact", input.privacyContact);
-    organization.set("privacyNoticeVersion", "2026-07-30");
-    organization.set("brandPrimaryColor", "#ef4d32");
-    organization.set("brandSecondaryColor", "#1c1917");
-    organization.set("pwaName", input.name);
-    organization.set("pwaShortName", input.name.slice(0, 20));
-    organization.set("manualTimeApprovalRequired", false);
-    organization.set("timeCorrectionApprovalRequired", true);
-    organization.set("accessStatus", "active");
-    txApp.save(organization);
+      const organization = new Record(
+        txApp.findCollectionByNameOrId("organizations"),
+      );
+      organization.set("name", input.name);
+      organization.set("taxId", input.taxId);
+      organization.set("timezone", input.timezone);
+      organization.set("retentionYears", 4);
+      organization.set("privacyContact", input.privacyContact);
+      organization.set("privacyNoticeVersion", "2026-07-30");
+      organization.set("brandPrimaryColor", "#ef4d32");
+      organization.set("brandSecondaryColor", "#1c1917");
+      organization.set("pwaName", input.name);
+      organization.set("pwaShortName", input.name.slice(0, 20));
+      organization.set("manualTimeApprovalRequired", false);
+      organization.set("timeCorrectionApprovalRequired", true);
+      organization.set("accessStatus", "active");
+      txApp.save(organization);
 
-    const owner = new Record(txApp.findCollectionByNameOrId("users"));
-    const temporaryPassword = $security.randomString(48);
-    owner.set("email", input.ownerEmail);
-    owner.set("password", temporaryPassword);
-    owner.set("passwordConfirm", temporaryPassword);
-    owner.set("verified", false);
-    owner.set("name", input.ownerName);
-    owner.set("organization", organization.id);
-    owner.set("role", "admin");
-    owner.set("active", true);
-    owner.set("employeeCode", "ADMIN");
-    owner.set("weeklyHours", 40);
-    owner.set("employmentType", "full_time");
-    owner.set("contractedWeeklyMinutes", 2400);
-    owner.set("complementaryHoursAgreement", false);
-    owner.set("scheduleMode", "scheduled");
-    owner.set("flexibleWeekdays", [1, 2, 3, 4, 5]);
-    owner.set("invitationStatus", "");
-    owner.set("privacyNoticeAcknowledgedVersion", "");
-    owner.set("privacyNoticeAcknowledgedAt", "");
-    txApp.save(owner);
+      const owner = new Record(txApp.findCollectionByNameOrId("users"));
+      const temporaryPassword = $security.randomString(48);
+      owner.set("email", input.ownerEmail);
+      owner.set("password", temporaryPassword);
+      owner.set("passwordConfirm", temporaryPassword);
+      owner.set("verified", false);
+      owner.set("name", input.ownerName);
+      owner.set("organization", organization.id);
+      owner.set("role", "admin");
+      owner.set("active", true);
+      owner.set("employeeCode", "ADMIN");
+      owner.set("weeklyHours", 40);
+      owner.set("employmentType", "full_time");
+      owner.set("contractedWeeklyMinutes", 2400);
+      owner.set("complementaryHoursAgreement", false);
+      owner.set("scheduleMode", "scheduled");
+      owner.set("flexibleWeekdays", [1, 2, 3, 4, 5]);
+      owner.set("invitationStatus", "pending");
+      owner.set("privacyNoticeAcknowledgedVersion", "");
+      owner.set("privacyNoticeAcknowledgedAt", "");
+      txApp.save(owner);
 
-    const subscription = new Record(
-      txApp.findCollectionByNameOrId("organization_subscriptions"),
-    );
-    subscription.set("organization", organization.id);
-    subscription.set("plan", plan.id);
-    subscription.set("billingStatus", "manual_active");
-    subscription.set("declaredHeadcount", input.declaredHeadcount);
-    txApp.save(subscription);
+      const subscription = new Record(
+        txApp.findCollectionByNameOrId("organization_subscriptions"),
+      );
+      subscription.set("organization", organization.id);
+      subscription.set("plan", plan.id);
+      subscription.set("billingStatus", "manual_active");
+      subscription.set("declaredHeadcount", input.declaredHeadcount);
+      txApp.save(subscription);
 
-    result = {
-      organizationId: organization.id,
-      ownerId: owner.id,
-      name: input.name,
-      accessStatus: "active",
-      billingStatus: "manual_active",
-      invitationSent: false,
-    };
+      result = {
+        organizationId: organization.id,
+        ownerId: owner.id,
+        name: input.name,
+        accessStatus: "active",
+        billingStatus: "manual_active",
+        invitationSent: false,
+      };
 
-    const idempotency = new Record(
-      txApp.findCollectionByNameOrId("platform_idempotency"),
-    );
-    idempotency.set("operator", operator.id);
-    idempotency.set("scope", scope);
-    idempotency.set("key", key);
-    idempotency.set("result", result);
-    idempotency.set(
-      "expiresAt",
-      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    );
-    txApp.save(idempotency);
+      const idempotency = new Record(
+        txApp.findCollectionByNameOrId("platform_idempotency"),
+      );
+      idempotency.set("operator", operator.id);
+      idempotency.set("scope", scope);
+      idempotency.set("key", key);
+      idempotency.set("result", result);
+      idempotency.set(
+        "expiresAt",
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      );
+      txApp.save(idempotency);
 
-    audit(
-      txApp,
-      operator,
-      "organization.provisioned",
-      "organization",
-      organization.id,
-      organization.id,
-      "Alta gestionada desde el área de proveedor.",
-      key,
-      { planCode: input.planCode, declaredHeadcount: input.declaredHeadcount },
-    );
-  });
+      audit(
+        txApp,
+        operator,
+        "organization.provisioned",
+        "organization",
+        organization.id,
+        organization.id,
+        "Alta gestionada desde el área de proveedor.",
+        key,
+        {
+          planCode: input.planCode,
+          declaredHeadcount: input.declaredHeadcount,
+        },
+      );
+    });
+  } catch (error) {
+    const replayAfterRace = existingIdempotency(app, scope, key);
+    if (replayAfterRace) return { replay: true, result: replayAfterRace };
+    throw error;
+  }
 
   return { replay: false, result };
 }
@@ -404,6 +427,7 @@ function updateAccess(app, operator, organizationId, body) {
   app.runInTransaction((txApp) => {
     const current = txApp.findRecordById("organizations", organizationId);
     current.set("accessStatus", status);
+    current.set("accessOverride", status);
     txApp.save(current);
     audit(
       txApp,
@@ -472,6 +496,7 @@ function reconcileLifecycle(app) {
     } catch (_) {
       continue;
     }
+    if (organization.getString("accessOverride")) continue;
     let next = organization.getString("accessStatus") || "trialing";
     const trial = new Date(subscription.getString("trialEndsAt")).getTime();
     const grace = new Date(subscription.getString("graceEndsAt")).getTime();

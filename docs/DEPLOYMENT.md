@@ -41,10 +41,10 @@ Activa el cambio en ventanas separadas:
    protocolos incluyen escrituras.
 6. Con SMTP validado, habilita `PB_SELF_SIGNUP_ENABLED=true`. La prueba de 14
    días empieza al aceptar la invitación, no al enviar el formulario.
-7. Configura Stripe y registra el webhook firmado antes de anunciar la
-   contratación autoservicio.
+7. Configura Stripe, registra el webhook firmado y sólo entonces activa
+   `PB_BILLING_ENABLED=true` antes de anunciar la contratación autoservicio.
 
-Para detener el cambio sin tocar datos, devuelve los tres flags a `false` y
+Para detener el cambio sin tocar datos, devuelve los cuatro flags a `false` y
 reinicia. No ejecutes `migrate down` en producción: el esquema es compatible
 hacia atrás. Restaura la instantánea sólo ante corrupción o pérdida de
 integridad comprobada.
@@ -53,7 +53,9 @@ integridad comprobada.
 
 El ciclo automático es `trialing → grace → read_only → suspended`: 14 días de
 prueba, 7 de cortesía y 30 adicionales de lectura administrativa. Un pago
-confirmado vuelve a `active`. `suspended` bloquea el acceso, pero nunca purga
+confirmado vuelve a `active`, salvo que un operador haya fijado manualmente el
+estado; esa suspensión o restricción prevalece sobre la facturación.
+`suspended` bloquea el acceso, pero nunca purga
 información; la retención mínima y las preservaciones legales siguen mandando.
 
 ### Stripe
@@ -61,12 +63,18 @@ información; la retención mínima y las preservaciones legales siguen mandando
 Configura mediante el gestor de secretos del proveedor:
 
 ```dotenv
+PB_BILLING_ENABLED=false
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_API_VERSION=
 STRIPE_PRICE_STARTER_FIXED=
 STRIPE_PRICE_GROWTH_TIERED=
 ```
+
+Activa `PB_BILLING_ENABLED=true` sólo cuando la URL pública, la clave secreta,
+el secreto del webhook y el precio del plan estén configurados y probados. De
+este modo Checkout no puede cobrar si la recepción firmada de eventos no está
+operativa.
 
 El webhook es `POST /api/openjornada/stripe/webhook`. OpenJornada valida el
 cuerpo original, HMAC y antigüedad, guarda sólo ID, tipo y hash del evento y
