@@ -2,8 +2,29 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-test_data_dir=$(mktemp -d /tmp/aura-e2e-XXXXXX)
 pb_binary="$project_root/backend/bin/pocketbase"
+test_data_dir=""
+pb_pid=""
+web_pid=""
+
+cleanup() {
+  if [ -n "$web_pid" ]; then
+    kill "$web_pid" 2>/dev/null || true
+    wait "$web_pid" 2>/dev/null || true
+  fi
+  if [ -n "$pb_pid" ]; then
+    kill "$pb_pid" 2>/dev/null || true
+    wait "$pb_pid" 2>/dev/null || true
+  fi
+  case "$test_data_dir" in
+    /tmp/aura-e2e-??????) rm -rf -- "$test_data_dir" ;;
+  esac
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+test_data_dir=$(mktemp -d /tmp/aura-e2e-XXXXXX)
 
 mkdir -p "$project_root/backend/bin"
 (cd "$project_root" && go build -o "$pb_binary" ./cmd/openjornada)
@@ -34,23 +55,29 @@ export PB_SMTP_TLS="false"
   --migrationsDir "$project_root/backend/pb_migrations" \
   --hooksDir "$project_root/backend/pb_hooks"
 
+if ! command -v script >/dev/null 2>&1 || ! script --version 2>&1 | grep -qi util-linux; then
+  echo "El E2E del área de proveedor necesita 'script' de util-linux." >&2
+  exit 1
+fi
+
+create_platform_operator() {
+  operator_email=$1
+  operator_name=$2
+  operator_role=$3
+  operator_command="\"$pb_binary\" platform operator create --dir=\"$test_data_dir\" --migrationsDir=\"$project_root/backend/pb_migrations\" --hooksDir=\"$project_root/backend/pb_hooks\" --email=\"$operator_email\" --name=\"$operator_name\" --role=\"$operator_role\""
+  printf 'PlatformE2EPassword123!\nPlatformE2EPassword123!\n' | \
+    script -qec "$operator_command" /dev/null >/dev/null
+}
+
+create_platform_operator "platform-admin@example.com" "Operaciones E2E" "admin"
+create_platform_operator "platform-support@example.com" "Soporte E2E" "support"
+
 "$pb_binary" serve \
   --http=127.0.0.1:8090 \
   --dir "$test_data_dir" \
   --migrationsDir "$project_root/backend/pb_migrations" \
   --hooksDir "$project_root/backend/pb_hooks" &
 pb_pid=$!
-web_pid=""
-
-cleanup() {
-  if [ -n "$web_pid" ]; then
-    kill "$web_pid" 2>/dev/null || true
-  fi
-  kill "$pb_pid" 2>/dev/null || true
-  wait "$web_pid" 2>/dev/null || true
-  wait "$pb_pid" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
 
 sleep 1
 if ! kill -0 "$pb_pid" 2>/dev/null; then
