@@ -7,3 +7,4 @@ web/playwright-report/
 web/test-results/
 .codegraph/
 *.log
+tmp/
