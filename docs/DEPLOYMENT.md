@@ -55,6 +55,9 @@ El ciclo automático es `trialing → grace → read_only → suspended`: 14 dí
 prueba, 7 de cortesía y 30 adicionales de lectura administrativa. Un pago
 confirmado vuelve a `active`, salvo que un operador haya fijado manualmente el
 estado; esa suspensión o restricción prevalece sobre la facturación.
+El operador puede devolver explícitamente la empresa a gestión automática desde
+`/proveedor`; el cambio queda auditado y reconcilia inmediatamente el estado
+efectivo con la suscripción.
 `suspended` bloquea el acceso, pero nunca purga
 información; la retención mínima y las preservaciones legales siguen mandando.
 
@@ -78,9 +81,11 @@ operativa.
 
 El webhook es `POST /api/openjornada/stripe/webhook`. OpenJornada valida el
 cuerpo original, HMAC y antigüedad, guarda sólo ID, tipo y hash del evento y
-rechaza actualizaciones anteriores a la última aplicada. No registres cuerpos
-de webhook ni claves. Fija `STRIPE_API_VERSION` a la versión probada por la
-cuenta antes de producción.
+serializa la reconciliación contra el estado canónico de Stripe. La cantidad
+facturable usa una revisión monotónica, una clave idempotente distinta por
+intento confirmado y sólo se persiste tras validar la respuesta de Stripe. No
+registres cuerpos de webhook ni claves. Fija `STRIPE_API_VERSION` a la versión
+probada por la cuenta antes de producción.
 
 ### Instantáneas, RPO y restauración
 

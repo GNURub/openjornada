@@ -15,12 +15,16 @@ laboral, la trazabilidad y el aislamiento de datos entre empresas.
   empresa permanece consistente y la invitación puede reenviarse.
 - El alta pública opcional ofrece 14 días sin tarjeta. La cuenta queda
   verificada al aceptar el enlace de un solo uso y ese momento inicia la prueba.
+  Los reintentos reutilizan de forma segura una entrega persistente cuyo token se
+  conserva cifrado, sin duplicar empresas ni invalidar el enlace ya enviado.
 - Stripe Checkout admite cuota mensual fija o por tramos de plantilla declarada;
   Customer Portal gestiona el pago. Los webhooks son firmados, idempotentes y
-  toleran entregas fuera de orden.
+  reconcilian en serie el estado canónico aunque lleguen fuera de orden. Los
+  cambios de cantidad se versionan y validan contra la respuesta de Stripe.
 - `trialing`, `active`, `grace`, `read_only` y `suspended` degradan el acceso sin
   eliminar datos. En `read_only` sólo `admin` consulta, exporta o factura;
-  terminales y MCP quedan deshabilitados.
+  terminales y MCP quedan deshabilitados. Un operador puede fijar un estado
+  manual o devolver la empresa al ciclo automático con auditoría.
 - No existe suplantación desde soporte. El plano de control sólo entrega
   metadatos operativos, conteos y datos de suscripción.
 

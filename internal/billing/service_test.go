@@ -126,3 +126,13 @@ func TestValidIdempotencyKey(t *testing.T) {
 		}
 	}
 }
+
+func TestQuantityIdempotencyKeyChangesWithRevision(t *testing.T) {
+	t.Parallel()
+	firstFive := quantityIdempotencyKey("sub_record", 1)
+	six := quantityIdempotencyKey("sub_record", 2)
+	secondFive := quantityIdempotencyKey("sub_record", 3)
+	if firstFive == six || firstFive == secondFive || six == secondFive {
+		t.Fatalf("quantity keys must be unique per revision: %q, %q, %q", firstFive, six, secondFive)
+	}
+}

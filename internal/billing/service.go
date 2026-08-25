@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pocketbase/pocketbase/apis"
@@ -35,6 +36,8 @@ type Service struct {
 	publicURL     string
 	apiVersion    string
 	priceByPlan   map[string]string
+	reconcileMu   sync.Mutex
+	quantityMu    sync.Mutex
 }
 
 type stripeEvent struct {
@@ -91,8 +94,9 @@ func (id *expandableID) UnmarshalJSON(data []byte) error {
 }
 
 type stripeResponse struct {
-	ID  string `json:"id"`
-	URL string `json:"url"`
+	ID       string `json:"id"`
+	URL      string `json:"url"`
+	Quantity int    `json:"quantity"`
 }
 
 func New(app core.App) *Service {
@@ -274,6 +278,14 @@ func (s *Service) webhook(e *core.RequestEvent) error {
 	if _, err := e.App.FindFirstRecordByData("stripe_webhook_events", "eventId", event.ID); err == nil {
 		return e.JSON(http.StatusOK, map[string]bool{"received": true})
 	}
+	// OpenJornada is deliberately deployed as a single PocketBase node. Serialize
+	// canonical reconciliation so two deliveries cannot apply stale snapshots in
+	// opposite order inside that process.
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	if _, err := e.App.FindFirstRecordByData("stripe_webhook_events", "eventId", event.ID); err == nil {
+		return e.JSON(http.StatusOK, map[string]bool{"received": true})
+	}
 	var canonical *stripeObject
 	if strings.HasPrefix(event.Type, "customer.subscription.") || strings.HasPrefix(event.Type, "invoice.") {
 		var preview stripeObject
@@ -310,7 +322,8 @@ func (s *Service) applyEvent(app core.App, event stripeEvent, payloadHash string
 	}
 	normalizeStripeObject(&object)
 	applyType := event.Type
-	if len(canonical) > 0 && canonical[0] != nil {
+	reconciled := len(canonical) > 0 && canonical[0] != nil
+	if reconciled {
 		object = *canonical[0]
 		applyType = "customer.subscription.updated"
 	}
@@ -324,7 +337,10 @@ func (s *Service) applyEvent(app core.App, event stripeEvent, payloadHash string
 		if err == nil && subscription != nil {
 			last := subscription.GetDateTime("lastStripeEventAt").Time()
 			eventTime := time.Unix(event.Created, 0).UTC()
-			if last.IsZero() || !eventTime.Before(last) {
+			if reconciled {
+				eventTime = time.Now().UTC()
+			}
+			if reconciled || last.IsZero() || !eventTime.Before(last) {
 				outcome = applyStripeObject(subscription, organization, applyType, object, eventTime)
 				if outcome == "applied" {
 					if err := tx.Save(subscription); err != nil {
@@ -509,7 +525,19 @@ func (s *Service) getStripe(ctx context.Context, path string, destination any) e
 	return json.NewDecoder(limited).Decode(destination)
 }
 
+func quantityIdempotencyKey(subscriptionID string, revision int) string {
+	return fmt.Sprintf("quantity:%s:%d", subscriptionID, revision)
+}
+
 func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *core.Record) error {
+	s.quantityMu.Lock()
+	defer s.quantityMu.Unlock()
+
+	currentSubscription, err := app.FindRecordById("organization_subscriptions", subscription.Id)
+	if err != nil {
+		return err
+	}
+	subscription = currentSubscription
 	if !s.checkoutConfigured() || subscription.GetString("stripeSubscriptionItemId") == "" {
 		return nil
 	}
@@ -530,7 +558,20 @@ func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *
 	}
 	desired := max(1, subscription.GetInt("declaredHeadcount"), len(activeUsers))
 	if desired == subscription.GetInt("stripeQuantitySynced") {
+		if subscription.GetInt("stripeQuantityPending") != 0 {
+			subscription.Set("stripeQuantityPending", 0)
+			return app.Save(subscription)
+		}
 		return nil
+	}
+	revision := subscription.GetInt("stripeQuantityRevision")
+	if revision == 0 || subscription.GetInt("stripeQuantityPending") != desired {
+		revision++
+		subscription.Set("stripeQuantityRevision", revision)
+		subscription.Set("stripeQuantityPending", desired)
+		if err := app.Save(subscription); err != nil {
+			return err
+		}
 	}
 	var response stripeResponse
 	if err := s.postStripe(
@@ -538,15 +579,22 @@ func (s *Service) syncQuantity(ctx context.Context, app core.App, subscription *
 		"/subscription_items/"+url.PathEscape(subscription.GetString("stripeSubscriptionItemId")),
 		url.Values{"quantity": {strconv.Itoa(desired)}},
 		&response,
-		fmt.Sprintf("quantity:%s:%d", subscription.Id, desired),
+		quantityIdempotencyKey(subscription.Id, revision),
 	); err != nil {
 		return err
+	}
+	if response.Quantity != desired {
+		return fmt.Errorf("stripe returned quantity %d, expected %d", response.Quantity, desired)
 	}
 	current, err := app.FindRecordById("organization_subscriptions", subscription.Id)
 	if err != nil {
 		return err
 	}
+	if current.GetInt("stripeQuantityRevision") != revision || current.GetInt("stripeQuantityPending") != desired {
+		return nil
+	}
 	current.Set("stripeQuantitySynced", desired)
+	current.Set("stripeQuantityPending", 0)
 	return app.Save(current)
 }
 

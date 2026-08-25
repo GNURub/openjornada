@@ -1,6 +1,7 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
+  AccessMode,
   AccessStatus,
   PlatformOrganization,
   PlatformService,
@@ -74,11 +75,16 @@ export class PlatformDashboardComponent implements OnInit {
 
   protected async changeAccess(
     organization: PlatformOrganization,
-    accessStatus: AccessStatus,
+    accessStatus: AccessMode,
   ): Promise<void> {
-    if (!this.auth.canWrite() || organization.accessStatus === accessStatus) return;
+    if (!this.auth.canWrite()) return;
+    if (
+      (accessStatus === 'automatic' && !organization.accessOverride) ||
+      (accessStatus !== 'automatic' && organization.accessOverride === accessStatus)
+    )
+      return;
     const reason = window.prompt(
-      `Motivo del cambio de ${organization.accessStatus} a ${accessStatus} (mínimo 10 caracteres):`,
+      `Motivo del cambio a ${accessStatus === 'automatic' ? 'gestión automática' : accessStatus} (mínimo 10 caracteres):`,
     );
     if (!reason) return;
     this.saving.set(true);

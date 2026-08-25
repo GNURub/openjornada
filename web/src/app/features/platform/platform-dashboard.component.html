@@ -228,12 +228,13 @@
                         Reenviar invitación
                       </button>
                       <select
-                        [ngModel]="organization.accessStatus"
+                        [ngModel]="organization.accessOverride || 'automatic'"
                         (ngModelChange)="changeAccess(organization, $event)"
                         [disabled]="saving()"
                         aria-label="Cambiar estado de acceso"
                         class="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold"
                       >
+                        <option value="automatic">Gestión automática</option>
                         <option value="trialing">Prueba</option>
                         <option value="active">Activo</option>
                         <option value="grace">Cortesía</option>

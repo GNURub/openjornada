@@ -415,7 +415,8 @@ function updateAccess(app, operator, organizationId, body) {
   requireOperator(operator, true);
   const status = cleanText(body.accessStatus, 20);
   const reason = cleanText(body.reason, 500);
-  if (ACCESS_STATUSES.indexOf(status) === -1) {
+  const automatic = status === "automatic";
+  if (!automatic && ACCESS_STATUSES.indexOf(status) === -1) {
     throw new BadRequestError("El estado de acceso no es válido.");
   }
   if (reason.length < 10) {
@@ -423,11 +424,16 @@ function updateAccess(app, operator, organizationId, body) {
   }
   const organization = app.findRecordById("organizations", organizationId);
   const previous = organization.getString("accessStatus") || "active";
-  if (previous === status) return organizationView(app, organization);
+  const previousOverride = organization.getString("accessOverride");
+  if (
+    (automatic && !previousOverride) ||
+    (!automatic && previous === status && previousOverride === status)
+  )
+    return organizationView(app, organization);
   app.runInTransaction((txApp) => {
     const current = txApp.findRecordById("organizations", organizationId);
-    current.set("accessStatus", status);
-    current.set("accessOverride", status);
+    if (!automatic) current.set("accessStatus", status);
+    current.set("accessOverride", automatic ? "" : status);
     txApp.save(current);
     audit(
       txApp,
@@ -438,9 +444,15 @@ function updateAccess(app, operator, organizationId, body) {
       organizationId,
       reason,
       "",
-      { previous, current: status },
+      {
+        previous,
+        current: automatic ? previous : status,
+        previousOverride,
+        accessMode: automatic ? "automatic" : "manual",
+      },
     );
   });
+  if (automatic) reconcileLifecycle(app);
   return organizationView(
     app,
     app.findRecordById("organizations", organizationId),

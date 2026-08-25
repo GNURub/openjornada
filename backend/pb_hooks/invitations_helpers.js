@@ -187,7 +187,7 @@ function issueInvitation(app, actor, userId) {
   };
 }
 
-function issueManagedInvitation(app, userId, platformOperatorId) {
+function issueManagedInvitation(app, userId, platformOperatorId, fixedToken) {
   if (!app.settings().smtp.enabled) {
     throw new BadRequestError(
       "El correo SMTP no está configurado. Revisa la configuración antes de enviar la invitación.",
@@ -205,21 +205,35 @@ function issueManagedInvitation(app, userId, platformOperatorId) {
     );
   }
 
-  const token = $security.randomString(64);
+  const token = fixedToken || $security.randomString(64);
   const sentAt = new Date();
   const expiresAt = new Date(sentAt.getTime() + 72 * 60 * 60 * 1000);
-  const invitation = new Record(
-    app.findCollectionByNameOrId("user_invitations"),
-  );
-  invitation.set("organization", user.getString("organization"));
-  invitation.set("user", user.id);
-  invitation.set("email", user.email());
-  invitation.set("tokenHash", $security.sha256(token));
-  invitation.set("status", "pending");
-  invitation.set("sentAt", sentAt.toISOString());
-  invitation.set("expiresAt", expiresAt.toISOString());
-  invitation.set("platformOperator", platformOperatorId || "");
-  app.save(invitation);
+  const tokenHash = $security.sha256(token);
+  let invitation = null;
+  try {
+    invitation = app.findFirstRecordByData(
+      "user_invitations",
+      "tokenHash",
+      tokenHash,
+    );
+  } catch (_) {}
+  if (!invitation) {
+    invitation = new Record(app.findCollectionByNameOrId("user_invitations"));
+    invitation.set("organization", user.getString("organization"));
+    invitation.set("user", user.id);
+    invitation.set("email", user.email());
+    invitation.set("tokenHash", tokenHash);
+    invitation.set("status", "pending");
+    invitation.set("sentAt", sentAt.toISOString());
+    invitation.set("expiresAt", expiresAt.toISOString());
+    invitation.set("platformOperator", platformOperatorId || "");
+    app.save(invitation);
+  } else if (
+    invitation.getString("status") !== "pending" ||
+    invitation.getString("user") !== user.id
+  ) {
+    throw new BadRequestError("La invitación reservada ya no es válida.");
+  }
 
   const link = publicURL(app, token);
   const appName = app.settings().meta.appName;
@@ -275,17 +289,19 @@ function issueManagedInvitation(app, userId, platformOperatorId) {
     item.set("status", "revoked");
     app.save(item);
   }
+  const persistedSentAt = invitation.getString("sentAt");
+  const persistedExpiresAt = invitation.getString("expiresAt");
   user.set("invitationStatus", "pending");
-  user.set("invitationSentAt", sentAt.toISOString());
-  user.set("invitationExpiresAt", expiresAt.toISOString());
+  user.set("invitationSentAt", persistedSentAt);
+  user.set("invitationExpiresAt", persistedExpiresAt);
   user.set("invitationAcceptedAt", "");
   app.save(user);
 
   return {
     userId: user.id,
     status: "pending",
-    sentAt: sentAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
+    sentAt: persistedSentAt,
+    expiresAt: persistedExpiresAt,
   };
 }
 
@@ -301,8 +317,8 @@ function issuePlatformInvitation(app, operator, userId) {
   return issueManagedInvitation(app, userId, operator.id);
 }
 
-function issueSignupInvitation(app, userId) {
-  return issueManagedInvitation(app, userId, "");
+function issueSignupInvitation(app, userId, fixedToken) {
+  return issueManagedInvitation(app, userId, "", fixedToken);
 }
 
 function invitationDetails(app, token) {

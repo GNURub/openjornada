@@ -68,33 +68,130 @@ function plainResult(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
 
-function deliverInvitation(app, scope, key, result, ownerEmail) {
-  result = plainResult(result);
-  if (!result.ownerId) {
-    const owner = app.findAuthRecordByEmail("users", ownerEmail);
-    result.ownerId = owner.id;
-    result.organizationId = owner.getString("organization");
+function encryptionKey() {
+  const key = $os.getenv("PB_ENCRYPTION_KEY") || "";
+  if (key.length !== 32) {
+    throw new BadRequestError(
+      "El alta está temporalmente deshabilitada por una configuración incompleta.",
+    );
   }
-  if (result.invitationSent) return result;
+  return key;
+}
+
+function deliverInvitation(app, scope, key, ownerEmail) {
+  let claim = null;
+  app.runInTransaction((txApp) => {
+    const stored = txApp.findFirstRecordByFilter(
+      "platform_idempotency",
+      "scope = {:scope} && key = {:key}",
+      { scope, key },
+    );
+    const result = plainResult(stored.get("result"));
+    if (!result.ownerId) {
+      const owner = txApp.findAuthRecordByEmail("users", ownerEmail);
+      result.ownerId = owner.id;
+      result.organizationId = owner.getString("organization");
+    }
+    if (
+      result.invitationSent ||
+      stored.getString("deliveryStatus") === "sent"
+    ) {
+      result.invitationSent = true;
+      stored.set("result", result);
+      stored.set("deliveryStatus", "sent");
+      stored.set("deliveryClaimedAt", "");
+      txApp.save(stored);
+      claim = { result, sent: true, token: "" };
+      return;
+    }
+    const claimedAt = new Date(stored.getString("deliveryClaimedAt")).getTime();
+    if (
+      stored.getString("deliveryStatus") === "sending" &&
+      Number.isFinite(claimedAt) &&
+      Date.now() - claimedAt < 5 * 60 * 1000
+    ) {
+      throw new BadRequestError(
+        "La invitación se está enviando. Espera unos segundos antes de reintentar.",
+      );
+    }
+    let ciphertext = stored.getString("deliveryTokenCiphertext");
+    if (!ciphertext) {
+      ciphertext = $security.encrypt(
+        $security.randomString(64),
+        encryptionKey(),
+      );
+      stored.set("deliveryTokenCiphertext", ciphertext);
+    }
+    stored.set("deliveryStatus", "sending");
+    stored.set("deliveryClaimedAt", new Date().toISOString());
+    stored.set("result", result);
+    txApp.save(stored);
+    claim = {
+      result,
+      sent: false,
+      token: String($security.decrypt(ciphertext, encryptionKey())),
+    };
+  });
+  if (claim.sent) return claim.result;
   try {
     require(`${__hooks}/invitations_helpers.js`).issueSignupInvitation(
       app,
-      result.ownerId,
+      claim.result.ownerId,
+      claim.token,
     );
   } catch (_) {
+    try {
+      app.runInTransaction((txApp) => {
+        const stored = txApp.findFirstRecordByFilter(
+          "platform_idempotency",
+          "scope = {:scope} && key = {:key}",
+          { scope, key },
+        );
+        if (stored.getString("deliveryStatus") !== "sent") {
+          stored.set("deliveryStatus", "pending");
+          stored.set("deliveryClaimedAt", "");
+          txApp.save(stored);
+        }
+      });
+    } catch (_) {}
     throw new BadRequestError(
       "La empresa se ha reservado, pero no se pudo enviar la invitación. Reintenta el alta con los mismos datos.",
     );
   }
-  result.invitationSent = true;
-  const stored = app.findFirstRecordByFilter(
+  claim.result.invitationSent = true;
+  app.runInTransaction((txApp) => {
+    const stored = txApp.findFirstRecordByFilter(
+      "platform_idempotency",
+      "scope = {:scope} && key = {:key}",
+      { scope, key },
+    );
+    stored.set("result", claim.result);
+    stored.set("deliveryStatus", "sent");
+    stored.set("deliveryClaimedAt", "");
+    txApp.save(stored);
+  });
+  return claim.result;
+}
+
+function recoverIncompleteSignup(app, scope, ownerEmail) {
+  const records = app.findRecordsByFilter(
     "platform_idempotency",
-    "scope = {:scope} && key = {:key}",
-    { scope, key },
+    "scope = {:scope}",
+    "-created",
+    20,
+    0,
+    { scope },
   );
-  stored.set("result", result);
-  app.save(stored);
-  return result;
+  for (const record of records) {
+    const result = plainResult(record.get("result"));
+    if (
+      !result.invitationSent &&
+      record.getString("deliveryStatus") !== "sent"
+    ) {
+      return deliverInvitation(app, scope, record.getString("key"), ownerEmail);
+    }
+  }
+  return null;
 }
 
 function signup(app, body) {
@@ -114,12 +211,15 @@ function signup(app, body) {
     );
   } catch (_) {}
   if (previous) {
-    if (new Date(previous.getString("expiresAt")).getTime() > Date.now()) {
+    const previousResult = plainResult(previous.get("result"));
+    if (
+      new Date(previous.getString("expiresAt")).getTime() > Date.now() ||
+      !previousResult.invitationSent
+    ) {
       return deliverInvitation(
         app,
         scope,
         input.idempotencyKey,
-        previous.get("result"),
         input.ownerEmail,
       );
     }
@@ -148,10 +248,11 @@ function signup(app, body) {
         app,
         scope,
         input.idempotencyKey,
-        replay.get("result"),
         input.ownerEmail,
       );
     }
+    const recovered = recoverIncompleteSignup(app, scope, input.ownerEmail);
+    if (recovered) return recovered;
     throw new BadRequestError("Ya existe una empresa con ese NIF/CIF.");
   }
   try {
@@ -173,10 +274,11 @@ function signup(app, body) {
         app,
         scope,
         input.idempotencyKey,
-        replay.get("result"),
         input.ownerEmail,
       );
     }
+    const recovered = recoverIncompleteSignup(app, scope, input.ownerEmail);
+    if (recovered) return recovered;
     throw new BadRequestError("Ya existe una cuenta con ese correo.");
   }
 
@@ -262,6 +364,11 @@ function signup(app, body) {
       idempotency.set("scope", scope);
       idempotency.set("key", input.idempotencyKey);
       idempotency.set("result", result);
+      idempotency.set("deliveryStatus", "pending");
+      idempotency.set(
+        "deliveryTokenCiphertext",
+        $security.encrypt($security.randomString(64), encryptionKey()),
+      );
       idempotency.set(
         "expiresAt",
         new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
@@ -279,7 +386,6 @@ function signup(app, body) {
         app,
         scope,
         input.idempotencyKey,
-        replay.get("result"),
         input.ownerEmail,
       );
     } catch (_) {
@@ -287,13 +393,7 @@ function signup(app, body) {
     }
   }
 
-  return deliverInvitation(
-    app,
-    scope,
-    input.idempotencyKey,
-    result,
-    input.ownerEmail,
-  );
+  return deliverInvitation(app, scope, input.idempotencyKey, input.ownerEmail);
 }
 
 module.exports = { plans, signup };

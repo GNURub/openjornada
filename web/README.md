@@ -54,7 +54,7 @@ que sirve la SPA en producción.
   solicita tarjeta y la prueba empieza al aceptar la invitación.
 - `/proveedor/login` y `/proveedor` usan un cliente PocketBase y almacenamiento
   propios. El acceso exige contraseña y OTP; soporte sólo lee y administración
-  puede aprovisionar y cambiar estados.
+  puede aprovisionar, fijar estados y devolver una empresa a gestión automática.
 - **Ajustes → Suscripción** consume los endpoints protegidos de estado,
   Checkout y Customer Portal. Sigue disponible para `admin` en `read_only`,
   aunque el servidor rechace el resto de escrituras.

@@ -3,6 +3,7 @@ import { ClientResponseError } from 'pocketbase';
 import { PlatformAuthService } from './platform-auth.service';
 
 export type AccessStatus = 'trialing' | 'active' | 'grace' | 'read_only' | 'suspended';
+export type AccessMode = AccessStatus | 'automatic';
 
 export interface PlatformSummary {
   organizations: number;
@@ -16,6 +17,7 @@ export interface PlatformOrganization {
   taxId: string;
   timezone: string;
   accessStatus: AccessStatus;
+  accessOverride: AccessStatus | '';
   billingStatus: string;
   planCode: string;
   planName: string;
@@ -67,7 +69,7 @@ export class PlatformService {
 
   updateAccess(
     organizationId: string,
-    accessStatus: AccessStatus,
+    accessStatus: AccessMode,
     reason: string,
   ): Promise<PlatformOrganization> {
     return this.pb.send(`${this.base}/organizations/${organizationId}/access`, {
