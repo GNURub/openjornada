@@ -1,0 +1,134 @@
+- generic [ref=e34]:
+  - complementary [ref=e35]:
+    - link "Mi empresa de estética Gestión de jornada" [ref=e36] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e37]:
+        - generic [ref=e38]: Mi empresa de estética
+        - generic [ref=e39]: Gestión de jornada
+    - navigation "Navegación principal" [ref=e40]:
+      - paragraph [ref=e41]: Mi espacio
+      - link "Mi jornada" [ref=e42] [cursor=pointer]:
+        - /url: /
+      - link "Control horario" [ref=e46] [cursor=pointer]:
+        - /url: /registros
+      - link "Resúmenes" [ref=e49] [cursor=pointer]:
+        - /url: /resumenes
+      - link "Ausencias" [ref=e52] [cursor=pointer]:
+        - /url: /ausencias
+      - link "Horarios" [ref=e56] [cursor=pointer]:
+        - /url: /horarios
+      - link "Avisos" [ref=e60] [cursor=pointer]:
+        - /url: /avisos
+      - link "Gastos" [ref=e63] [cursor=pointer]:
+        - /url: /gastos
+      - link "Documentos" [ref=e67] [cursor=pointer]:
+        - /url: /documentos
+      - link "Tareas" [ref=e70] [cursor=pointer]:
+        - /url: /tareas
+      - link "Objetivos" [ref=e73] [cursor=pointer]:
+        - /url: /objetivos
+      - paragraph [ref=e78]: Gestión
+      - link "Informes" [ref=e79] [cursor=pointer]:
+        - /url: /informes
+      - link "Equipo" [ref=e82] [cursor=pointer]:
+        - /url: /equipo
+      - link "Integraciones" [active] [ref=e87] [cursor=pointer]:
+        - /url: /integraciones
+      - link "Ajustes" [ref=e91] [cursor=pointer]:
+        - /url: /ajustes
+    - generic [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e97]: A
+        - generic [ref=e98]:
+          - paragraph [ref=e99]: Administración
+          - paragraph [ref=e100]: Equipo
+      - button "Cerrar sesión" [ref=e101]
+  - banner [ref=e102]:
+    - paragraph [ref=e104]: Espacio de trabajo
+    - generic [ref=e105]: Administración
+  - main [ref=e107]:
+    - generic [ref=e159]:
+      - generic [ref=e160]:
+        - paragraph [ref=e161]: Integraciones
+        - heading "Integraciones" [level=1] [ref=e162]
+        - paragraph [ref=e163]: Conecta terminales de fichaje y clientes MCP sin compartir credenciales personales.
+      - complementary [ref=e164]:
+        - heading "Acceso MCP" [level=2] [ref=e165]
+        - paragraph [ref=e166]: Trata cada token como una contraseña.
+        - paragraph [ref=e167]: El cliente podrá actuar en tu nombre hasta que el token caduque o lo revoques. No lo pegues en chats, incidencias ni repositorios.
+      - generic [ref=e168]:
+        - generic [ref=e169]:
+          - generic [ref=e170]:
+            - paragraph [ref=e171]: Control presencial
+            - heading "Terminales RFID" [level=2] [ref=e172]
+            - paragraph [ref=e173]: Cada aparato tiene una credencial independiente. El PIN empresarial solo abre durante cinco minutos la asignación local de tags.
+          - button "Actualizar" [ref=e174]
+        - generic [ref=e175]:
+          - generic [ref=e176]:
+            - generic [ref=e177]:
+              - generic [ref=e178]: Nombre del nuevo terminal
+              - textbox "Nombre del nuevo terminal" [ref=e179]:
+                - /placeholder: Recepción
+            - button "Crear terminal" [ref=e180]
+          - generic [ref=e181]:
+            - generic [ref=e182]:
+              - generic [ref=e183]: PIN empresarial de 4 cifras
+              - textbox "PIN empresarial de 4 cifras" [ref=e184]:
+                - /placeholder: ••••
+            - generic [ref=e185]:
+              - button "Cambiar PIN" [ref=e186]
+              - generic [ref=e187]: Configurado
+        - list [ref=e188]:
+          - listitem [ref=e189]:
+            - generic [ref=e190]:
+              - generic [ref=e191]:
+                - paragraph [ref=e192]: recepcion
+                - generic [ref=e193]: Activo
+              - paragraph [ref=e194]: ojterm_8xSG7zFYOcDn_…
+              - paragraph [ref=e195]: Última conexión Nunca · Protocolo 1 · Sin versión informada
+            - generic [ref=e196]:
+              - button "Renombrar" [ref=e197]
+              - button "Rotar key" [ref=e198]
+              - button "Revocar" [ref=e199]
+        - paragraph [ref=e200]:
+          - strong [ref=e201]: "Importante:"
+          - text: los UIDs RFID pueden clonarse. El tag facilita el fichaje, pero no sustituye una identificación fuerte.
+      - generic [ref=e202]:
+        - generic [ref=e203]:
+          - heading "Nuevo token" [level=2] [ref=e204]
+          - paragraph [ref=e205]: La duración máxima es de seis meses.
+        - generic [ref=e206]:
+          - generic [ref=e207]:
+            - generic [ref=e208]: Nombre descriptivo
+            - textbox "Nombre descriptivo" [ref=e209]:
+              - /placeholder: Codex de administración
+          - generic [ref=e210]:
+            - generic [ref=e211]: Caduca el
+            - textbox "Caduca el" [ref=e212]: 2026-09-26
+          - button "Crear token" [ref=e213]
+      - generic [ref=e214]:
+        - generic [ref=e215]:
+          - generic [ref=e216]:
+            - heading "Tokens emitidos" [level=2] [ref=e217]
+            - paragraph [ref=e218]: 1 activos
+          - button "Actualizar" [ref=e219]
+        - list [ref=e220]:
+          - listitem [ref=e221]:
+            - generic [ref=e222]:
+              - generic [ref=e223]:
+                - paragraph [ref=e224]: test
+                - generic [ref=e225]: Activo
+              - paragraph [ref=e226]: ojmcp_jLK__tKTQR5s_…
+              - paragraph [ref=e227]: Creado por Administración · Caduca 25 dic 2026, 23:59 · Último uso Nunca
+            - button "Revocar" [ref=e228]
+          - listitem [ref=e229]:
+            - generic [ref=e230]:
+              - generic [ref=e231]:
+                - paragraph [ref=e232]: terminal
+                - generic [ref=e233]: Revocado
+              - paragraph [ref=e234]: ojmcp_sHiB8gGQoFR-_…
+              - paragraph [ref=e235]: Creado por Administración · Caduca 31 oct 2026, 23:59 · Último uso Nunca
+      - generic [ref=e236]:
+        - heading "Conectar Codex" [level=2] [ref=e237]
+        - paragraph [ref=e238]: "Guarda el token en una variable de entorno y configura el servidor remoto:"
+        - code [ref=e240]: "[mcp_servers.openjornada] url = \"http://192.168.0.96:8090/mcp\" bearer_token_env_var = \"OPENJORNADA_MCP_TOKEN\" default_tools_approval_mode = \"writes\""

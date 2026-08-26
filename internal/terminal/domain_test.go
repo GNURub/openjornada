@@ -50,6 +50,19 @@ func TestStateWarningsUseApprovedThresholds(t *testing.T) {
 	}
 }
 
+func TestStateResponseUsesNullSinceWhenIdle(t *testing.T) {
+	idle := stateResponse(WorkState{Kind: StateIdle})
+	if idle["since"] != nil {
+		t.Fatalf("idle since = %#v, want nil", idle["since"])
+	}
+
+	const startedAt = "2026-08-26T08:30:00Z"
+	working := stateResponse(WorkState{Kind: StateWorking, Since: startedAt})
+	if working["since"] != startedAt {
+		t.Fatalf("working since = %#v, want %q", working["since"], startedAt)
+	}
+}
+
 func TestPINDelay(t *testing.T) {
 	tests := map[int]time.Duration{
 		1:  0,

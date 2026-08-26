@@ -1,0 +1,82 @@
+- generic [ref=e34]:
+  - complementary [ref=e35]:
+    - link "Mi empresa de estética Gestión de jornada" [ref=e36] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e37]:
+        - generic [ref=e38]: Mi empresa de estética
+        - generic [ref=e39]: Gestión de jornada
+    - navigation "Navegación principal" [ref=e40]:
+      - paragraph [ref=e41]: Mi espacio
+      - link "Mi jornada" [ref=e42] [cursor=pointer]:
+        - /url: /
+      - link "Control horario" [ref=e46] [cursor=pointer]:
+        - /url: /registros
+      - link "Resúmenes" [ref=e49] [cursor=pointer]:
+        - /url: /resumenes
+      - link "Ausencias" [ref=e52] [cursor=pointer]:
+        - /url: /ausencias
+      - link "Horarios" [ref=e56] [cursor=pointer]:
+        - /url: /horarios
+      - link "Avisos" [ref=e60] [cursor=pointer]:
+        - /url: /avisos
+      - link "Gastos" [ref=e63] [cursor=pointer]:
+        - /url: /gastos
+      - link "Documentos" [ref=e67] [cursor=pointer]:
+        - /url: /documentos
+      - link "Tareas" [ref=e70] [cursor=pointer]:
+        - /url: /tareas
+      - link "Objetivos" [ref=e73] [cursor=pointer]:
+        - /url: /objetivos
+      - paragraph [ref=e78]: Gestión
+      - link "Informes" [ref=e79] [cursor=pointer]:
+        - /url: /informes
+      - link "Equipo" [ref=e82] [cursor=pointer]:
+        - /url: /equipo
+      - link "Integraciones" [ref=e87] [cursor=pointer]:
+        - /url: /integraciones
+      - link "Ajustes" [ref=e91] [cursor=pointer]:
+        - /url: /ajustes
+    - generic [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e97]: A
+        - generic [ref=e98]:
+          - paragraph [ref=e99]: Administración
+          - paragraph [ref=e100]: Equipo
+      - button "Cerrar sesión" [ref=e101]
+  - banner [ref=e102]:
+    - paragraph [ref=e104]: Espacio de trabajo
+    - generic [ref=e105]: Administración
+  - main [ref=e107]:
+    - generic [ref=e109]:
+      - generic [ref=e110]:
+        - generic [ref=e111]:
+          - paragraph [ref=e112]: miércoles, 26 de agosto
+          - heading "Buenas tardes, Administración" [level=1] [ref=e113]
+        - generic [ref=e114]: Fuera de jornada
+      - generic [ref=e116]:
+        - generic [ref=e120]:
+          - paragraph [ref=e121]: Hora actual
+          - paragraph [ref=e122]: 16:52:17
+          - generic [ref=e123]:
+            - button [ref=e124]
+            - generic [ref=e128] [cursor=pointer]:
+              - checkbox "Abrir el control en ventana flotante al fichar" [checked] [ref=e129]
+              - text: Abrir el control en ventana flotante al fichar
+          - paragraph [ref=e130]: La hora se registra en el servidor. Cada evento queda protegido por una huella de integridad.
+        - generic [ref=e131]:
+          - generic [ref=e133]:
+            - paragraph [ref=e134]: Tiempo efectivo hoy
+            - paragraph [ref=e135]: 00:00
+          - generic [ref=e141]:
+            - generic [ref=e142]: Objetivo diario
+            - generic [ref=e143]: Sin planificación
+          - generic [ref=e144]: Las pausas no cuentan como tiempo efectivo y se muestran por separado en tu historial.
+      - generic [ref=e145]:
+        - generic [ref=e146]:
+          - generic [ref=e147]:
+            - heading "Actividad de hoy" [level=2] [ref=e148]
+            - paragraph [ref=e149]: Tus entradas, pausas y salidas
+          - generic [ref=e150]: 0 eventos
+        - generic [ref=e151]:
+          - paragraph [ref=e156]: Aún no hay actividad
+          - paragraph [ref=e157]: Empieza tu jornada cuando estés lista.

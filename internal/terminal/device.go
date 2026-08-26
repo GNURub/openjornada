@@ -359,6 +359,10 @@ func parseScanContext(key []byte, value, terminalID string) (employeeID, fingerp
 
 func stateResponse(state WorkState) map[string]any {
 	actions := make([]map[string]any, 0, 3)
+	var since any
+	if state.Since != "" {
+		since = state.Since
+	}
 	switch state.Kind {
 	case StateIdle:
 		actions = append(actions, map[string]any{"command": CommandClockIn, "label": "Comenzar jornada", "mode": "now", "highlighted": false})
@@ -377,7 +381,7 @@ func stateResponse(state WorkState) map[string]any {
 		)
 	}
 	return map[string]any{
-		"kind": state.Kind, "since": state.Since, "workedSeconds": state.WorkedSeconds, "breakSeconds": state.BreakSeconds,
+		"kind": state.Kind, "since": since, "workedSeconds": state.WorkedSeconds, "breakSeconds": state.BreakSeconds,
 		"longShift": state.LongShift, "staleBreak": state.StaleBreak, "actions": actions,
 	}
 }

@@ -1,0 +1,26 @@
+- main [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e8]: OpenJornada
+    - generic [ref=e10]:
+      - paragraph [ref=e11]: Tu tiempo, bien cuidado
+      - heading "Fichar debería ser la parte más sencilla del día." [level=1] [ref=e12]
+      - paragraph [ref=e13]: "Una experiencia clara y humana para que tu equipo se centre en lo importante: cuidar de cada cliente."
+    - generic [ref=e14]:
+      - generic [ref=e15]: Registro fiable
+      - generic [ref=e16]: Datos protegidos
+      - generic [ref=e17]: Acceso desde cualquier dispositivo
+  - generic [ref=e20]:
+    - paragraph [ref=e21]: Bienvenida de nuevo
+    - heading "Entra en tu espacio" [level=1] [ref=e22]
+    - paragraph [ref=e23]: Usa el correo que te ha facilitado tu empresa.
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - generic [ref=e26]: Correo electrónico
+        - textbox "Correo electrónico" [ref=e27]:
+          - /placeholder: tu@empresa.com
+      - generic [ref=e28]:
+        - generic [ref=e29]: Contraseña
+        - textbox "Contraseña" [ref=e30]:
+          - /placeholder: ••••••••••••
+      - button "Entrar" [ref=e31]
+    - button "He olvidado mi contraseña" [ref=e32]
