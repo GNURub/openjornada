@@ -93,6 +93,7 @@ class FakeApi final : public ApiClient {
   AdminSessionResponse nextAdminSession;
   EmployeeListResponse nextEmployees;
   int openAdminCalls = 0;
+  int closeAdminCalls = 0;
   int employeeCalls = 0;
   int assignCalls = 0;
   bool lastAssignReplace = false;
@@ -149,7 +150,10 @@ class FakeApi final : public ApiClient {
     return {};
   }
   ApiCallResult closeAdminSession(const ApiCredentials&, const std::string&,
-                                  uint32_t) override { return {}; }
+                                  uint32_t) override {
+    ++closeAdminCalls;
+    return {};
+  }
   ApiCallResult employees(const ApiCredentials&, const std::string&,
                           EmployeeListResponse& output, uint32_t) override {
     ++employeeCalls;
@@ -355,6 +359,31 @@ QueuedAction pendingAction(std::string id) {
   action.rebootId = "older-boot";
   action.signature = std::string(64, 'a');
   return action;
+}
+
+void openAdminEmployeeList(Fixture& fixture) {
+  fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
+  fixture.api.nextEmployees.itemCount = 1;
+  fixture.api.nextEmployees.items[0] =
+      {"employee-1", "Marina", "Marina", false};
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo.nowMs = fixture.nowMs;
+  fixture.app.tick(combo);
+  TEST_ASSERT_EQUAL(ScreenKind::AdminPin, fixture.app.screen().kind);
+
+  fixture.tick();
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.networkRoundTrip();
+  fixture.networkRoundTrip();
+  TEST_ASSERT_EQUAL(ScreenKind::AdminEmployees, fixture.app.screen().kind);
 }
 
 void test_idle_clock_in_is_durable_before_network_and_completes() {
@@ -1335,8 +1364,169 @@ void test_admin_pin_assignment_and_session_expiry_flow() {
 
   fixture.nowMs += AdminFlow::kSessionIdleMs;
   fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Acerca tu tarjeta",
+                           fixture.app.screen().detail.c_str());
+}
+
+void test_admin_screens_explain_and_allow_explicit_exit() {
+  Fixture fixture;
+  openAdminEmployeeList(fixture);
+
+  TEST_ASSERT_EQUAL_STRING("Mantén A+C 3 s para salir",
+                           fixture.app.screen().employee.c_str());
+  fixture.press(Button::B);
+  TEST_ASSERT_EQUAL(ScreenKind::AdminScan, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Mantén A+C 3 s para salir",
+                           fixture.app.screen().employee.c_str());
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo.nowMs = fixture.nowMs;
+  fixture.app.tick(combo);
+
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_INT(0, fixture.api.closeAdminCalls);
+  TEST_ASSERT_EQUAL_STRING("Acerca tu tarjeta",
+                           fixture.app.screen().detail.c_str());
+}
+
+void test_admin_exit_is_immediate_while_an_admin_request_is_pending() {
+  Fixture fixture;
+  fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
+  fixture.api.nextEmployees.itemCount = 1;
+  fixture.api.nextEmployees.items[0] =
+      {"employee-1", "Marina", "Marina", false};
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo.nowMs = fixture.nowMs;
+  fixture.app.tick(combo);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
   TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
-  TEST_ASSERT_EQUAL_STRING("La sesión administrativa ha caducado.",
+
+  combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo.nowMs = fixture.nowMs;
+  fixture.app.tick(combo);
+
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Acerca tu tarjeta",
+                           fixture.app.screen().detail.c_str());
+
+  fixture.nowMs += 1001U;
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+
+  fixture.api.nextResolve = {};
+  fixture.api.nextResolve.scanContext = "scan-context";
+  fixture.api.nextResolve.employee = {"employee-1", "Marina"};
+  fixture.api.nextResolve.state.kind = WorkKind::Idle;
+  AppEvent scan = fixture.event(AppEventKind::TagScanned);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Actions, fixture.app.screen().kind);
+}
+
+void test_admin_timeout_is_immediate_while_an_admin_request_is_pending() {
+  Fixture fixture;
+  fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
+  fixture.api.nextEmployees.itemCount = 1;
+  fixture.api.nextEmployees.items[0] =
+      {"employee-1", "Marina", "Marina", false};
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo.nowMs = fixture.nowMs;
+  fixture.app.tick(combo);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  fixture.press(Button::B);
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+
+  fixture.nowMs += AdminFlow::kSessionIdleMs;
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+
+  TEST_ASSERT_TRUE(fixture.worker.processOne());
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+}
+
+void test_admin_pin_and_activity_share_the_five_minute_timeout() {
+  Fixture fixture;
+
+  AppEvent combo = fixture.event(AppEventKind::Timer);
+  combo.buttonADown = true;
+  combo.buttonCDown = true;
+  fixture.app.tick(combo);
+  fixture.nowMs += AdminFlow::kActivationHoldMs;
+  combo.nowMs = fixture.nowMs;
+  fixture.app.tick(combo);
+  TEST_ASSERT_EQUAL(ScreenKind::AdminPin, fixture.app.screen().kind);
+
+  fixture.nowMs += AdminFlow::kSessionIdleMs - 1U;
+  fixture.press(Button::A);
+  fixture.nowMs += 2U;
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::AdminPin, fixture.app.screen().kind);
+
+  fixture.nowMs += AdminFlow::kSessionIdleMs;
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+}
+
+void test_rfid_activity_outside_admin_scan_is_ignored_and_resets_timeout() {
+  Fixture fixture;
+  openAdminEmployeeList(fixture);
+
+  fixture.nowMs += AdminFlow::kSessionIdleMs - 1U;
+  AppEvent scan = fixture.event(AppEventKind::TagScanned);
+  scan.uid = "04AABBCC";
+  fixture.app.tick(scan);
+  TEST_ASSERT_EQUAL(ScreenKind::AdminEmployees, fixture.app.screen().kind);
+
+  fixture.nowMs += 2U;
+  fixture.tick();
+  TEST_ASSERT_EQUAL(ScreenKind::AdminEmployees, fixture.app.screen().kind);
+}
+
+void test_admin_inactivity_returns_directly_to_idle() {
+  Fixture fixture;
+  openAdminEmployeeList(fixture);
+
+  fixture.nowMs += AdminFlow::kSessionIdleMs;
+  fixture.tick();
+
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Acerca tu tarjeta",
                            fixture.app.screen().detail.c_str());
 }
 
@@ -1367,8 +1557,8 @@ void test_late_employee_response_cannot_restore_an_expired_admin_session() {
   TEST_ASSERT_TRUE(fixture.worker.processOne());
   fixture.tick();
 
-  TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
-  TEST_ASSERT_EQUAL_STRING("La sesión administrativa ha caducado.",
+  TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Acerca tu tarjeta",
                            fixture.app.screen().detail.c_str());
 }
 
@@ -1411,6 +1601,12 @@ int main(int, char**) {
   RUN_TEST(test_bootstrap_clock_remains_monotonic_across_millis_rollover);
   RUN_TEST(test_automatic_sync_completes_pending_action_in_order);
   RUN_TEST(test_admin_pin_assignment_and_session_expiry_flow);
+  RUN_TEST(test_admin_screens_explain_and_allow_explicit_exit);
+  RUN_TEST(test_admin_exit_is_immediate_while_an_admin_request_is_pending);
+  RUN_TEST(test_admin_timeout_is_immediate_while_an_admin_request_is_pending);
+  RUN_TEST(test_admin_pin_and_activity_share_the_five_minute_timeout);
+  RUN_TEST(test_rfid_activity_outside_admin_scan_is_ignored_and_resets_timeout);
+  RUN_TEST(test_admin_inactivity_returns_directly_to_idle);
   RUN_TEST(test_late_employee_response_cannot_restore_an_expired_admin_session);
   return UNITY_END();
 }

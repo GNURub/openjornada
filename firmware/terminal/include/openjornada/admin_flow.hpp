@@ -19,10 +19,12 @@ class AdminFlow {
   std::optional<std::string> updatePin(Button button, uint32_t nowMs);
   std::string pinDisplay() const;
 
+  void beginMode(uint32_t nowMs);
   bool setSession(std::string capability, uint32_t nowMs);
   void touch(uint32_t nowMs);
   bool expire(uint32_t nowMs, bool networkConnected);
   void clearSession();
+  bool modeActive() const { return modeActive_; }
   bool hasSession() const { return !capability_.empty(); }
   const std::string& capability() const { return capability_; }
   bool canAdminister(bool networkConnected) const {
@@ -37,6 +39,7 @@ class AdminFlow {
   uint32_t lastActivityMs_ = 0;
   bool comboActive_ = false;
   bool comboTriggered_ = false;
+  bool modeActive_ = false;
   std::string capability_;
 };
 

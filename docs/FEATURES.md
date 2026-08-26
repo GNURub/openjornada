@@ -29,6 +29,15 @@ cancela al soltar, no genera acciones de jornada y conserva credenciales,
 caché y cola local. El borrado completo sigue requiriendo el gesto físico
 separado A+B+C del arranque y su confirmación con C.
 
+La asignación local de tags conserva la lista para enlazar varias tarjetas
+seguidas y muestra `A+C durante 3 s` como salida explícita en todas sus
+pantallas. Si pasan cinco minutos sin botones ni lecturas RFID, la sesión
+administrativa se elimina de memoria y el terminal vuelve directamente a
+**Acerca tu tarjeta**, incluso si una petición de red estaba en curso. El plazo
+empieza al abrir el PIN, cada interacción lo reinicia y los tags presentados
+fuera de la pantalla de asignación se ignoran. El simulador aplica el mismo
+comportamiento.
+
 Durante el funcionamiento normal, diez minutos sin botones ni lecturas RFID
 apagan únicamente la pantalla. Wi-Fi, RFID, sincronización y cola local siguen
 activos. La primera pulsación despierta la pantalla y se consume hasta soltar

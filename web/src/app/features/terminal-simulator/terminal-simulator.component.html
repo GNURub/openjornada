@@ -86,6 +86,9 @@
                     }
                   </div>
                   <p class="mt-4 text-sm text-stone-500">A − · B siguiente · C +</p>
+                  <p class="mt-2 text-sm font-bold text-coral-700">
+                    Mantén A+C 3 s para salir
+                  </p>
                 </div>
               }
               @case ('admin-employees') {
@@ -103,6 +106,9 @@
                     {{ currentEmployee()?.hasRfidTag ? 'Tag asignado' : 'Sin tag' }}
                   </p>
                   <p class="mt-4 text-sm text-stone-500">A/C navegar · B seleccionar</p>
+                  <p class="mt-2 text-sm font-bold text-coral-700">
+                    Mantén A+C 3 s para salir
+                  </p>
                 </div>
               }
               @case ('admin-scan') {
@@ -111,6 +117,9 @@
                     Acerca el tag para {{ currentEmployee()?.name }}
                   </p>
                   <p class="mt-4 text-sm text-stone-500">A para volver</p>
+                  <p class="mt-2 text-sm font-bold text-coral-700">
+                    Mantén A+C 3 s para salir
+                  </p>
                 </div>
               }
             }
@@ -203,7 +212,7 @@
           type="button"
           data-testid="simulate-admin-hold"
           aria-describedby="admin-hold-help"
-          [disabled]="busy() || screen() !== 'idle'"
+          [disabled]="!adminModeActive() && (busy() || screen() !== 'idle')"
           (pointerdown)="startAdminHold(); $event.preventDefault()"
           (pointerup)="cancelAdminHold()"
           (pointercancel)="cancelAdminHold()"

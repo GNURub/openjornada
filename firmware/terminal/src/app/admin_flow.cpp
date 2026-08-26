@@ -54,20 +54,29 @@ std::string AdminFlow::pinDisplay() const {
   return display;
 }
 
+void AdminFlow::beginMode(uint32_t nowMs) {
+  capability_.clear();
+  resetPin();
+  modeActive_ = true;
+  lastActivityMs_ = nowMs;
+}
+
 bool AdminFlow::setSession(std::string capability, uint32_t nowMs) {
   if (capability.size() <= 9U || capability.size() > 160U ||
       capability.compare(0, 9, "ojtadmin_") != 0) {
     return false;
   }
+  const bool alreadyActive = modeActive_;
   capability_ = std::move(capability);
-  touch(nowMs);
+  modeActive_ = true;
+  if (!alreadyActive) lastActivityMs_ = nowMs;
   return true;
 }
 
 void AdminFlow::touch(uint32_t nowMs) { lastActivityMs_ = nowMs; }
 
 bool AdminFlow::expire(uint32_t nowMs, bool networkConnected) {
-  if (!hasSession()) return false;
+  if (!modeActive_) return false;
   if (networkConnected && nowMs - lastActivityMs_ < kSessionIdleMs) {
     return false;
   }
@@ -78,6 +87,7 @@ bool AdminFlow::expire(uint32_t nowMs, bool networkConnected) {
 void AdminFlow::clearSession() {
   capability_.clear();
   lastActivityMs_ = 0;
+  modeActive_ = false;
   resetPin();
 }
 

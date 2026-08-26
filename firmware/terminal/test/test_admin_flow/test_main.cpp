@@ -37,6 +37,8 @@ void test_pin_digits_wrap_and_four_confirmations_return_exact_pin() {
 
 void test_session_is_ram_only_and_expires_on_time_or_network_loss() {
   AdminFlow flow;
+  flow.beginMode(1000);
+  TEST_ASSERT_TRUE(flow.modeActive());
   TEST_ASSERT_FALSE(flow.setSession("invalid", 1000));
   TEST_ASSERT_TRUE(flow.setSession("ojtadmin_session-capability", 1000));
   TEST_ASSERT_TRUE(flow.canAdminister(true));
@@ -47,6 +49,18 @@ void test_session_is_ram_only_and_expires_on_time_or_network_loss() {
   TEST_ASSERT_TRUE(flow.setSession("ojtadmin_second", 500000));
   TEST_ASSERT_TRUE(flow.expire(500001, false));
   TEST_ASSERT_FALSE(flow.canAdminister(true));
+  TEST_ASSERT_FALSE(flow.modeActive());
+}
+
+void test_admin_mode_expires_before_a_session_exists_and_activity_resets_it() {
+  AdminFlow flow;
+  flow.beginMode(1000);
+
+  TEST_ASSERT_FALSE(flow.expire(300999, true));
+  flow.touch(300999);
+  TEST_ASSERT_FALSE(flow.expire(301000, true));
+  TEST_ASSERT_TRUE(flow.expire(600999, true));
+  TEST_ASSERT_FALSE(flow.modeActive());
 }
 
 }  // namespace
@@ -56,5 +70,6 @@ int main(int, char**) {
   RUN_TEST(test_admin_combo_activates_at_three_seconds_and_cancels_early);
   RUN_TEST(test_pin_digits_wrap_and_four_confirmations_return_exact_pin);
   RUN_TEST(test_session_is_ram_only_and_expires_on_time_or_network_loss);
+  RUN_TEST(test_admin_mode_expires_before_a_session_exists_and_activity_resets_it);
   return UNITY_END();
 }

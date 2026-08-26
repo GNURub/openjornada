@@ -60,6 +60,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
     Array<{ id: string; name: string; hasRfidTag: boolean }>
   >([]);
   protected readonly adminEmployeeIndex = signal(0);
+  protected readonly adminModeActive = signal(false);
   protected readonly heldButtons = signal(new Set<SimulatorButton>());
   protected readonly adminHoldActive = signal(false);
   protected readonly adminHoldRemaining = signal(3);
@@ -84,14 +85,17 @@ export class TerminalSimulatorComponent implements OnDestroy {
   private rebooted = false;
   private messageTimer: ReturnType<typeof setTimeout> | undefined;
   private actionTimer: ReturnType<typeof setTimeout> | undefined;
+  private adminIdleTimer: ReturnType<typeof setTimeout> | undefined;
   private adminHoldTimer: ReturnType<typeof setTimeout> | undefined;
   private adminHoldCountdown: ReturnType<typeof setInterval> | undefined;
   private adminGestureCompleted = false;
+  private adminModeGeneration = 0;
   private readonly suppressedButtonClicks = new Set<SimulatorButton>();
 
   ngOnDestroy(): void {
     clearTimeout(this.messageTimer);
     clearTimeout(this.actionTimer);
+    clearTimeout(this.adminIdleTimer);
     this.cancelAdminHold();
   }
 
@@ -138,10 +142,16 @@ export class TerminalSimulatorComponent implements OnDestroy {
   }
 
   protected async scan(): Promise<void> {
-    if (!this.connected() || !this.uid.trim()) return;
+    if (!this.uid.trim()) return;
+    const adminGeneration = this.adminModeActive() ? this.adminModeGeneration : null;
+    if (adminGeneration !== null) {
+      this.touchAdminSession();
+      if (!this.connected() || this.screen() !== 'admin-scan') return;
+    }
+    if (!this.connected()) return;
     this.busy.set(true);
     try {
-      if (this.screen() === 'admin-scan') {
+      if (adminGeneration !== null) {
         const employee = this.currentEmployee();
         if (!employee) return;
         await this.terminals.deviceAssign(
@@ -151,6 +161,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
           this.uid,
           employee.hasRfidTag,
         );
+        if (!this.adminRequestIsCurrent(adminGeneration)) return;
         employee.hasRfidTag = true;
         this.showMessage(`Tag asignado a ${employee.name}`, 3_000, 'admin-employees');
         return;
@@ -180,9 +191,24 @@ export class TerminalSimulatorComponent implements OnDestroy {
       this.screen.set('actions');
       this.armActionTimeout();
     } catch (error) {
-      this.showMessage(this.errorMessage(error, 'Tag no asignado; avisa a un responsable'), 5_000);
+      if (adminGeneration !== null && this.adminRequestIsCurrent(adminGeneration)) {
+        const session = this.adminSession();
+        this.clearAdminMode();
+        if (session && this.online()) void this.closeAdminCapability(session);
+        this.showMessage(
+          this.errorMessage(error, 'No se pudo asignar el tag'),
+          5_000,
+        );
+      } else if (adminGeneration === null) {
+        this.showMessage(
+          this.errorMessage(error, 'Tag no asignado; avisa a un responsable'),
+          5_000,
+        );
+      }
     } finally {
-      this.busy.set(false);
+      if (adminGeneration === null || this.adminRequestIsCurrent(adminGeneration)) {
+        this.busy.set(false);
+      }
     }
   }
 
@@ -190,7 +216,11 @@ export class TerminalSimulatorComponent implements OnDestroy {
     const next = new Set(this.heldButtons());
     next.add(button);
     this.heldButtons.set(next);
-    if (next.has('A') && next.has('C') && this.screen() === 'idle') {
+    if (
+      next.has('A') &&
+      next.has('C') &&
+      (this.screen() === 'idle' || this.adminModeActive())
+    ) {
       this.startAdminHold();
     }
   }
@@ -207,7 +237,15 @@ export class TerminalSimulatorComponent implements OnDestroy {
   }
 
   protected startAdminHold(): void {
-    if (this.adminHoldActive() || this.busy() || this.screen() !== 'idle') return;
+    const exitingAdmin = this.adminModeActive();
+    if (
+      this.adminHoldActive() ||
+      (this.busy() && !exitingAdmin) ||
+      (this.screen() !== 'idle' && !exitingAdmin)
+    ) {
+      return;
+    }
+    if (exitingAdmin) this.touchAdminSession();
 
     this.adminHoldActive.set(true);
     this.adminHoldRemaining.set(3);
@@ -224,7 +262,8 @@ export class TerminalSimulatorComponent implements OnDestroy {
         this.suppressedButtonClicks.add('A');
         this.suppressedButtonClicks.add('C');
       }
-      void this.openAdminPin();
+      if (exitingAdmin) void this.exitAdmin();
+      else void this.openAdminPin();
     }, 3_000);
   }
 
@@ -238,6 +277,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
   protected async press(button: SimulatorButton): Promise<void> {
     if (this.suppressedButtonClicks.delete(button)) return;
     if (this.busy()) return;
+    if (this.adminModeActive()) this.touchAdminSession();
     switch (this.screen()) {
       case 'actions':
         await this.pressAction(button);
@@ -391,6 +431,10 @@ export class TerminalSimulatorComponent implements OnDestroy {
 
   protected toggleOnline(): void {
     this.online.update((value) => !value);
+    if (!this.online() && this.adminModeActive()) {
+      void this.exitAdmin();
+      return;
+    }
     if (this.online() && this.connected()) void this.connect();
   }
 
@@ -401,6 +445,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
   }
 
   protected reboot(): void {
+    this.clearAdminMode();
     this.rebooted = true;
     this.rebootId = crypto.randomUUID();
     this.sequence = 0;
@@ -415,9 +460,12 @@ export class TerminalSimulatorComponent implements OnDestroy {
       this.showMessage('La asignación de tags necesita Internet', 5_000);
       return;
     }
+    this.adminModeGeneration += 1;
+    this.adminModeActive.set(true);
     this.pinDigits.set([0, 0, 0, 0]);
     this.pinIndex.set(0);
     this.screen.set('admin-pin');
+    this.touchAdminSession();
   }
 
   private async pressPin(button: SimulatorButton): Promise<void> {
@@ -431,15 +479,28 @@ export class TerminalSimulatorComponent implements OnDestroy {
       this.pinIndex.update((value) => value + 1);
       return;
     }
+    const generation = this.adminModeGeneration;
+    this.busy.set(true);
     try {
       const response = await this.terminals.openAdminSession(this.token, this.pinDigits().join(''));
+      if (!this.adminRequestIsCurrent(generation)) {
+        if (this.online()) void this.closeAdminCapability(response.token);
+        return;
+      }
       this.adminSession.set(response.token);
       const employees = await this.terminals.deviceEmployees(this.token, response.token);
+      if (!this.adminRequestIsCurrent(generation)) return;
       this.adminEmployees.set(employees.items);
       this.adminEmployeeIndex.set(0);
       this.screen.set('admin-employees');
+      this.touchAdminSession();
     } catch (error) {
-      this.showMessage(this.errorMessage(error, 'PIN no válido'), 5_000);
+      if (this.adminRequestIsCurrent(generation)) {
+        this.clearAdminMode();
+        this.showMessage(this.errorMessage(error, 'PIN no válido'), 5_000);
+      }
+    } finally {
+      if (this.adminRequestIsCurrent(generation)) this.busy.set(false);
     }
   }
 
@@ -452,6 +513,45 @@ export class TerminalSimulatorComponent implements OnDestroy {
   private armActionTimeout(): void {
     clearTimeout(this.actionTimer);
     this.actionTimer = setTimeout(() => this.returnToIdle(), 10_000);
+  }
+
+  private touchAdminSession(): void {
+    if (!this.adminModeActive()) return;
+    clearTimeout(this.adminIdleTimer);
+    this.adminIdleTimer = setTimeout(() => void this.exitAdmin(), 5 * 60_000);
+  }
+
+  private async exitAdmin(): Promise<void> {
+    const session = this.adminSession();
+    this.clearAdminMode();
+    clearTimeout(this.messageTimer);
+    clearTimeout(this.actionTimer);
+    this.returnToIdle();
+    if (!session || !this.online()) return;
+    await this.closeAdminCapability(session);
+  }
+
+  private clearAdminMode(): void {
+    clearTimeout(this.adminIdleTimer);
+    this.adminModeGeneration += 1;
+    this.adminModeActive.set(false);
+    this.adminSession.set('');
+    this.adminEmployees.set([]);
+    this.adminEmployeeIndex.set(0);
+    this.busy.set(false);
+  }
+
+  private adminRequestIsCurrent(generation: number): boolean {
+    return this.adminModeActive() && this.adminModeGeneration === generation;
+  }
+
+  private async closeAdminCapability(session: string): Promise<void> {
+    try {
+      await this.terminals.closeAdminSession(this.token, session);
+    } catch {
+      // The server expires the capability independently; local exit must not
+      // leave the terminal trapped if the best-effort close request fails.
+    }
   }
 
   private showMessage(message: string, duration: number, next: Screen = 'idle'): void {

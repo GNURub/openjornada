@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -83,7 +84,9 @@ class AppController {
   void enqueueAdminSession(const std::string& pin, const AppEvent& event);
   void enqueueEmployees(const AppEvent& event);
   void enqueueAssignment(const AppEvent& event, bool replace);
-  void exitAdmin(const AppEvent& event);
+  void exitAdmin();
+  void rememberAbandonedAdminJob(uint32_t id);
+  bool consumeAbandonedAdminJob(uint32_t id);
   void showAdminEmployees();
   void enqueueBootstrap(uint32_t nowMs);
   void enqueueCacheRefresh(uint32_t nowMs);
@@ -173,6 +176,8 @@ class AppController {
   bool resolvedOffline_ = false;
   bool closeBreakQueued_ = false;
   bool cacheRefreshForAdmin_ = false;
+  std::array<uint32_t, NetworkWorker::kQueueCapacity>
+      abandonedAdminJobIds_{};
   AppFeedback feedback_ = AppFeedback::None;
 };
 

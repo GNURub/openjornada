@@ -12,6 +12,8 @@
 namespace openjornada {
 namespace {
 
+constexpr char kAdminExitHint[] = "Mantén A+C 3 s para salir";
+
 bool deadlineReached(uint32_t now, uint32_t deadline) {
   return static_cast<int32_t>(now - deadline) >= 0;
 }
@@ -20,13 +22,6 @@ bool ambiguous(const ApiFailure& failure) {
   return failure.retryable || failure.code == ApiErrorCode::Transport ||
          failure.code == ApiErrorCode::Timeout ||
          failure.code == ApiErrorCode::InvalidResponse;
-}
-
-bool isAdminScreen(ScreenKind kind) {
-  return kind == ScreenKind::AdminPin ||
-         kind == ScreenKind::AdminEmployees ||
-         kind == ScreenKind::AdminScan ||
-         kind == ScreenKind::AdminReplaceConfirm;
 }
 
 const char* actionSuccessMessage(Command command) {
@@ -218,6 +213,13 @@ void AppController::processNetworkResults(const AppEvent& event) {
 
 void AppController::processNetworkResult(NetworkResult&& result,
                                          const AppEvent& event) {
+  if (consumeAbandonedAdminJob(result.id)) {
+    if ((result.kind == NetworkJobKind::AssignEmployee && result.call.ok) ||
+        result.kind == NetworkJobKind::Cache) {
+      cacheRefreshDone_ = false;
+    }
+    return;
+  }
   if (result.id != activeJobId_) return;
   activeJobId_ = 0;
   if (result.kind == NetworkJobKind::Bootstrap) {
@@ -311,6 +313,10 @@ void AppController::processNetworkResult(NetworkResult&& result,
     return;
   }
   if (result.kind == NetworkJobKind::OpenAdminSession) {
+    if (adminFlow_.expire(event.nowMs, event.networkConnected)) {
+      exitAdmin();
+      return;
+    }
     if (!result.call.ok || result.adminSession == nullptr ||
         !adminFlow_.setSession(result.adminSession->token, event.nowMs)) {
       const std::string message = result.call.failure.safeMessage.empty()
@@ -326,9 +332,7 @@ void AppController::processNetworkResult(NetworkResult&& result,
   if (result.kind == NetworkJobKind::Employees) {
     if (adminFlow_.expire(event.nowMs, event.networkConnected) ||
         !adminFlow_.canAdminister(event.networkConnected)) {
-      adminEmployees_ = {};
-      showMessage("La sesión administrativa ha caducado.", event.nowMs,
-                  kMessageMs, true);
+      exitAdmin();
       return;
     }
     if (!result.call.ok || result.employees == nullptr) {
@@ -340,7 +344,6 @@ void AppController::processNetworkResult(NetworkResult&& result,
     }
     adminEmployees_ = std::move(*result.employees);
     selectedEmployeeIndex_ = 0;
-    adminFlow_.touch(event.nowMs);
     showAdminEmployees();
     return;
   }
@@ -348,6 +351,12 @@ void AppController::processNetworkResult(NetworkResult&& result,
     const bool sessionExpired =
         adminFlow_.expire(event.nowMs, event.networkConnected) ||
         !adminFlow_.canAdminister(event.networkConnected);
+    if (sessionExpired) {
+      pendingAdminUid_.clear();
+      if (result.call.ok) cacheRefreshDone_ = false;
+      exitAdmin();
+      return;
+    }
     if (!result.call.ok) {
       const std::string message = result.call.failure.safeMessage.empty()
                                       ? "No se pudo asignar el tag."
@@ -360,8 +369,7 @@ void AppController::processNetworkResult(NetworkResult&& result,
     if (selectedEmployeeIndex_ < adminEmployees_.itemCount) {
       adminEmployees_.items[selectedEmployeeIndex_].hasRfidTag = true;
     }
-    if (!sessionExpired) adminFlow_.touch(event.nowMs);
-    cacheRefreshForAdmin_ = !sessionExpired;
+    cacheRefreshForAdmin_ = true;
     cacheRefreshDone_ = false;
     enqueueCacheRefresh(event.nowMs);
     return;
@@ -417,8 +425,9 @@ void AppController::handleTimer(const AppEvent& event) {
 }
 
 void AppController::handleTag(const AppEvent& event) {
-  if (screen_.kind == ScreenKind::AdminScan && activeJobId_ == 0 &&
-      !event.uid.empty()) {
+  if (adminFlow_.modeActive() && !event.uid.empty()) {
+    adminFlow_.touch(event.nowMs);
+    if (screen_.kind != ScreenKind::AdminScan || activeJobId_ != 0) return;
     if (!adminFlow_.canAdminister(event.networkConnected) ||
         selectedEmployeeIndex_ >= adminEmployees_.itemCount) {
       adminFlow_.clearSession();
@@ -426,11 +435,11 @@ void AppController::handleTag(const AppEvent& event) {
                   kMessageMs, true);
       return;
     }
-    adminFlow_.touch(event.nowMs);
     pendingAdminUid_ = event.uid;
     if (adminEmployees_.items[selectedEmployeeIndex_].hasRfidTag) {
       screen_.kind = ScreenKind::AdminReplaceConfirm;
       screen_.title = "Sustituir tag";
+      screen_.employee = kAdminExitHint;
       screen_.detail = "Esta persona ya tiene un tag asignado.";
       screen_.buttons = {"Cancelar", "", "Sustituir"};
       screen_.warning = true;
@@ -527,6 +536,7 @@ void AppController::handleButton(const AppEvent& event, bool held) {
     }
     return;
   }
+  if (adminFlow_.modeActive()) adminFlow_.touch(event.nowMs);
   if (!held && screen_.kind == ScreenKind::AdminPin) {
     const auto pin = adminFlow_.updatePin(event.button, event.nowMs);
     screen_.detail = "PIN: " + adminFlow_.pinDisplay();
@@ -554,6 +564,7 @@ void AppController::handleButton(const AppEvent& event, bool held) {
     } else {
       screen_.kind = ScreenKind::AdminScan;
       screen_.title = adminEmployees_.items[selectedEmployeeIndex_].displayName;
+      screen_.employee = kAdminExitHint;
       screen_.detail = "Acerca el tag que deseas asignar.";
       screen_.buttons = {"Volver", "", ""};
       screen_.warning = false;
@@ -608,34 +619,33 @@ void AppController::handleButton(const AppEvent& event, bool held) {
 }
 
 void AppController::handleAdminTimer(const AppEvent& event) {
-  if (activeJobId_ == 0 &&
-      adminFlow_.holdCombo(event.buttonADown, event.buttonBDown,
+  if (adminFlow_.modeActive() &&
+      (event.buttonADown || event.buttonBDown || event.buttonCDown)) {
+    adminFlow_.touch(event.nowMs);
+  }
+  if (adminFlow_.holdCombo(event.buttonADown, event.buttonBDown,
                            event.buttonCDown, event.nowMs)) {
-    if (screen_.kind == ScreenKind::Idle) {
+    if (adminFlow_.modeActive()) {
+      exitAdmin();
+    } else if (activeJobId_ == 0 && screen_.kind == ScreenKind::Idle) {
       if (!event.networkConnected) {
         showMessage("La administración necesita conexión.", event.nowMs,
                     kMessageMs, true);
       } else {
         openAdminPin(event.nowMs);
       }
-    } else if (isAdminScreen(screen_.kind)) {
-      exitAdmin(event);
     }
   }
   if (adminFlow_.expire(event.nowMs, event.networkConnected)) {
-    pendingAdminUid_.clear();
-    if (isAdminScreen(screen_.kind)) {
-      showMessage("La sesión administrativa ha caducado.", event.nowMs,
-                  kMessageMs, true);
-    }
+    exitAdmin();
   }
 }
 
 void AppController::openAdminPin(uint32_t nowMs) {
-  adminFlow_.clearSession();
-  adminFlow_.resetPin();
+  adminFlow_.beginMode(nowMs);
   screen_.kind = ScreenKind::AdminPin;
   screen_.title = "Administración";
+  screen_.employee = kAdminExitHint;
   screen_.detail = "PIN: " + adminFlow_.pinDisplay();
   screen_.buttons = {"−", "Confirmar", "+"};
   screen_.deadlineMs = nowMs + AdminFlow::kSessionIdleMs;
@@ -725,35 +735,47 @@ void AppController::enqueueAssignment(const AppEvent& event, bool replace) {
   screen_.deadlineMs = 0;
 }
 
-void AppController::exitAdmin(const AppEvent& event) {
-  const std::string capability = adminFlow_.capability();
+void AppController::exitAdmin() {
+  const bool abandonedRequest = activeJobId_ != 0;
   adminFlow_.clearSession();
   pendingAdminUid_.clear();
   adminEmployees_ = {};
-  if (!event.networkConnected || capability.empty()) {
-    returnToIdle();
-    return;
+  cacheRefreshForAdmin_ = false;
+  if (abandonedRequest) {
+    rememberAbandonedAdminJob(activeJobId_);
+    activeJobId_ = 0;
+    if (cacheRefreshQueued_) cacheRefreshQueued_ = false;
   }
-  NetworkJob job;
-  job.id = nextJobId_++;
-  job.kind = NetworkJobKind::CloseAdminSession;
-  job.credentials = config_.credentials;
-  job.adminSession = capability;
-  if (!worker_.enqueue(std::move(job))) {
-    returnToIdle();
-    return;
+  // The worker is serialized: enqueueing server revocation here could delay a
+  // normal RFID lookup by its full timeout. The RAM-only capability is erased
+  // above and the server independently expires it after five minutes.
+  returnToIdle();
+}
+
+void AppController::rememberAbandonedAdminJob(uint32_t id) {
+  if (id == 0) return;
+  for (uint32_t& candidate : abandonedAdminJobIds_) {
+    if (candidate == 0 || candidate == id) {
+      candidate = id;
+      return;
+    }
   }
-  activeJobId_ = job.id;
-  screen_.kind = ScreenKind::Message;
-  screen_.title = "Administración";
-  screen_.detail = "Cerrando sesión...";
-  screen_.buttons = {};
-  screen_.busy = true;
+}
+
+bool AppController::consumeAbandonedAdminJob(uint32_t id) {
+  for (uint32_t& candidate : abandonedAdminJobIds_) {
+    if (candidate == id) {
+      candidate = 0;
+      return true;
+    }
+  }
+  return false;
 }
 
 void AppController::showAdminEmployees() {
   screen_.kind = ScreenKind::AdminEmployees;
   screen_.title = "Asignar tag";
+  screen_.employee = kAdminExitHint;
   if (adminEmployees_.itemCount == 0) {
     screen_.detail = "No hay personal disponible.";
     screen_.buttons = {};
@@ -851,8 +873,7 @@ void AppController::handleCacheResult(NetworkResult&& result,
     if (cacheRefreshForAdmin_) {
       cacheRefreshForAdmin_ = false;
       if (adminSessionExpired) {
-        showMessage("La sesión administrativa ha caducado.", event.nowMs,
-                    kMessageMs, true);
+        exitAdmin();
       } else {
         showAdminEmployees();
       }
@@ -882,8 +903,13 @@ void AppController::handleCacheResult(NetworkResult&& result,
     }
     if (cacheStore_ != nullptr &&
         cacheStore_->replaceAtomically(candidate) != CacheError::None) {
-      showMessage("No se pudo guardar la caché actualizada.", event.nowMs,
-                  kMessageMs, true);
+      if (adminSessionExpired) {
+        cacheRefreshForAdmin_ = false;
+        exitAdmin();
+      } else {
+        showMessage("No se pudo guardar la caché actualizada.", event.nowMs,
+                    kMessageMs, true);
+      }
       return;
     }
     cache_ = std::move(candidate);
@@ -892,8 +918,7 @@ void AppController::handleCacheResult(NetworkResult&& result,
   if (cacheRefreshForAdmin_) {
     cacheRefreshForAdmin_ = false;
     if (adminSessionExpired) {
-      showMessage("La sesión administrativa ha caducado.", event.nowMs,
-                  kMessageMs, true);
+      exitAdmin();
     } else {
       showAdminEmployees();
     }
@@ -1288,6 +1313,12 @@ void AppController::showMessage(std::string detail, uint32_t nowMs,
 
 void AppController::returnToIdle() {
   if (!outboxOperational_) return;
+  if (adminFlow_.modeActive()) {
+    adminFlow_.clearSession();
+    pendingAdminUid_.clear();
+    adminEmployees_ = {};
+    cacheRefreshForAdmin_ = false;
+  }
   screen_.kind = ScreenKind::Idle;
   screen_.title = "OpenJornada";
   screen_.detail = "Acerca tu tarjeta";

@@ -83,7 +83,11 @@ administración o responsables abren la trazabilidad y documentan su resolución
 `/terminal-simulator` sólo se registra con el servidor de desarrollo de Angular.
 Muestra una pantalla 320 × 240, botones A/B/C, lector UID, estado de red, avance
 del reloj y reinicio. Permite probar la asignación con A+C mantenidos tres
-segundos, el flujo normal de jornada, la corrección de una pausa olvidada en una
+segundos; durante la asignación, el mismo gesto sale al modo normal y cinco
+minutos sin botones ni tags desde la pantalla del PIN cierran automáticamente
+la sesión. El simulador ignora los tags fuera de la pantalla de lectura
+administrativa para que nunca los confunda con un fichaje. También permite
+probar el flujo normal de jornada, la corrección de una pausa olvidada en una
 jornada de al menos cuatro horas y la sincronización de acciones offline. La
 clave introducida permanece únicamente en memoria y se pierde al recargar.
 

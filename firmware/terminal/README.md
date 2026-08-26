@@ -98,8 +98,13 @@ otra pantalla frente a observadores.
   despierta la pantalla y debe soltarse antes de ejecutar otra acción; un tag
   despierta la pantalla y procesa el fichaje en la misma lectura.
 - A+C durante tres segundos abre el PIN de administración; la misma pulsación
-  mantenida sale explícitamente del modo administrativo. La sesión dura cinco
-  minutos de inactividad, sólo funciona con red y nunca se persiste.
+  mantenida sale explícitamente del modo administrativo. Las pantallas de
+  asignación muestran este gesto para que la salida sea visible, y funciona
+  incluso mientras hay una petición administrativa en curso. El plazo empieza
+  en la pantalla del PIN y cada botón o lectura RFID lo reinicia. Tras cinco
+  minutos sin actividad, el terminal borra la capacidad de su memoria y vuelve
+  directamente a **Acerca tu tarjeta**; el servidor también caduca la capacidad
+  de forma independiente. La sesión sólo funciona con red y nunca se persiste.
 - A+B durante cinco segundos reabre la configuración desde cualquier pantalla,
   incluso si el terminal está esperando a la red o al servidor. Una cuenta
   atrás permite cancelar soltando los botones. Conserva la URL, la API key, la
