@@ -43,7 +43,13 @@ placa sin depender del número ACM puede usarse el enlace estable de
 El artefacto de producción queda en
 `.pio/build/m5stack_release/firmware.bin`. `m5stack_release` sólo permite
 HTTPS y valida la cadena del servidor con el bundle de CA del ESP32. La
-actualización v1 es exclusivamente por USB; no hay OTA.
+actualización v1 es exclusivamente por USB; no hay OTA. La configuración
+validada se guarda en una partición NVS que no se sobrescribe con una carga USB
+normal. Sólo el restablecimiento físico A+B+C descrito más abajo —o un borrado
+completo de la flash ejecutado expresamente desde las herramientas de
+desarrollo— elimina esas credenciales. La compilación valida la tabla de
+particiones para impedir que NVS vuelva a solaparse con los metadatos que
+PlatformIO escribe durante cada actualización.
 
 ## Puesta en servicio
 
@@ -112,7 +118,7 @@ otra pantalla frente a observadores.
   Wi-Fi y dejar vacíos los secretos que no cambien.
 - A+B+C durante diez segundos, soltar y mantener sólo C cinco segundos ejecuta
   el restablecimiento completo tras mostrar el número de pendientes. Es la
-  única operación local que elimina la cola.
+  única operación local que elimina configuración, caché y cola.
 
 Tras cada reinicio se exige una sincronización NTP nueva antes de crear
 fichajes offline. La confianza caduca a las 24 horas. Los registros ya

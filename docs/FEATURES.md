@@ -29,6 +29,12 @@ cancela al soltar, no genera acciones de jornada y conserva credenciales,
 caché y cola local. El borrado completo sigue requiriendo el gesto físico
 separado A+B+C del arranque y su confirmación con C.
 
+Las actualizaciones normales por USB conservan la configuración validada del
+terminal en NVS. La compilación comprueba que esa partición no se solape con
+los metadatos que PlatformIO escribe durante el flasheo; sólo el gesto de
+restablecimiento confirmado o un borrado completo explícito de la flash
+eliminan las credenciales guardadas.
+
 La asignación local de tags conserva la lista para enlazar varias tarjetas
 seguidas y muestra `A+C durante 3 s` como salida explícita en todas sus
 pantallas. Si pasan cinco minutos sin botones ni lecturas RFID, la sesión
