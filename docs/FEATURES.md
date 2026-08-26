@@ -30,8 +30,10 @@ caché y cola local. El borrado completo sigue requiriendo el gesto físico
 separado A+B+C del arranque y su confirmación con C.
 
 Las actualizaciones normales por USB conservan la configuración validada del
-terminal en NVS. La compilación comprueba que esa partición no se solape con
-los metadatos que PlatformIO escribe durante el flasheo; sólo el gesto de
+terminal en NVS sin reducir la geometría publicada de esa partición. Como la
+aplicación arranca desde una partición `factory`, la carga excluye los
+metadatos OTA innecesarios que ocuparían parte de NVS. La compilación comprueba
+la tabla y las direcciones efectivas de carga; sólo el gesto de
 restablecimiento confirmado o un borrado completo explícito de la flash
 eliminan las credenciales guardadas.
 

@@ -6,4 +6,6 @@ web/dist/
 web/playwright-report/
 web/test-results/
 .codegraph/
+__pycache__/
+*.pyc
 *.log

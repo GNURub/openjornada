@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 
-"""Fail firmware builds when persistent storage overlaps upload metadata."""
+"""Keep USB uploads away from the terminal's persistent NVS partition."""
 
 from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Iterable
 
 
 FLASH_SIZE = 16 * 1024 * 1024
-PARTITION_TABLE_END = 0x9000
-BOOT_METADATA_START = 0xE000
 APP_START = 0x10000
+BOOT_APP_OFFSET = 0xE000
+EXPECTED_LAYOUT = {
+    "nvs": ("data", "nvs", 0x9000, 0x6000),
+    "phy_init": ("data", "phy", 0xF000, 0x1000),
+    "factory": ("app", "factory", APP_START, 0x400000),
+    "littlefs": ("data", "spiffs", 0x410000, 0xBF0000),
+}
+EXPECTED_EXTRA_OFFSETS = {0x1000, 0x8000}
+EXPECTED_EXTRA_IMAGES = [(0x1000, "bootloader.bin"), (0x8000, "partitions.bin")]
 
 
 @dataclass(frozen=True)
@@ -31,11 +39,11 @@ class Partition:
 def parse_number(value: str) -> int:
     normalized = value.strip().lower()
     multiplier = 1
-    if normalized.endswith("k"):
-        normalized = normalized[:-1]
+    if normalized.endswith(("kb", "k")):
+        normalized = normalized[: -2 if normalized.endswith("kb") else -1]
         multiplier = 1024
-    elif normalized.endswith("m"):
-        normalized = normalized[:-1]
+    elif normalized.endswith(("mb", "m")):
+        normalized = normalized[: -2 if normalized.endswith("mb") else -1]
         multiplier = 1024 * 1024
     return int(normalized, 0) * multiplier
 
@@ -60,17 +68,40 @@ def load_partitions(path: Path) -> list[Partition]:
     return partitions
 
 
-def validate_partitions(partitions: list[Partition]) -> list[str]:
+def validate_layout(
+    partitions: list[Partition],
+    flash_size: int,
+    app_offset: int,
+    extra_offsets: Iterable[int],
+) -> list[str]:
     errors: list[str] = []
+    by_name = {partition.name: partition for partition in partitions}
+    if len(by_name) != len(partitions):
+        errors.append("los nombres de partición deben ser únicos")
+
+    for name, expected in EXPECTED_LAYOUT.items():
+        partition = by_name.get(name)
+        actual = None
+        if partition is not None:
+            actual = (
+                partition.partition_type,
+                partition.subtype,
+                partition.offset,
+                partition.size,
+            )
+        if actual != expected:
+            errors.append(
+                f"{name} debe ser {expected[0]}/{expected[1]} en "
+                f"{expected[2]:#x} con tamaño {expected[3]:#x}"
+            )
+
     ordered = sorted(partitions, key=lambda partition: partition.offset)
     for partition in ordered:
-        if partition.offset < PARTITION_TABLE_END:
+        if partition.offset % 0x1000 != 0 or partition.size % 0x1000 != 0:
+            errors.append(f"{partition.name} no está alineada a sectores de 4 KiB")
+        if partition.end > flash_size:
             errors.append(
-                f"{partition.name} empieza en {partition.offset:#x}, dentro del área de arranque"
-            )
-        if partition.end > FLASH_SIZE:
-            errors.append(
-                f"{partition.name} termina en {partition.end:#x}, fuera de la flash de 16 MB"
+                f"{partition.name} termina en {partition.end:#x}, fuera de la flash"
             )
     for previous, current in zip(ordered, ordered[1:]):
         if previous.end > current.offset:
@@ -79,42 +110,131 @@ def validate_partitions(partitions: list[Partition]) -> list[str]:
                 f"{current.name} ({current.offset:#x}-{current.end:#x})"
             )
 
-    nvs = [partition for partition in partitions if partition.name == "nvs"]
-    if len(nvs) != 1:
-        errors.append("debe existir exactamente una partición nvs")
-    elif nvs[0].end > BOOT_METADATA_START:
-        errors.append(
-            f"nvs termina en {nvs[0].end:#x} y boot_app0 se escribe desde "
-            f"{BOOT_METADATA_START:#x}; un flasheo borraría la configuración"
-        )
+    if flash_size != FLASH_SIZE:
+        errors.append(f"la flash efectiva debe ser de 16 MB, no {flash_size:#x} bytes")
+    if app_offset != APP_START:
+        errors.append(f"la aplicación debe cargarse en {APP_START:#x}, no {app_offset:#x}")
 
-    boot_metadata = [
-        partition
-        for partition in partitions
-        if partition.offset == BOOT_METADATA_START and partition.end == APP_START
-    ]
-    if not any(
-        partition.partition_type == "data" and partition.subtype == "ota"
-        for partition in boot_metadata
-    ):
+    offsets = set(extra_offsets)
+    if offsets != EXPECTED_EXTRA_OFFSETS:
+        formatted = ", ".join(f"{offset:#x}" for offset in sorted(offsets))
         errors.append(
-            "el rango 0xe000-0x10000 debe reservarse como partición data/ota"
+            "las imágenes auxiliares deben limitarse al bootloader y la tabla en "
+            f"0x1000 y 0x8000; se encontraron: {formatted or 'ninguna'}"
         )
-
+    for offset in offsets:
+        for partition in partitions:
+            if partition.offset <= offset < partition.end:
+                errors.append(
+                    f"una imagen auxiliar en {offset:#x} sobrescribiría {partition.name}"
+                )
     return errors
 
 
-def main() -> None:
-    try:
-        Import("env")  # type: ignore[name-defined]  # PlatformIO/SCons global
-        project_dir = Path(env.subst("$PROJECT_DIR"))  # type: ignore[name-defined]
-    except NameError:
-        project_dir = Path(__file__).resolve().parents[1]
-    path = project_dir / "partitions.csv"
-    errors = validate_partitions(load_partitions(path))
+def validate_extra_images(images: Iterable[tuple[Any, Any]]) -> list[str]:
+    actual = sorted(
+        (parse_number(str(offset)), Path(str(path)).name) for offset, path in images
+    )
+    if actual == EXPECTED_EXTRA_IMAGES:
+        return []
+    formatted = ", ".join(f"{offset:#x}/{name}" for offset, name in actual)
+    return [
+        "las imágenes auxiliares efectivas deben ser exactamente "
+        f"0x1000/bootloader.bin y 0x8000/partitions.bin; son: {formatted or 'ninguna'}"
+    ]
+
+
+def remove_boot_app_image(
+    images: Iterable[tuple[Any, Any]],
+) -> tuple[list[tuple[Any, Any]], str]:
+    kept: list[tuple[Any, Any]] = []
+    removed_path = ""
+    for offset, path in images:
+        if (
+            parse_number(str(offset)) == BOOT_APP_OFFSET
+            and Path(str(path)).name == "boot_app0.bin"
+        ):
+            removed_path = str(path)
+            continue
+        kept.append((offset, path))
+    return kept, removed_path
+
+
+def remove_upload_flag_pair(
+    flags: Iterable[Any], offset: int, image_path: str
+) -> tuple[list[Any], int]:
+    values = list(flags)
+    kept: list[Any] = []
+    removed = 0
+    index = 0
+    while index < len(values):
+        if (
+            index + 1 < len(values)
+            and str(values[index]).lower() == f"{offset:#x}"
+            and str(values[index + 1]) == image_path
+        ):
+            removed += 1
+            index += 2
+            continue
+        kept.append(values[index])
+        index += 1
+    return kept, removed
+
+
+def configure_platformio(environment: Any) -> None:
+    partition_path = Path(environment.subst("$PARTITIONS_TABLE_CSV")).resolve()
+    images = list(environment.get("FLASH_EXTRA_IMAGES", []))
+    kept_images, removed_path = remove_boot_app_image(images)
+    if not removed_path:
+        raise SystemExit("No se encontró boot_app0.bin en 0xe000; no se puede asegurar NVS")
+
+    resolved_removed_path = environment.subst(removed_path)
+    upload_flags, removed_flag_pairs = remove_upload_flag_pair(
+        environment.get("UPLOADERFLAGS", []),
+        BOOT_APP_OFFSET,
+        resolved_removed_path,
+    )
+    if removed_flag_pairs != 1:
+        raise SystemExit(
+            "No se retiró exactamente una imagen boot_app0.bin de la orden de carga"
+        )
+    if any(str(flag).lower() == f"{BOOT_APP_OFFSET:#x}" for flag in upload_flags):
+        raise SystemExit("La orden de carga todavía contiene la dirección NVS 0xe000")
+
+    environment.Replace(FLASH_EXTRA_IMAGES=kept_images)
+    environment.Replace(UPLOADERFLAGS=upload_flags)
+
+    board = environment.BoardConfig()
+    flash_size = parse_number(str(board.get("upload.flash_size", "")))
+    app_offset = parse_number(str(environment.subst("$ESP32_APP_OFFSET")))
+    extra_offsets = [parse_number(str(offset)) for offset, _ in kept_images]
+    errors = validate_layout(
+        load_partitions(partition_path), flash_size, app_offset, extra_offsets
+    )
+    errors.extend(validate_extra_images(kept_images))
+    if errors:
+        details = "\n".join(f"  - {error}" for error in errors)
+        raise SystemExit(f"Carga USB o tabla de particiones no válida:\n{details}")
+
+
+def validate_standalone() -> None:
+    project_dir = Path(__file__).resolve().parents[1]
+    errors = validate_layout(
+        load_partitions(project_dir / "partitions.csv"),
+        FLASH_SIZE,
+        APP_START,
+        EXPECTED_EXTRA_OFFSETS,
+    )
+    errors.extend(validate_extra_images(EXPECTED_EXTRA_IMAGES))
     if errors:
         details = "\n".join(f"  - {error}" for error in errors)
         raise SystemExit(f"Tabla de particiones no válida:\n{details}")
 
 
-main()
+try:
+    Import("env")  # type: ignore[name-defined]  # PlatformIO/SCons global
+except NameError:
+    if __name__ == "__main__":
+        validate_standalone()
+else:
+    configure_platformio(env)  # type: ignore[name-defined]

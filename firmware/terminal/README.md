@@ -23,6 +23,7 @@ usar los comandos siguientes:
 
 ```bash
 cd firmware/terminal
+python3 -m unittest scripts/test_validate_partitions.py
 uv tool run --from platformio platformio test -e native
 uv tool run --from platformio platformio run -e m5stack_dev
 uv tool run --from platformio platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
@@ -47,9 +48,11 @@ actualización v1 es exclusivamente por USB; no hay OTA. La configuración
 validada se guarda en una partición NVS que no se sobrescribe con una carga USB
 normal. Sólo el restablecimiento físico A+B+C descrito más abajo —o un borrado
 completo de la flash ejecutado expresamente desde las herramientas de
-desarrollo— elimina esas credenciales. La compilación valida la tabla de
-particiones para impedir que NVS vuelva a solaparse con los metadatos que
-PlatformIO escribe durante cada actualización.
+desarrollo— elimina esas credenciales. El proyecto conserva la geometría NVS
+publicada y excluye de la carga la imagen `boot_app0.bin`, innecesaria con la
+aplicación `factory`, porque PlatformIO intentaría escribirla dentro de NVS. La
+compilación valida la tabla efectiva y las direcciones efectivas de carga para
+impedir que ese solapamiento reaparezca.
 
 ## Puesta en servicio
 
