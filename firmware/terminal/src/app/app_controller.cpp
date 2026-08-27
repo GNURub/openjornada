@@ -21,6 +21,7 @@ const char* greetingForLocalHour(int hour) {
 namespace {
 
 constexpr char kAdminExitHint[] = "Mantén A+C 3 s para salir";
+constexpr char kPickerHelp[] = "Mantén A/C para saltar 30 min";
 
 bool deadlineReached(uint32_t now, uint32_t deadline) {
   return static_cast<int32_t>(now - deadline) >= 0;
@@ -543,9 +544,20 @@ void AppController::handleButton(const AppEvent& event, bool held) {
       const int64_t requested =
           screen_.selectedEpochSeconds +
           (event.button == Button::A ? -stepMinutes : stepMinutes) * 60;
-      screen_.selectedEpochSeconds =
-          std::clamp(requested, pickerMinEpochSeconds_,
-                     pickerMaxEpochSeconds_);
+      const bool hitLowerBound = requested < pickerMinEpochSeconds_;
+      const bool hitUpperBound = requested > pickerMaxEpochSeconds_;
+      screen_.selectedEpochSeconds = std::clamp(
+          requested, pickerMinEpochSeconds_, pickerMaxEpochSeconds_);
+      if (hitLowerBound || hitUpperBound) {
+        screen_.detail = hitLowerBound
+                             ? (pickerClosesBreak_
+                                    ? "Límite: inicio de la pausa"
+                                    : "Límite: inicio de la jornada")
+                             : "No puedes elegir una hora futura";
+        feedback_ = AppFeedback::Error;
+      } else {
+        screen_.detail = kPickerHelp;
+      }
       if (held) {
         lastPickerPress_.reset();
       } else {
@@ -1103,7 +1115,7 @@ void AppController::openTimePicker(Command command, bool closesBreak,
   screen_.kind = ScreenKind::TimePicker;
   screen_.title = closesBreak ? "¿A qué hora terminaste la pausa?"
                               : "¿A qué hora terminaste?";
-  screen_.detail = "Mantén A/C para saltar 30 min";
+  screen_.detail = kPickerHelp;
   pickerMaxEpochSeconds_ = effectiveCapturedEpoch(event);
   pickerMinEpochSeconds_ =
       parseRfc3339(resolved_->state.since).value_or(pickerMaxEpochSeconds_);
@@ -1112,7 +1124,7 @@ void AppController::openTimePicker(Command command, bool closesBreak,
     pickerMinEpochSeconds_ = pickerMaxEpochSeconds_;
   }
   screen_.selectedEpochSeconds = pickerMaxEpochSeconds_;
-  screen_.buttons = {"−5 min", "Confirmar", "+5 min"};
+  screen_.buttons = {"-5 min", "Confirmar", "+5 min"};
   lastPickerPress_.reset();
   armInteractionDeadline(event.nowMs);
   screen_.warning = false;

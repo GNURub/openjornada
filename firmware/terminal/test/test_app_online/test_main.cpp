@@ -600,6 +600,7 @@ void test_time_picker_steps_five_and_held_steps_thirty() {
   fixture.scan(work(WorkKind::Working, true));
   fixture.press(Button::C);
   TEST_ASSERT_EQUAL(ScreenKind::TimePicker, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("-5 min", fixture.app.screen().buttons.a.c_str());
   const auto initial = fixture.app.screen().selectedEpochSeconds;
   fixture.press(Button::A);
   TEST_ASSERT_EQUAL_INT64(initial - 5 * 60,
@@ -642,6 +643,57 @@ void test_time_picker_steps_five_and_held_steps_thirty() {
   lowerBound.hold(Button::A);
   TEST_ASSERT_EQUAL_INT64(upper - 15 * 60,
                           lowerBound.app.screen().selectedEpochSeconds);
+}
+
+void test_time_picker_repeats_valid_steps_and_explains_limits() {
+  Fixture repeated;
+  ApiWorkState longPause = work(WorkKind::OnBreak);
+  longPause.since = "2026-08-21T09:30:00Z";
+  repeated.scan(longPause);
+  repeated.press(Button::C);
+  const auto initial = repeated.app.screen().selectedEpochSeconds;
+
+  repeated.press(Button::A);
+  repeated.press(Button::A);
+  repeated.press(Button::A);
+  TEST_ASSERT_EQUAL_INT64(initial - 15 * 60,
+                          repeated.app.screen().selectedEpochSeconds);
+  repeated.press(Button::C);
+  repeated.press(Button::C);
+  TEST_ASSERT_EQUAL_INT64(initial - 5 * 60,
+                          repeated.app.screen().selectedEpochSeconds);
+  TEST_ASSERT_EQUAL_STRING("Mantén A/C para saltar 30 min",
+                           repeated.app.screen().detail.c_str());
+
+  Fixture bounded;
+  ApiWorkState shortPause = work(WorkKind::OnBreak);
+  shortPause.since = "2026-08-21T09:57:00Z";
+  bounded.scan(shortPause);
+  bounded.press(Button::C);
+  bounded.press(Button::A);
+  const auto minimum = bounded.app.screen().selectedEpochSeconds;
+  TEST_ASSERT_EQUAL_INT64(initial - 3 * 60, minimum);
+  TEST_ASSERT_EQUAL_INT64(minimum,
+                          bounded.app.screen().selectedEpochSeconds);
+  TEST_ASSERT_EQUAL_STRING("Límite: inicio de la pausa",
+                           bounded.app.screen().detail.c_str());
+  TEST_ASSERT_EQUAL(AppFeedback::Error, bounded.app.takeFeedback());
+
+  bounded.press(Button::C);
+  TEST_ASSERT_EQUAL_INT64(initial, bounded.app.screen().selectedEpochSeconds);
+  TEST_ASSERT_EQUAL_STRING("No puedes elegir una hora futura",
+                           bounded.app.screen().detail.c_str());
+  TEST_ASSERT_EQUAL(AppFeedback::Error, bounded.app.takeFeedback());
+
+  Fixture workdayBound;
+  ApiWorkState shortWorkday = work(WorkKind::Working, true);
+  shortWorkday.since = "2026-08-21T09:57:00Z";
+  workdayBound.scan(shortWorkday);
+  workdayBound.press(Button::C);
+  workdayBound.press(Button::A);
+  TEST_ASSERT_EQUAL_STRING("Límite: inicio de la jornada",
+                           workdayBound.app.screen().detail.c_str());
+  TEST_ASSERT_EQUAL(AppFeedback::Error, workdayBound.app.takeFeedback());
 }
 
 void test_close_from_break_asks_time_then_close_confirmation() {
@@ -1601,6 +1653,7 @@ int main(int, char**) {
   RUN_TEST(test_completion_failure_preserves_each_server_outcome_semantics);
   RUN_TEST(test_stale_pause_warns_and_actions_expire_after_ten_seconds);
   RUN_TEST(test_time_picker_steps_five_and_held_steps_thirty);
+  RUN_TEST(test_time_picker_repeats_valid_steps_and_explains_limits);
   RUN_TEST(test_close_from_break_asks_time_then_close_confirmation);
   RUN_TEST(test_close_from_break_refresh_failure_never_appends_clock_out);
   RUN_TEST(test_close_refresh_rejects_reassigned_uid_and_unexpected_state);
