@@ -10,6 +10,12 @@
 #include <string_view>
 #include <utility>
 
+#ifdef ARDUINO
+#include <lwip/sockets.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 namespace openjornada {
 namespace {
 
@@ -21,6 +27,9 @@ constexpr size_t kMaxLabel = 96;
 constexpr size_t kMaxTimestamp = 48;
 constexpr size_t kMaxTimezone = 64;
 constexpr size_t kMaxVersion = 64;
+constexpr size_t kMaxTelemetryVersion = 40;
+constexpr size_t kMaxPingChallenge = 128;
+constexpr size_t kMaxIpAddress = 45;
 constexpr size_t kMaxScanContext = 512;
 constexpr size_t kMaxAdminToken = 96;
 constexpr size_t kMaxUid = 20;
@@ -321,6 +330,7 @@ bool serializeDocument(ArduinoJson::JsonDocument& document,
                        BoundedAllocator<Capacity>& allocator,
                        std::string& output) {
   (void)allocator;
+  if (document.overflowed()) return false;
   std::string candidate;
   const size_t measured = ArduinoJson::measureJson(document);
   if (measured == 0 || measured > ApiCodec::kMaxRequestBytes) return false;
@@ -341,6 +351,34 @@ bool validActionRequest(const ActionRequest& request) {
          validText(request.appliedAt, kMaxTimestamp, true) &&
          validText(request.clockSyncedAt, kMaxTimestamp, false) &&
          request.deviceSequence > 0;
+}
+
+bool validClockEvidence(const HeartbeatRequest& request) {
+  if (request.clockStatus == "unsynced") {
+    return request.lastNtpSyncAt.empty();
+  }
+  if (request.clockStatus != "synced" && request.clockStatus != "stale") {
+    return false;
+  }
+  return validText(request.lastNtpSyncAt, kMaxTimestamp, false);
+}
+
+bool validHeartbeatRequest(const HeartbeatRequest& request) {
+  return request.protocolVersion == kTerminalProtocolVersion &&
+         validText(request.clientVersion, kMaxTelemetryVersion, false) &&
+         request.pendingCount <= OutboxCodec::kCapacity &&
+         request.wifiRssiDbm >= -127 && request.wifiRssiDbm <= 0 &&
+         request.uptimeSeconds <= std::numeric_limits<uint32_t>::max() &&
+         validClockEvidence(request);
+}
+
+bool validIpAddress(std::string_view value) {
+  if (!validText(value, kMaxIpAddress, false)) return false;
+  const std::string terminated(value);
+  in_addr ipv4{};
+  if (inet_pton(AF_INET, terminated.c_str(), &ipv4) == 1) return true;
+  in6_addr ipv6{};
+  return inet_pton(AF_INET6, terminated.c_str(), &ipv6) == 1;
 }
 
 }  // namespace
@@ -639,6 +677,29 @@ bool ApiCodec::decodeSync(std::string_view json, SyncResponse& output,
   return true;
 }
 
+bool ApiCodec::decodeHeartbeat(std::string_view json,
+                               HeartbeatResponse& output,
+                               ApiFailure& failure) {
+  BoundedDocument<kMaxTelemetryResponseBytes * 4U> bounded;
+  if (!parseJson<kMaxTelemetryResponseBytes>(json, bounded, failure)) {
+    return false;
+  }
+  const auto root = bounded.document.as<ArduinoJson::JsonObjectConst>();
+  HeartbeatResponse candidate;
+  if (!requiredString(root, "serverTime", kMaxTimestamp,
+                      candidate.serverTime) ||
+      !optionalString(root, "pingChallenge", kMaxPingChallenge,
+                      candidate.pingChallenge) ||
+      (!candidate.pingChallenge.empty() &&
+       !validText(candidate.pingChallenge, kMaxPingChallenge, false))) {
+    setFailure(failure, ApiErrorCode::InvalidResponse);
+    return false;
+  }
+  output = std::move(candidate);
+  failure = {};
+  return true;
+}
+
 bool ApiCodec::decodeError(std::string_view json, int httpStatus,
                            ApiFailure& failure) {
   BoundedDocument<kMaxErrorResponseBytes * 4U> bounded;
@@ -765,6 +826,39 @@ bool ApiCodec::encodeSync(const SyncRequest& request, std::string& output) {
     item["signature"] = action.signature;
   }
   root["pendingCount"] = request.pendingCount;
+  return serializeDocument(bounded.document, bounded.allocator, output);
+}
+
+bool ApiCodec::encodeHeartbeat(const HeartbeatRequest& request,
+                               std::string& output) {
+  if (!validHeartbeatRequest(request)) return false;
+  BoundedDocument<8192> bounded;
+  auto root = bounded.document.to<ArduinoJson::JsonObject>();
+  root["protocolVersion"] = request.protocolVersion;
+  root["clientVersion"] = request.clientVersion.c_str();
+  root["cacheRevision"] = request.cacheRevision;
+  root["pendingCount"] = request.pendingCount;
+  root["wifiRssiDbm"] = request.wifiRssiDbm;
+  root["uptimeSeconds"] = request.uptimeSeconds;
+  root["clockStatus"] = request.clockStatus.c_str();
+  root["lastNtpSyncAt"] = request.lastNtpSyncAt.c_str();
+  return serializeDocument(bounded.document, bounded.allocator, output);
+}
+
+bool ApiCodec::encodePingAck(const PingAckRequest& request,
+                             std::string& output) {
+  if (!validText(request.pingChallenge, kMaxPingChallenge, false) ||
+      !validIpAddress(request.localIp) || request.wifiRssiDbm < -127 ||
+      request.wifiRssiDbm > 0 ||
+      request.uptimeSeconds > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  BoundedDocument<8192> bounded;
+  auto root = bounded.document.to<ArduinoJson::JsonObject>();
+  root["pingChallenge"] = request.pingChallenge.c_str();
+  root["localIp"] = request.localIp.c_str();
+  root["wifiRssiDbm"] = request.wifiRssiDbm;
+  root["uptimeSeconds"] = request.uptimeSeconds;
   return serializeDocument(bounded.document, bounded.allocator, output);
 }
 

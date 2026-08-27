@@ -95,6 +95,29 @@ struct BootstrapResponse {
   uint32_t maxQueuedActions = 0;
 };
 
+struct HeartbeatRequest {
+  uint8_t protocolVersion = kTerminalProtocolVersion;
+  std::string clientVersion;
+  uint32_t cacheRevision = 0;
+  uint32_t pendingCount = 0;
+  int16_t wifiRssiDbm = -127;
+  uint64_t uptimeSeconds = 0;
+  std::string clockStatus;
+  std::string lastNtpSyncAt;
+};
+
+struct HeartbeatResponse {
+  std::string serverTime;
+  std::string pingChallenge;
+};
+
+struct PingAckRequest {
+  std::string pingChallenge;
+  std::string localIp;
+  int16_t wifiRssiDbm = -127;
+  uint64_t uptimeSeconds = 0;
+};
+
 enum class ActionMode { Now, ChooseTime, CloseFromBreak };
 
 struct ActionChoice {
@@ -212,6 +235,7 @@ class ApiCodec {
   static constexpr size_t kMaxEmployeeResponseBytes = 16U * 1024U;
   static constexpr size_t kMaxSyncResponseBytes = 16U * 1024U;
   static constexpr size_t kMaxErrorResponseBytes = 2048;
+  static constexpr size_t kMaxTelemetryResponseBytes = 2048;
 
   static bool decodeBootstrap(std::string_view json,
                               BootstrapResponse& output,
@@ -230,6 +254,9 @@ class ApiCodec {
                               ApiFailure& failure);
   static bool decodeSync(std::string_view json, SyncResponse& output,
                          ApiFailure& failure);
+  static bool decodeHeartbeat(std::string_view json,
+                              HeartbeatResponse& output,
+                              ApiFailure& failure);
   static bool decodeError(std::string_view json, int httpStatus,
                           ApiFailure& failure);
 
@@ -242,6 +269,10 @@ class ApiCodec {
   static bool encodeAssignEmployee(std::string_view uid, bool replace,
                                    std::string& output);
   static bool encodeSync(const SyncRequest& request, std::string& output);
+  static bool encodeHeartbeat(const HeartbeatRequest& request,
+                              std::string& output);
+  static bool encodePingAck(const PingAckRequest& request,
+                            std::string& output);
 };
 
 const char* commandApiValue(Command command);

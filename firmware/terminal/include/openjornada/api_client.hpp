@@ -63,8 +63,21 @@ class ApiClient {
                              uint32_t timeoutMs) = 0;
 };
 
+class TelemetryClient {
+ public:
+  virtual ~TelemetryClient() = default;
+
+  virtual ApiCallResult heartbeat(const ApiCredentials& credentials,
+                                  const HeartbeatRequest& request,
+                                  HeartbeatResponse& output,
+                                  uint32_t timeoutMs) = 0;
+  virtual ApiCallResult pingAck(const ApiCredentials& credentials,
+                                const PingAckRequest& request,
+                                uint32_t timeoutMs) = 0;
+};
+
 #ifdef ARDUINO
-class Esp32ApiClient final : public ApiClient {
+class Esp32ApiClient final : public ApiClient, public TelemetryClient {
  public:
   explicit Esp32ApiClient(BuildProfile profile) : profile_(profile) {}
 
@@ -89,6 +102,10 @@ class Esp32ApiClient final : public ApiClient {
                                const std::string&, uint32_t) override;
   ApiCallResult sync(const ApiCredentials&, const SyncRequest&, SyncResponse&,
                      uint32_t) override;
+  ApiCallResult heartbeat(const ApiCredentials&, const HeartbeatRequest&,
+                          HeartbeatResponse&, uint32_t) override;
+  ApiCallResult pingAck(const ApiCredentials&, const PingAckRequest&,
+                        uint32_t) override;
 
  private:
   BuildProfile profile_;

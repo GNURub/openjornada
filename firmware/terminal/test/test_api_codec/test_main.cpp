@@ -235,6 +235,91 @@ void test_oversized_json_is_rejected_before_parse() {
   TEST_ASSERT_EQUAL_UINT32(17, output.cacheRevision);
 }
 
+void test_heartbeat_contract_round_trip() {
+  HeartbeatRequest request{1, "m5stack-1.1.0", 7, 2, -63, 3600,
+                           "synced", "2026-08-27T11:59:00Z"};
+  std::string encoded;
+  TEST_ASSERT_TRUE(ApiCodec::encodeHeartbeat(request, encoded));
+  TEST_ASSERT_EQUAL_STRING(
+      "{\"protocolVersion\":1,\"clientVersion\":\"m5stack-1.1.0\",\"cacheRevision\":7,\"pendingCount\":2,\"wifiRssiDbm\":-63,\"uptimeSeconds\":3600,\"clockStatus\":\"synced\",\"lastNtpSyncAt\":\"2026-08-27T11:59:00Z\"}",
+      encoded.c_str());
+
+  HeartbeatResponse response;
+  ApiFailure failure;
+  TEST_ASSERT_TRUE(ApiCodec::decodeHeartbeat(
+      "{\"serverTime\":\"2026-08-27T12:00:00Z\",\"pingChallenge\":\"challenge\"}",
+      response, failure));
+  TEST_ASSERT_EQUAL_STRING("2026-08-27T12:00:00Z",
+                           response.serverTime.c_str());
+  TEST_ASSERT_EQUAL_STRING("challenge", response.pingChallenge.c_str());
+}
+
+void test_heartbeat_contract_enforces_bounds_and_clock_evidence() {
+  HeartbeatRequest request{1, "m5stack-1.1.0", 7, 2, -63, 3600,
+                           "unsynced", ""};
+  std::string output = "preserve";
+  TEST_ASSERT_TRUE(ApiCodec::encodeHeartbeat(request, output));
+
+  request.clientVersion = std::string(41, 'v');
+  TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
+  request.clientVersion = "m5stack-1.1.0";
+  request.pendingCount = OutboxCodec::kCapacity + 1U;
+  TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
+  request.pendingCount = 2;
+  request.wifiRssiDbm = 1;
+  TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
+  request.wifiRssiDbm = -63;
+  request.uptimeSeconds = 4294967296ULL;
+  TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
+  request.uptimeSeconds = 3600;
+  request.clockStatus = "synced";
+  TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
+  request.lastNtpSyncAt = "2026-08-27T11:59:00Z";
+  TEST_ASSERT_TRUE(ApiCodec::encodeHeartbeat(request, output));
+}
+
+void test_heartbeat_response_rejects_invalid_challenge_without_mutation() {
+  HeartbeatResponse response;
+  response.serverTime = "preserve";
+  response.pingChallenge = "preserve";
+  ApiFailure failure;
+  const std::string oversized(129, 'a');
+  const std::string json =
+      "{\"serverTime\":\"2026-08-27T12:00:00Z\",\"pingChallenge\":\"" +
+      oversized + "\"}";
+  TEST_ASSERT_FALSE(ApiCodec::decodeHeartbeat(json, response, failure));
+  TEST_ASSERT_EQUAL(ApiErrorCode::InvalidResponse, failure.code);
+  TEST_ASSERT_EQUAL_STRING("preserve", response.serverTime.c_str());
+  TEST_ASSERT_EQUAL_STRING("preserve", response.pingChallenge.c_str());
+}
+
+void test_ping_ack_validates_native_ipv4_and_ipv6() {
+  std::string output;
+  TEST_ASSERT_FALSE(
+      ApiCodec::encodePingAck({"", "192.168.1.2", -60, 9}, output));
+  TEST_ASSERT_FALSE(
+      ApiCodec::encodePingAck({"challenge", "not-an-ip", -60, 9}, output));
+  TEST_ASSERT_FALSE(ApiCodec::encodePingAck(
+      {"challenge", "192.168.001.2", -60, 9}, output));
+  TEST_ASSERT_FALSE(ApiCodec::encodePingAck(
+      {"challenge", "2001:db8:::1", -60, 9}, output));
+  TEST_ASSERT_TRUE(ApiCodec::encodePingAck(
+      {"challenge", "192.168.1.2", -60, 9}, output));
+  TEST_ASSERT_TRUE(ApiCodec::encodePingAck(
+      {"challenge", "2001:db8::5", -60, 9}, output));
+  TEST_ASSERT_TRUE(ApiCodec::encodePingAck(
+      {"challenge", "::ffff:192.168.1.2", -60, 9}, output));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        output.find("\"localIp\":\"::ffff:192.168.1.2\""));
+
+  TEST_ASSERT_FALSE(ApiCodec::encodePingAck(
+      {std::string(129, 'c'), "192.168.1.2", -60, 9}, output));
+  TEST_ASSERT_FALSE(ApiCodec::encodePingAck(
+      {"challenge", "192.168.1.2", -128, 9}, output));
+  TEST_ASSERT_FALSE(ApiCodec::encodePingAck(
+      {"challenge", "192.168.1.2", -60, 4294967296ULL}, output));
+}
+
 }  // namespace
 
 int main(int, char**) {
@@ -252,5 +337,9 @@ int main(int, char**) {
   RUN_TEST(test_admin_and_employee_contracts_are_bounded);
   RUN_TEST(test_sync_contract_and_request_are_bounded);
   RUN_TEST(test_oversized_json_is_rejected_before_parse);
+  RUN_TEST(test_heartbeat_contract_round_trip);
+  RUN_TEST(test_heartbeat_contract_enforces_bounds_and_clock_evidence);
+  RUN_TEST(test_heartbeat_response_rejects_invalid_challenge_without_mutation);
+  RUN_TEST(test_ping_ack_validates_native_ipv4_and_ipv6);
   return UNITY_END();
 }

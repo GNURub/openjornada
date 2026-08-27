@@ -515,6 +515,32 @@ ApiCallResult Esp32ApiClient::sync(const ApiCredentials& credentials,
   return decodeSuccess(call, response, output, ApiCodec::decodeSync);
 }
 
+ApiCallResult Esp32ApiClient::heartbeat(
+    const ApiCredentials& credentials, const HeartbeatRequest& requestBody,
+    HeartbeatResponse& output, uint32_t timeoutMs) {
+  std::string payload;
+  if (!ApiCodec::encodeHeartbeat(requestBody, payload)) {
+    return failure(ApiErrorCode::InvalidResponse);
+  }
+  HttpResponse response;
+  auto call = request(profile_, credentials, "POST", "/heartbeat", payload,
+                      {}, timeoutMs, ApiCodec::kMaxTelemetryResponseBytes,
+                      response);
+  return decodeSuccess(call, response, output, ApiCodec::decodeHeartbeat);
+}
+
+ApiCallResult Esp32ApiClient::pingAck(const ApiCredentials& credentials,
+                                      const PingAckRequest& requestBody,
+                                      uint32_t timeoutMs) {
+  std::string payload;
+  if (!ApiCodec::encodePingAck(requestBody, payload)) {
+    return failure(ApiErrorCode::InvalidResponse);
+  }
+  HttpResponse response;
+  return request(profile_, credentials, "POST", "/ping-ack", payload, {},
+                 timeoutMs, ApiCodec::kMaxTelemetryResponseBytes, response);
+}
+
 }  // namespace openjornada
 
 #endif
