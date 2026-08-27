@@ -396,10 +396,17 @@ func (s *Service) syncActions(e *core.RequestEvent) error {
 	for _, result := range indexedResults {
 		results = append(results, result.outcome)
 	}
-	principal.Terminal.Set("lastSeenAt", time.Now())
+	completedAt := time.Now()
+	principal.Terminal.Set("lastSeenAt", completedAt)
+	principal.Terminal.Set("lastAttendanceSyncAt", completedAt)
 	principal.Terminal.Set("lastPendingCount", maxInt(0, body.PendingCount-len(results)))
-	_ = e.App.Save(principal.Terminal)
-	return e.JSON(http.StatusOK, map[string]any{"items": results, "serverTime": time.Now().UTC().Format(time.RFC3339Nano)})
+	if err := e.App.Save(principal.Terminal); err != nil {
+		return e.InternalServerError("No se pudo actualizar la sincronización del terminal.", err)
+	}
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      results,
+		"serverTime": completedAt.UTC().Format(time.RFC3339Nano),
+	})
 }
 
 func (s *Service) createIncident(app core.App, principal *terminalPrincipal, employee *core.Record, request actionRequest, reason string) actionOutcome {
