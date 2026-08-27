@@ -97,6 +97,11 @@ describe('TerminalDiagnosticsCardComponent', () => {
     expect(host.querySelector('[data-testid="last-heartbeat"]')?.getAttribute('title')).toContain(
       '27 ago 2026',
     );
+    expect(host.textContent).toContain('Creado');
+    expect(host.textContent).toContain('hace 7 días');
+    expect(host.querySelector('[data-testid="terminal-created"]')?.getAttribute('title')).toContain(
+      '20 ago 2026',
+    );
   });
 
   it('shows live telemetry and clears both IPs after ten minutes', async () => {

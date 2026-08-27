@@ -72,9 +72,28 @@ ambos perfiles pueden comprobar si una persona
 tiene tag, asignar uno, sustituirlo o revocarlo. El UID se envía una vez y no se
 vuelve a mostrar. La caché offline v1 admite hasta 30 personas activas con tag.
 
+Las tarjetas se refrescan en segundo plano cada 30 segundos y muestran estado,
+último heartbeat y sincronización de fichajes, pendientes, firmware/protocolo,
+reloj/NTP, señal Wi-Fi, uptime y revisión de caché. **En línea** requiere un
+heartbeat de hace menos de 45 segundos; desde los 45 segundos aparece **Sin
+conexión**, y una credencial revocada aparece siempre **Revocado**.
+
+`admin` y `manager` pueden pulsar **Comprobar conexión**; rotar, renombrar y
+revocar siguen siendo acciones exclusivas de `admin`. El backend espera hasta
+20 segundos a que el heartbeat del terminal recoja y conteste el reto, sin
+mostrar nada en el M5Stack. El resultado enseña temporalmente IP local, IP
+pública, señal y latencias. Esas IP viven sólo en una signal del componente:
+no se escriben en `localStorage`, `sessionStorage`, IndexedDB, PocketBase ni
+analítica, y se eliminan exactamente a los 10 minutos, al recargar o al salir
+de Integraciones.
+
+La UI obtiene el inventario mediante `GET /api/openjornada/terminals` y lanza
+la comprobación con `POST /api/openjornada/terminals/{id}/ping`.
+
 Los dispositivos consumen `/api/openjornada/terminal/v1`: `bootstrap`,
-`resolve`, `actions`, `sync`, sesiones administrativas, caché y asignación de
-tags. Un contexto firmado y efímero enlaza cada lectura online con sus acciones.
+`resolve`, `actions`, `sync`, `heartbeat`, `ping-ack`, sesiones administrativas,
+caché y asignación de tags. Un contexto firmado y efímero enlaza cada lectura
+online con sus acciones.
 La cola sin conexión conserva la hora capturada, la secuencia y una firma HMAC;
 el servidor comprueba el reloj, la asignación vigente y el estado resultante.
 Los conflictos aparecen en **Control horario → Incidencias RFID**, desde donde

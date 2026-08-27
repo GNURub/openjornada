@@ -23,6 +23,13 @@ function terminal(id: number, revoked = false) {
     lastSeenAt: '',
     lastPendingCount: 0,
     revokedAt: revoked ? '2026-08-22 12:00:00.000Z' : '',
+    connectionStatus: revoked ? 'revoked' : 'offline',
+    lastHeartbeatAt: '',
+    lastAttendanceSyncAt: '',
+    lastClockStatus: '',
+    lastNtpSyncAt: '',
+    lastWifiRssiDbm: null,
+    lastUptimeSeconds: null,
     createdBy: 'admin-1',
     created: `2026-08-${day} 10:00:00.000Z`,
   };

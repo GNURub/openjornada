@@ -64,6 +64,21 @@ El inventario de terminales RFID se pagina en el servidor de diez en diez y se
 ordena por estado y fecha de creación: activos primero y, dentro de cada estado,
 los más recientes primero.
 
+Cada terminal activo envía telemetría operativa mediante un heartbeat
+silencioso cada 15 segundos desde un worker aislado del fichaje y de su cola
+offline. Integraciones muestra el último contacto y sincronización, reloj/NTP,
+señal Wi-Fi, uptime, versión, protocolo, revisión de caché y pendientes. El
+estado se deriva sin guardar historial: pasa a **Sin conexión** al alcanzar 45
+segundos sin heartbeat y **Revocado** prevalece siempre.
+
+`admin` y `manager` pueden usar **Comprobar conexión**. La comprobación espera
+como máximo 20 segundos y es silenciosa en el M5Stack: no cambia la pantalla,
+no emite sonido y no interrumpe un fichaje. Las IP local y pública sólo forman
+parte de esa respuesta; no se guardan en PocketBase, logs, auditoría ni
+almacenamiento del navegador y desaparecen de la web a los 10 minutos, al
+recargar o al abandonar Integraciones. No se implementan historial, gráficas
+ni alertas de disponibilidad.
+
 ## Permisos principales
 
 - `admin`: configura políticas y saldos, asigna ausencias, aprueba solicitudes y gastos, gestiona documentos, tareas y objetivos.

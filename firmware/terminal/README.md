@@ -99,6 +99,27 @@ la pantalla muestra la contraseña temporal del AP y los ojos del portal pueden
 revelar la contraseña Wi-Fi o la API key; protege la placa, el móvil y cualquier
 otra pantalla frente a observadores.
 
+## Telemetría y comprobación silenciosa
+
+Con Wi-Fi disponible, el firmware intenta cada 15 segundos
+`POST /api/openjornada/terminal/v1/heartbeat`. Envía `protocolVersion`,
+`clientVersion`, `cacheRevision`, `pendingCount`, `wifiRssiDbm`,
+`uptimeSeconds`, `clockStatus` y, cuando existe, `lastNtpSyncAt`. La respuesta
+puede traer un `pingChallenge`; en ese caso se contesta mediante
+`POST /api/openjornada/terminal/v1/ping-ack` con el reto, la IP local, señal
+Wi-Fi y uptime.
+
+El heartbeat y su posible acuse usan un worker de telemetría aislado y de una
+sola ranura. Se planifican sólo cuando el worker principal está libre, no
+acumulan ciclos y nunca ocupan el trabajo activo de fichaje, sincronización,
+caché o administración. El ping es silencioso: no modifica la pantalla, el
+sonido, el lector ni el estado de jornada. Un fallo se descarta hasta el
+siguiente ciclo.
+
+Ningún heartbeat o acuse se añade al journal, al outbox ni a LittleFS. Las IP
+no se guardan en el dispositivo ni se imprimen en logs; sólo existen durante
+la petición de comprobación en curso.
+
 ## Uso y recuperación
 
 - Acerca un tag y usa A/B/C según las etiquetas inferiores.
