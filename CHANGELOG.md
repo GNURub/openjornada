@@ -2,6 +2,64 @@
 
 Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 
+## [0.7.0] - 2026-08-27
+
+### Añadido
+
+- Aprovisionamiento de terminales mediante un QR efímero que permite trasladar
+  de forma controlada la red Wi-Fi, URL y credencial desde Integraciones al
+  portal cautivo del M5Stack.
+- Telemetría operativa del terminal con estado de conexión, última
+  sincronización de fichajes, reloj, señal Wi-Fi, tiempo encendido y versión
+  del firmware visibles para administración y responsables.
+- Ping silencioso bajo demanda para diagnosticar la conexión y consultar las
+  IP local y pública de forma temporal, sin persistirlas en PocketBase ni en el
+  navegador.
+- Presentación corporativa reutilizable con capturas actualizadas de los
+  principales flujos de OpenJornada.
+- Fichaje offline operativo con cola durable, reproducción idempotente tras
+  reinicios y revisión posterior de conflictos desde la aplicación.
+- Administración local de tags desde el terminal físico y listado paginado de
+  terminales para empresas con múltiples dispositivos.
+
+### Cambiado
+
+- El firmware permite revisar y confirmar la hora efectiva al terminar tanto
+  una pausa como una jornada; al confirmar la hora corregida se ejecuta
+  directamente la acción elegida.
+- Las opciones tras leer un tag muestran con claridad la acción disponible y
+  las confirmaciones saludan a la persona según la hora del día.
+- El terminal conserva su configuración durante actualizaciones por USB y
+  permite recuperar o restablecer la conexión desde cualquier pantalla si
+  cambia la red Wi-Fi.
+- El modo de asignación de tags se puede abandonar manualmente y vuelve al modo
+  de fichaje tras cinco minutos sin actividad.
+- La pantalla entra en reposo tras diez minutos sin uso sin detener RFID, Wi-Fi
+  ni sincronización; una pulsación o un tag la despiertan de forma segura.
+- Cada reinicio exige una sincronización NTP nueva para admitir fichajes
+  offline y la confianza del reloj caduca tras veinticuatro horas.
+- OpenJornada se distribuye bajo Business Source License 1.1: uso gratuito para
+  entidades o grupos bajo control común con un máximo colectivo de diez
+  trabajadores —empleados y contratistas independientes—; cualquier otro uso
+  en producción requiere licencia comercial o permiso previo.
+
+### Corregido
+
+- Los selectores de hora responden de forma repetida y respetan sus límites al
+  ajustar el final de una pausa o jornada.
+- El aprovisionamiento rechaza QR y texto UTF-16 malformados, retira los
+  secretos de la vista y del estado de la aplicación al cerrar o abandonar la
+  página, y conserva correctamente redes Wi-Fi abiertas.
+- La telemetría respeta la configuración de proxies de confianza de PocketBase
+  al obtener la IP pública y mantiene el ping aislado entre empresas.
+
+### Seguridad y cumplimiento
+
+- Los heartbeats no bloquean fichajes, no se acumulan sin límite y nunca
+  escriben IP, credenciales ni respuestas de ping en almacenamiento duradero.
+- La imagen de distribución incorpora la licencia y los avisos de terceros del
+  frontend y del backend.
+
 ## [0.6.0] - 2026-08-21
 
 ### Añadido
@@ -155,6 +213,7 @@ Este proyecto sigue [versionado semántico](https://semver.org/lang/es/).
 - Las preservaciones legales excluyen los registros afectados de cualquier
   futura depuración; no se incorpora una purga automática.
 
+[0.7.0]: https://github.com/GNURub/openjornada/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/GNURub/openjornada/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/GNURub/openjornada/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/GNURub/openjornada/compare/v0.3.0...v0.4.0

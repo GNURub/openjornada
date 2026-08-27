@@ -19,6 +19,7 @@
 
 #include "openjornada/config.hpp"
 #include "openjornada/http_response_reader.hpp"
+#include "openjornada/version.hpp"
 
 extern "C" const uint8_t openjornada_ca_bundle[]
     asm("_binary_x509_crt_bundle_start");
@@ -319,8 +320,9 @@ ApiCallResult request(BuildProfile profile, const ApiCredentials& credentials,
   headers.append(target);
   headers.append(" HTTP/1.1\r\nHost: ");
   headers.append(url.authority);
-  headers.append("\r\nUser-Agent: OpenJornada-M5/1.0\r\n"
-                 "Accept: application/json\r\n"
+  headers.append("\r\nUser-Agent: ");
+  headers.append(kTerminalUserAgent);
+  headers.append("\r\nAccept: application/json\r\n"
                  "Content-Type: application/json\r\n"
                  "Authorization: Bearer ");
   headers.append(credentials.terminalToken);

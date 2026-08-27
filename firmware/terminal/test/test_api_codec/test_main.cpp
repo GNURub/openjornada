@@ -3,6 +3,7 @@
 #include <string>
 
 #include "openjornada/api_models.hpp"
+#include "openjornada/version.hpp"
 
 using namespace openjornada;
 
@@ -158,8 +159,10 @@ void test_malformed_state_conflict_does_not_mutate_failure() {
 void test_requests_are_serialized_with_protocol_field_names() {
   std::string json;
   TEST_ASSERT_TRUE(ApiCodec::encodeBootstrap(
-      BootstrapRequest{1, "m5stack-1.0.0", 3}, json));
+      BootstrapRequest{1, std::string(kTerminalClientVersion), 3}, json));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, json.find("\"protocolVersion\":1"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        json.find("\"clientVersion\":\"m5stack-1.1.0\""));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, json.find("\"pendingCount\":3"));
 
   ActionRequest action;

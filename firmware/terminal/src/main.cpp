@@ -35,6 +35,7 @@
 #include "openjornada/telemetry_worker.hpp"
 #include "openjornada/timezone.hpp"
 #include "openjornada/uid_gate.hpp"
+#include "openjornada/version.hpp"
 
 namespace {
 
@@ -245,7 +246,7 @@ ProvisioningOutcome runProvisioning(
         job.kind = NetworkJobKind::Bootstrap;
         job.credentials = {candidate.baseUrl, candidate.terminalToken};
         job.bootstrap = {
-            kTerminalProtocolVersion, "m5stack-1.0.0",
+            kTerminalProtocolVersion, std::string(kTerminalClientVersion),
             static_cast<uint32_t>(
                 std::min(pendingCount, OutboxCodec::kCapacity))};
         const uint32_t expectedJobId = job.id;
@@ -551,7 +552,7 @@ void setup() {
   }
   AppControllerConfig appConfig;
   appConfig.credentials = {deviceConfig->baseUrl, deviceConfig->terminalToken};
-  appConfig.clientVersion = "m5stack-1.0.0";
+  appConfig.clientVersion = kTerminalClientVersion;
   appConfig.rebootId = makeRebootId();
   appConfig.configFingerprint = configFingerprint;
   appConfig.initialCache = std::move(initialCache);
