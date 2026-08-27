@@ -156,6 +156,10 @@ function heartbeatData() {
     uptimeSeconds: 7200,
     clockStatus: 'synced',
     lastNtpSyncAt: new Date(Date.now() - 60_000).toISOString(),
+    firmwareUpdateStatus: 'updated',
+    firmwareTargetVersion: '1.2.0',
+    lastFirmwareCheckAt: new Date(Date.now() - 120_000).toISOString(),
+    firmwareUpdateErrorCode: '',
   };
 }
 
@@ -183,6 +187,10 @@ function terminalFixture(
     lastNtpSyncAt: hasTelemetry ? '2026-08-27T09:59:00.000Z' : '',
     lastWifiRssiDbm: hasTelemetry ? -62 : null,
     lastUptimeSeconds: hasTelemetry ? 7200 : null,
+    firmwareUpdateStatus: hasTelemetry ? 'rolled_back' : '',
+    firmwareTargetVersion: hasTelemetry ? '1.2.1' : '',
+    lastFirmwareCheckAt: hasTelemetry ? '2026-08-27T09:58:00.000Z' : '',
+    firmwareUpdateErrorCode: hasTelemetry ? 'rollback' : '',
     createdBy: 'admin-1',
     created: '2026-08-27T09:00:00.000Z',
   };
@@ -446,6 +454,8 @@ test('muestra telemetría y ping efímero para estados online, offline y revocad
 
   await expect(onlineCard.getByText('En línea', { exact: true })).toBeVisible();
   await expect(onlineCard.getByText('Buena · −62 dBm')).toBeVisible();
+  await expect(onlineCard.getByText('Revertido · 1.2.1')).toBeVisible();
+  await expect(onlineCard).toContainText('recuperó automáticamente la versión anterior');
   await expect(offlineCard.getByText('Sin conexión', { exact: true })).toBeVisible();
   await expect(revokedCard.getByText('Revocado', { exact: true })).toBeVisible();
   await expect(revokedCard.getByRole('button', { name: 'Comprobar conexión' })).toHaveCount(0);

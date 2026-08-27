@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Keep USB uploads away from the terminal's persistent NVS partition."""
+"""Validate the A/B layout and keep USB uploads away from persistent data."""
 
 from __future__ import annotations
 
@@ -13,14 +13,23 @@ from typing import Any, Iterable
 FLASH_SIZE = 16 * 1024 * 1024
 APP_START = 0x10000
 BOOT_APP_OFFSET = 0xE000
+OTADATA_START = 0x3F0000
+OTA_SLOT_SIZE = 0x1F0000
+MAX_APP_SIZE = OTA_SLOT_SIZE * 85 // 100
 EXPECTED_LAYOUT = {
     "nvs": ("data", "nvs", 0x9000, 0x6000),
     "phy_init": ("data", "phy", 0xF000, 0x1000),
-    "factory": ("app", "factory", APP_START, 0x400000),
+    "ota_0": ("app", "ota_0", APP_START, OTA_SLOT_SIZE),
+    "ota_1": ("app", "ota_1", 0x200000, OTA_SLOT_SIZE),
+    "otadata": ("data", "ota", OTADATA_START, 0x2000),
     "littlefs": ("data", "spiffs", 0x410000, 0xBF0000),
 }
-EXPECTED_EXTRA_OFFSETS = {0x1000, 0x8000}
-EXPECTED_EXTRA_IMAGES = [(0x1000, "bootloader.bin"), (0x8000, "partitions.bin")]
+EXPECTED_EXTRA_OFFSETS = {0x1000, 0x8000, OTADATA_START}
+EXPECTED_EXTRA_IMAGES = [
+    (0x1000, "bootloader.bin"),
+    (0x8000, "partitions.bin"),
+    (OTADATA_START, "boot_app0.bin"),
+]
 
 
 @dataclass(frozen=True)
@@ -119,12 +128,15 @@ def validate_layout(
     if offsets != EXPECTED_EXTRA_OFFSETS:
         formatted = ", ".join(f"{offset:#x}" for offset in sorted(offsets))
         errors.append(
-            "las imágenes auxiliares deben limitarse al bootloader y la tabla en "
-            f"0x1000 y 0x8000; se encontraron: {formatted or 'ninguna'}"
+            "las imágenes auxiliares deben limitarse al bootloader, la tabla y "
+            f"otadata en 0x1000, 0x8000 y 0x3f0000; se encontraron: "
+            f"{formatted or 'ninguna'}"
         )
     for offset in offsets:
         for partition in partitions:
             if partition.offset <= offset < partition.end:
+                if offset == OTADATA_START and partition.name == "otadata":
+                    continue
                 errors.append(
                     f"una imagen auxiliar en {offset:#x} sobrescribiría {partition.name}"
                 )
@@ -140,11 +152,12 @@ def validate_extra_images(images: Iterable[tuple[Any, Any]]) -> list[str]:
     formatted = ", ".join(f"{offset:#x}/{name}" for offset, name in actual)
     return [
         "las imágenes auxiliares efectivas deben ser exactamente "
-        f"0x1000/bootloader.bin y 0x8000/partitions.bin; son: {formatted or 'ninguna'}"
+        "0x1000/bootloader.bin, 0x8000/partitions.bin y "
+        f"0x3f0000/boot_app0.bin; son: {formatted or 'ninguna'}"
     ]
 
 
-def remove_boot_app_image(
+def relocate_boot_app_image(
     images: Iterable[tuple[Any, Any]],
 ) -> tuple[list[tuple[Any, Any]], str]:
     kept: list[tuple[Any, Any]] = []
@@ -157,6 +170,8 @@ def remove_boot_app_image(
             removed_path = str(path)
             continue
         kept.append((offset, path))
+    if removed_path:
+        kept.append((f"{OTADATA_START:#x}", removed_path))
     return kept, removed_path
 
 
@@ -184,7 +199,7 @@ def remove_upload_flag_pair(
 def configure_platformio(environment: Any) -> None:
     partition_path = Path(environment.subst("$PARTITIONS_TABLE_CSV")).resolve()
     images = list(environment.get("FLASH_EXTRA_IMAGES", []))
-    kept_images, removed_path = remove_boot_app_image(images)
+    kept_images, removed_path = relocate_boot_app_image(images)
     if not removed_path:
         raise SystemExit("No se encontró boot_app0.bin en 0xe000; no se puede asegurar NVS")
 
@@ -200,6 +215,7 @@ def configure_platformio(environment: Any) -> None:
         )
     if any(str(flag).lower() == f"{BOOT_APP_OFFSET:#x}" for flag in upload_flags):
         raise SystemExit("La orden de carga todavía contiene la dirección NVS 0xe000")
+    upload_flags.extend([f"{OTADATA_START:#x}", resolved_removed_path])
 
     environment.Replace(FLASH_EXTRA_IMAGES=kept_images)
     environment.Replace(UPLOADERFLAGS=upload_flags)
@@ -215,6 +231,22 @@ def configure_platformio(environment: Any) -> None:
     if errors:
         details = "\n".join(f"  - {error}" for error in errors)
         raise SystemExit(f"Carga USB o tabla de particiones no válida:\n{details}")
+
+    def validate_program_size(source: Any, target: Any, env: Any) -> None:
+        del source
+        del env
+        candidates = list(target)
+        if not candidates:
+            raise SystemExit("No se encontró el binario del firmware")
+        binary = Path(str(candidates[0]))
+        size = binary.stat().st_size
+        if size > MAX_APP_SIZE:
+            raise SystemExit(
+                f"El firmware ocupa {size} bytes y supera el límite OTA del 85 % "
+                f"({MAX_APP_SIZE} bytes)"
+            )
+
+    environment.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", validate_program_size)
 
 
 def validate_standalone() -> None:

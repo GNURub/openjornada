@@ -23,6 +23,7 @@ struct TelemetryJob {
 
 struct TelemetryResult {
   ApiCallResult heartbeat;
+  HeartbeatResponse response;
   bool ackAttempted = false;
   ApiCallResult ack;
 };

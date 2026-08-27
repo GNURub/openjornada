@@ -24,11 +24,11 @@ usar los comandos siguientes:
 ```bash
 cd firmware/terminal
 python3 -m unittest scripts/test_validate_partitions.py
-uv tool run --from platformio platformio test -e native
-uv tool run --from platformio platformio run -e m5stack_dev
-uv tool run --from platformio platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
-uv tool run --from platformio platformio device monitor --port /dev/ttyACM0 --baud 115200
-uv tool run --from platformio platformio run -e m5stack_release
+uv tool run --from platformio==6.1.19 platformio test -e native
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
+uv tool run --from platformio==6.1.19 platformio device monitor --port /dev/ttyACM0 --baud 115200
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
 ```
 
 El benchmark destructivo de cola llena sólo debe ejecutarse sobre una placa de
@@ -43,16 +43,49 @@ placa sin depender del número ACM puede usarse el enlace estable de
 
 El artefacto de producción queda en
 `.pio/build/m5stack_release/firmware.bin`. `m5stack_release` sólo permite
-HTTPS y valida la cadena del servidor con el bundle de CA del ESP32. La
-actualización v1 es exclusivamente por USB; no hay OTA. La configuración
-validada se guarda en una partición NVS que no se sobrescribe con una carga USB
-normal. Sólo el restablecimiento físico A+B+C descrito más abajo —o un borrado
-completo de la flash ejecutado expresamente desde las herramientas de
-desarrollo— elimina esas credenciales. El proyecto conserva la geometría NVS
-publicada y excluye de la carga la imagen `boot_app0.bin`, innecesaria con la
-aplicación `factory`, porque PlatformIO intentaría escribirla dentro de NVS. La
-compilación valida la tabla efectiva y las direcciones efectivas de carga para
-impedir que ese solapamiento reaparezca.
+HTTPS y valida la cadena del servidor con el bundle de CA del ESP32. La primera
+instalación de la versión 1.2.0 requiere USB para activar el layout A/B; las
+versiones posteriores se descargan automáticamente desde la última GitHub
+Release estable.
+
+La carga USB conserva NVS y LittleFS, escribe la aplicación en `ota_0` y
+reubica el inicializador `boot_app0.bin` a la partición `otadata` de `0x3f0000`,
+evitando su offset predeterminado `0xe000`, que solaparía NVS. El firmware nunca
+puede superar el 85 % de cada slot de `0x1f0000`. Sólo el restablecimiento
+físico A+B+C —o un borrado completo solicitado expresamente— elimina las
+credenciales, la caché y la cola.
+
+## Actualizaciones OTA
+
+Una vez por hora, el perfil `m5stack_release` consulta en segundo plano el
+manifiesto firmado de `GNURub/openjornada`. Sólo instala una versión SemVer
+superior para `m5stack-basic-core-v27`, protocolo 1 y canal `stable`. El
+manifiesto debe tener
+una firma Ed25519 válida y el binario debe coincidir en tamaño y SHA-256.
+
+La instalación espera a que no haya fichajes pendientes, trabajos de red ni
+sesión administrativa, y exige dos minutos sin interacción, Wi-Fi, reloj fiable
+y evidencia compatible reciente: el `bootstrap` inicial y cada heartbeat
+autenticado correcto la renuevan. La telemetría usa un worker independiente y
+no bloquea botones ni lecturas RFID; sus fallos son silenciosos. Justo antes de
+descargar se vuelven a comprobar todas las condiciones. Una instalación real
+muestra su progreso, escribe el slot inactivo y reinicia. Si el nuevo firmware
+no supera la autocomprobación local, el bootloader recupera la versión anterior
+y bloquea esa combinación de versión y hash para evitar bucles.
+
+`m5stack_dev` no consulta actualizaciones. Para pruebas aisladas usa
+`m5stack_ota_test` y define antes de compilar:
+
+```bash
+export OJ_OTA_TEST_MANIFEST_URL='http://192.168.1.20:8765/openjornada-m5stack-manifest.json'
+export OJ_OTA_TEST_PUBLIC_KEY_HEX='64-caracteres-hex-de-la-clave-publica'
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_ota_test
+```
+
+La clave privada de pruebas no debe entrar en Git. La privada de producción se
+guarda exclusivamente como secreto `FIRMWARE_SIGNING_PRIVATE_KEY_B64` de
+GitHub Actions. Cada release estable contiene binario, manifiesto, firma y
+licencias. USB sigue siendo siempre el mecanismo de recuperación.
 
 ## Puesta en servicio
 
@@ -108,6 +141,10 @@ Con Wi-Fi disponible, el firmware intenta cada 15 segundos
 puede traer un `pingChallenge`; en ese caso se contesta mediante
 `POST /api/openjornada/terminal/v1/ping-ack` con el reto, la IP local, señal
 Wi-Fi y uptime.
+
+El mismo heartbeat incluye `firmwareUpdateStatus`, `firmwareTargetVersion`,
+`lastFirmwareCheckAt` y un `firmwareUpdateErrorCode` acotado. No envía detalles
+internos, URLs ni material criptográfico.
 
 El heartbeat y su posible acuse usan un worker de telemetría aislado y de una
 sola ranura. Se planifican sólo cuando el worker principal está libre, no

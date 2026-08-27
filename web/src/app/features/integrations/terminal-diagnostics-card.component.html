@@ -110,6 +110,24 @@
       </dd>
     </div>
     <div>
+      <dt class="text-xs font-semibold text-stone-400">Actualización del firmware</dt>
+      <dd class="mt-1 font-medium text-stone-700">
+        {{ firmwareStatus(terminal().firmwareUpdateStatus) }}
+        @if (terminal().firmwareTargetVersion) {
+          · {{ terminal().firmwareTargetVersion }}
+        }
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Última comprobación de firmware</dt>
+      <dd
+        class="mt-1 font-medium text-stone-700"
+        [title]="date(terminal().lastFirmwareCheckAt).exact"
+      >
+        {{ date(terminal().lastFirmwareCheckAt).relative }}
+      </dd>
+    </div>
+    <div>
       <dt class="text-xs font-semibold text-stone-400">Revisión de caché</dt>
       <dd class="mt-1 font-medium text-stone-700">{{ terminal().cacheRevision }}</dd>
     </div>
@@ -125,6 +143,14 @@
       </dd>
     </div>
   </dl>
+
+  @if (firmwareError(terminal().firmwareUpdateErrorCode); as updateError) {
+    @if (updateError) {
+      <p role="status" class="rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+        {{ updateError }}
+      </p>
+    }
+  }
 
   @if (pingError()) {
     <p role="alert" class="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">

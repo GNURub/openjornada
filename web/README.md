@@ -87,6 +87,10 @@ no se escriben en `localStorage`, `sessionStorage`, IndexedDB, PocketBase ni
 analítica, y se eliminan exactamente a los 10 minutos, al recargar o al salir
 de Integraciones.
 
+La tarjeta muestra también el estado de actualización del firmware, versión
+objetivo, última comprobación y un error seguro si hubo rechazo o rollback. La
+instalación es automática y no existe un botón manual en esta primera versión.
+
 La UI obtiene el inventario mediante `GET /api/openjornada/terminals` y lanza
 la comprobación con `POST /api/openjornada/terminals/{id}/ping`.
 

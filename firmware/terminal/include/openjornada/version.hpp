@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-#define OPENJORNADA_TERMINAL_VERSION_LITERAL "1.1.0"
+#define OPENJORNADA_TERMINAL_VERSION_LITERAL "1.2.0"
 
 namespace openjornada {
 

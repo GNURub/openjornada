@@ -1,4 +1,4 @@
-import type { TerminalRecord } from '../../core/terminal.models';
+import type { TerminalFirmwareUpdateStatus, TerminalRecord } from '../../core/terminal.models';
 
 const relativeFormatter = new Intl.RelativeTimeFormat('es-ES', { numeric: 'always' });
 const exactFormatter = new Intl.DateTimeFormat('es-ES', {
@@ -74,5 +74,58 @@ export function clockStatusLabel(value: TerminalRecord['lastClockStatus']): stri
       return 'Sin sincronizar';
     default:
       return 'Sin datos';
+  }
+}
+
+export function firmwareUpdateStatusLabel(value: TerminalFirmwareUpdateStatus | ''): string {
+  switch (value) {
+    case 'idle':
+      return 'En espera';
+    case 'checking':
+      return 'Comprobando';
+    case 'available':
+      return 'Disponible';
+    case 'downloading':
+      return 'Descargando';
+    case 'verifying':
+      return 'Verificando';
+    case 'pending_reboot':
+      return 'Reiniciando';
+    case 'updated':
+      return 'Actualizado';
+    case 'failed':
+      return 'Error';
+    case 'rolled_back':
+      return 'Revertido';
+    case 'blocked':
+      return 'Bloqueado';
+    default:
+      return 'Sin datos';
+  }
+}
+
+export function firmwareUpdateErrorLabel(value: string): string {
+  switch (value) {
+    case 'manifest_signature':
+      return 'La firma de la actualización no es válida.';
+    case 'manifest_invalid':
+      return 'La información de la actualización no es válida.';
+    case 'incompatible':
+      return 'La actualización no es compatible con este terminal.';
+    case 'size':
+      return 'El firmware no tiene el tamaño esperado.';
+    case 'hash':
+      return 'El firmware descargado está dañado.';
+    case 'flash':
+      return 'No se pudo escribir el firmware.';
+    case 'boot_validation':
+      return 'El firmware nuevo no superó la comprobación de arranque.';
+    case 'rollback':
+      return 'El terminal recuperó automáticamente la versión anterior.';
+    case 'manifest_fetch':
+    case 'download':
+      return 'No se pudo descargar la actualización.';
+    default:
+      return '';
   }
 }

@@ -162,7 +162,7 @@ void test_requests_are_serialized_with_protocol_field_names() {
       BootstrapRequest{1, std::string(kTerminalClientVersion), 3}, json));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, json.find("\"protocolVersion\":1"));
   TEST_ASSERT_NOT_EQUAL(std::string::npos,
-                        json.find("\"clientVersion\":\"m5stack-1.1.0\""));
+                        json.find("\"clientVersion\":\"m5stack-1.2.0\""));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, json.find("\"pendingCount\":3"));
 
   ActionRequest action;
@@ -244,7 +244,7 @@ void test_heartbeat_contract_round_trip() {
   std::string encoded;
   TEST_ASSERT_TRUE(ApiCodec::encodeHeartbeat(request, encoded));
   TEST_ASSERT_EQUAL_STRING(
-      "{\"protocolVersion\":1,\"clientVersion\":\"m5stack-1.1.0\",\"cacheRevision\":7,\"pendingCount\":2,\"wifiRssiDbm\":-63,\"uptimeSeconds\":3600,\"clockStatus\":\"synced\",\"lastNtpSyncAt\":\"2026-08-27T11:59:00Z\"}",
+      "{\"protocolVersion\":1,\"clientVersion\":\"m5stack-1.1.0\",\"cacheRevision\":7,\"pendingCount\":2,\"wifiRssiDbm\":-63,\"uptimeSeconds\":3600,\"clockStatus\":\"synced\",\"lastNtpSyncAt\":\"2026-08-27T11:59:00Z\",\"firmwareUpdateStatus\":\"idle\",\"firmwareTargetVersion\":\"\",\"lastFirmwareCheckAt\":\"\",\"firmwareUpdateErrorCode\":\"\"}",
       encoded.c_str());
 
   HeartbeatResponse response;
@@ -278,6 +278,11 @@ void test_heartbeat_contract_enforces_bounds_and_clock_evidence() {
   request.clockStatus = "synced";
   TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
   request.lastNtpSyncAt = "2026-08-27T11:59:00Z";
+  TEST_ASSERT_TRUE(ApiCodec::encodeHeartbeat(request, output));
+  request.firmwareUpdateStatus = "unknown";
+  TEST_ASSERT_FALSE(ApiCodec::encodeHeartbeat(request, output));
+  request.firmwareUpdateStatus = "failed";
+  request.firmwareUpdateErrorCode = "manifest_signature";
   TEST_ASSERT_TRUE(ApiCodec::encodeHeartbeat(request, output));
 }
 

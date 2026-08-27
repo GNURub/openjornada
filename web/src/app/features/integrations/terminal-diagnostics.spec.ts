@@ -3,6 +3,8 @@ import {
   clockStatusLabel,
   formatLatency,
   formatTerminalUptime,
+  firmwareUpdateErrorLabel,
+  firmwareUpdateStatusLabel,
   terminalDatePresentation,
   wifiQuality,
 } from './terminal-diagnostics';
@@ -44,5 +46,13 @@ describe('terminal diagnostics formatting', () => {
     });
     expect(clockStatusLabel('')).toBe('Sin datos');
     expect(clockStatusLabel('stale')).toBe('Desactualizado');
+  });
+
+  it('explains firmware update and rollback states in Spanish', () => {
+    expect(firmwareUpdateStatusLabel('')).toBe('Sin datos');
+    expect(firmwareUpdateStatusLabel('idle')).toBe('En espera');
+    expect(firmwareUpdateStatusLabel('downloading')).toBe('Descargando');
+    expect(firmwareUpdateStatusLabel('rolled_back')).toBe('Revertido');
+    expect(firmwareUpdateErrorLabel('rollback')).toContain('versión anterior');
   });
 });

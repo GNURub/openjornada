@@ -66,6 +66,7 @@ class FakeTelemetryClient final : public TelemetryClient {
 
 void test_worker_acks_challenge_in_same_cycle() {
   FakeTelemetryClient api;
+  api.heartbeatResponse.serverTime = "2026-08-27T12:00:00Z";
   api.heartbeatResponse.pingChallenge = "challenge-1";
   TelemetryWorker worker{api};
   TEST_ASSERT_TRUE(worker.enqueue(validJob()));
@@ -78,6 +79,8 @@ void test_worker_acks_challenge_in_same_cycle() {
   TEST_ASSERT_TRUE(worker.poll(result));
   TEST_ASSERT_FALSE(worker.busy());
   TEST_ASSERT_TRUE(result.heartbeat.ok);
+  TEST_ASSERT_EQUAL_STRING("2026-08-27T12:00:00Z",
+                           result.response.serverTime.c_str());
   TEST_ASSERT_TRUE(result.ackAttempted);
   TEST_ASSERT_TRUE(result.ack.ok);
   TEST_ASSERT_EQUAL_INT(1, api.heartbeatCalls);

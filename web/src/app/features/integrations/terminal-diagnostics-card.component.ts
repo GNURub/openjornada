@@ -12,6 +12,8 @@ import type { TerminalPingResult, TerminalRecord } from '../../core/terminal.mod
 import { TerminalService } from '../../core/terminal.service';
 import {
   clockStatusLabel,
+  firmwareUpdateErrorLabel,
+  firmwareUpdateStatusLabel,
   formatLatency,
   formatTerminalUptime,
   terminalDatePresentation,
@@ -75,6 +77,14 @@ export class TerminalDiagnosticsCardComponent implements OnDestroy {
 
   protected clock(value: TerminalRecord['lastClockStatus']): string {
     return clockStatusLabel(value);
+  }
+
+  protected firmwareStatus(value: TerminalRecord['firmwareUpdateStatus']): string {
+    return firmwareUpdateStatusLabel(value);
+  }
+
+  protected firmwareError(value: string): string {
+    return firmwareUpdateErrorLabel(value);
   }
 
   protected async checkConnection(): Promise<void> {

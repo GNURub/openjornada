@@ -4,6 +4,17 @@ export type TerminalStateKind = 'idle' | 'working' | 'on_break';
 export type TerminalCommand = 'clock_in' | 'break_start' | 'break_end' | 'clock_out';
 export type TerminalActionStatus = 'accepted' | 'duplicate' | 'incident' | 'rejected';
 export type TerminalConnectionStatus = 'online' | 'offline' | 'revoked';
+export type TerminalFirmwareUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'verifying'
+  | 'pending_reboot'
+  | 'updated'
+  | 'failed'
+  | 'rolled_back'
+  | 'blocked';
 export type TerminalErrorCode =
   | 'authentication_required'
   | 'terminal_revoked'
@@ -35,6 +46,10 @@ export interface TerminalRecord extends RecordModel {
   lastNtpSyncAt: string;
   lastWifiRssiDbm: number | null;
   lastUptimeSeconds: number | null;
+  firmwareUpdateStatus: TerminalFirmwareUpdateStatus | '';
+  firmwareTargetVersion: string;
+  lastFirmwareCheckAt: string;
+  firmwareUpdateErrorCode: string;
   createdBy: string;
   created: string;
   token?: string;

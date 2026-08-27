@@ -105,14 +105,16 @@ administración.
 Compila y flashea por USB desde `firmware/terminal/`:
 
 ```bash
-uv tool run --from platformio platformio test -e native
-uv tool run --from platformio platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
-uv tool run --from platformio platformio device monitor --port /dev/ttyACM0 --baud 115200
-uv tool run --from platformio platformio run -e m5stack_release
+uv tool run --from platformio==6.1.19 platformio test -e native
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
+uv tool run --from platformio==6.1.19 platformio device monitor --port /dev/ttyACM0 --baud 115200
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
 ```
 
-La release sólo admite HTTPS y usa el bundle de CA del firmware. No existe OTA:
-las actualizaciones v1 se hacen por USB. Consulta el procedimiento operativo,
+La release sólo admite HTTPS y usa el bundle de CA del firmware. La primera
+instalación de firmware 1.2.0 se hace por USB para activar los slots A/B;
+después el terminal instala automáticamente la última release estable firmada.
+USB permanece como recuperación. Consulta el procedimiento operativo,
 el cableado Grove A y los gestos de recuperación en
 [`firmware/terminal/README.md`](../firmware/terminal/README.md).
 Si distribuyes `firmware.bin`, acompáñalo con
@@ -120,6 +122,19 @@ Si distribuyes `firmware.bin`, acompáñalo con
 y el directorio completo [`firmware/terminal/LICENSES/`](../firmware/terminal/LICENSES/).
 Los avisos no sustituyen las obligaciones de código fuente u objetos
 relocalizables que puedan exigir las licencias del build exacto.
+
+### Publicación del firmware
+
+Configura `FIRMWARE_SIGNING_PRIVATE_KEY_B64` como secreto de Actions. Debe ser
+el PEM PKCS#8 de la clave Ed25519 de producción codificado en Base64 y su pública
+debe coincidir con `firmware/terminal/keys/production-ed25519-public.pem`.
+No imprimas ni reutilices la privada.
+
+Al publicar una release estable, `publish-firmware.yml` compila el perfil
+`m5stack_release`, verifica el límite del 85 %, genera y firma el manifiesto y
+adjunta binario, manifiesto, firma y paquete de licencias. El manifiesto se sube
+en último lugar; las prereleases no se ofrecen por OTA. La firma se ejecuta en
+un job aislado del build y todas las Actions usadas están fijadas por commit.
 
 ## Despliegue en proveedores gestionados
 

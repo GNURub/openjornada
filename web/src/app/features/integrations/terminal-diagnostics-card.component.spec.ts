@@ -29,6 +29,10 @@ function terminalRecord(overrides: Partial<TerminalRecord> = {}): TerminalRecord
     lastNtpSyncAt: '2026-08-27T11:57:00Z',
     lastWifiRssiDbm: -62,
     lastUptimeSeconds: 90_061,
+    firmwareUpdateStatus: 'failed',
+    firmwareTargetVersion: '1.2.4',
+    lastFirmwareCheckAt: '2026-08-27T11:56:00Z',
+    firmwareUpdateErrorCode: 'hash',
     ...overrides,
   };
 }
@@ -94,6 +98,9 @@ describe('TerminalDiagnosticsCardComponent', () => {
     expect(host.textContent).toContain('En línea');
     expect(host.textContent).toContain('Buena · −62 dBm');
     expect(host.textContent).toContain('1 d 1 h 1 min');
+    expect(host.textContent).toContain('Actualización del firmware Error');
+    expect(host.textContent).toContain('1.2.4');
+    expect(host.textContent).toContain('firmware descargado está dañado');
     expect(host.querySelector('[data-testid="last-heartbeat"]')?.getAttribute('title')).toContain(
       '27 ago 2026',
     );

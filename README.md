@@ -50,6 +50,8 @@ API, migraciones y archivos estáticos se distribuyen en un único contenedor.
   asignación cifrada de tarjetas, fichaje guiado, cola offline firmada y revisión
   de incidencias. El entorno de desarrollo incluye un simulador de pantalla
   320 × 240 para probar el flujo sin hardware.
+- Firmware M5Stack publicado como assets firmados de GitHub Releases, con
+  actualización automática A/B, rollback y recuperación permanente por USB.
 - Identidad corporativa por empresa: colores, logotipo y nombre; el icono de la
   PWA y los favicons se generan automáticamente desde el logotipo.
 - PWA instalable con manifiesto por empresa, iconos adaptativos y shell disponible

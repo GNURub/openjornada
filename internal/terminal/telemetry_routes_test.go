@@ -192,14 +192,18 @@ func responseJSON(t *testing.T, response *httptest.ResponseRecorder) map[string]
 
 func validHeartbeatBody() map[string]any {
 	return map[string]any{
-		"protocolVersion": 1,
-		"clientVersion":   "m5stack-1.1.0",
-		"cacheRevision":   2,
-		"pendingCount":    0,
-		"wifiRssiDbm":     -61,
-		"uptimeSeconds":   90,
-		"clockStatus":     "synced",
-		"lastNtpSyncAt":   time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+		"protocolVersion":         1,
+		"clientVersion":           "m5stack-1.1.0",
+		"cacheRevision":           2,
+		"pendingCount":            0,
+		"wifiRssiDbm":             -61,
+		"uptimeSeconds":           90,
+		"clockStatus":             "synced",
+		"lastNtpSyncAt":           time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+		"firmwareUpdateStatus":    "updated",
+		"firmwareTargetVersion":   "1.2.0",
+		"lastFirmwareCheckAt":     time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339Nano),
+		"firmwareUpdateErrorCode": "",
 	}
 }
 

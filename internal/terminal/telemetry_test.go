@@ -111,7 +111,7 @@ func TestTerminalRecordViewNumericTelemetryRequiresHeartbeat(t *testing.T) {
 
 func TestHeartbeatRequestValidation(t *testing.T) {
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
-	valid := heartbeatRequest{ProtocolVersion: 1, ClientVersion: "m5stack-1.1.0", CacheRevision: 2, PendingCount: 0, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z"}
+	valid := heartbeatRequest{ProtocolVersion: 1, ClientVersion: "m5stack-1.2.0", CacheRevision: 2, PendingCount: 0, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z", FirmwareUpdateStatus: "downloading", FirmwareTargetVersion: "1.2.1", LastFirmwareCheckAt: "2026-08-27T11:58:00Z"}
 	if err := valid.validate(now); err != nil {
 		t.Fatal(err)
 	}
@@ -121,17 +121,20 @@ func TestHeartbeatRequestValidation(t *testing.T) {
 		t.Fatalf("maximum cache revision rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*heartbeatRequest){
-		"protocol":       func(v *heartbeatRequest) { v.ProtocolVersion = 2 },
-		"client empty":   func(v *heartbeatRequest) { v.ClientVersion = " " },
-		"client long":    func(v *heartbeatRequest) { v.ClientVersion = "12345678901234567890123456789012345678901" },
-		"cache negative": func(v *heartbeatRequest) { v.CacheRevision = -1 },
-		"cache too high": func(v *heartbeatRequest) { v.CacheRevision = int(maxTerminalCacheRevision) + 1 },
-		"pending":        func(v *heartbeatRequest) { v.PendingCount = 10001 },
-		"rssi":           func(v *heartbeatRequest) { v.WifiRSSIDbm = 1 },
-		"uptime":         func(v *heartbeatRequest) { v.UptimeSeconds = 4294967296 },
-		"clock":          func(v *heartbeatRequest) { v.ClockStatus = "invented" },
-		"ntp missing":    func(v *heartbeatRequest) { v.LastNtpSyncAt = "" },
-		"ntp future":     func(v *heartbeatRequest) { v.LastNtpSyncAt = now.Add(6 * time.Minute).Format(time.RFC3339) },
+		"protocol":        func(v *heartbeatRequest) { v.ProtocolVersion = 2 },
+		"client empty":    func(v *heartbeatRequest) { v.ClientVersion = " " },
+		"client long":     func(v *heartbeatRequest) { v.ClientVersion = "12345678901234567890123456789012345678901" },
+		"cache negative":  func(v *heartbeatRequest) { v.CacheRevision = -1 },
+		"cache too high":  func(v *heartbeatRequest) { v.CacheRevision = int(maxTerminalCacheRevision) + 1 },
+		"pending":         func(v *heartbeatRequest) { v.PendingCount = 10001 },
+		"rssi":            func(v *heartbeatRequest) { v.WifiRSSIDbm = 1 },
+		"uptime":          func(v *heartbeatRequest) { v.UptimeSeconds = 4294967296 },
+		"clock":           func(v *heartbeatRequest) { v.ClockStatus = "invented" },
+		"ntp missing":     func(v *heartbeatRequest) { v.LastNtpSyncAt = "" },
+		"ntp future":      func(v *heartbeatRequest) { v.LastNtpSyncAt = now.Add(6 * time.Minute).Format(time.RFC3339) },
+		"firmware status": func(v *heartbeatRequest) { v.FirmwareUpdateStatus = "invented" },
+		"firmware error":  func(v *heartbeatRequest) { v.FirmwareUpdateErrorCode = "secret_detail" },
+		"firmware future": func(v *heartbeatRequest) { v.LastFirmwareCheckAt = now.Add(6 * time.Minute).Format(time.RFC3339) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := valid
@@ -286,7 +289,7 @@ func TestPersistHeartbeatUpdatesActiveTerminal(t *testing.T) {
 	app, terminal := persistedTelemetryTerminal(t)
 	defer app.Cleanup()
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
-	request := heartbeatRequest{ProtocolVersion: 1, ClientVersion: " m5stack-1.1.0 ", CacheRevision: 2, PendingCount: 3, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z"}
+	request := heartbeatRequest{ProtocolVersion: 1, ClientVersion: " m5stack-1.2.0 ", CacheRevision: 2, PendingCount: 3, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z", FirmwareUpdateStatus: "failed", FirmwareTargetVersion: "1.2.1", LastFirmwareCheckAt: "2026-08-27T11:58:00Z", FirmwareUpdateErrorCode: "hash"}
 	if err := persistHeartbeat(app, terminal.Id, request, now); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +297,7 @@ func TestPersistHeartbeatUpdatesActiveTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.GetDateTime("lastHeartbeatAt").Time() != now || stored.GetString("clientVersion") != "m5stack-1.1.0" || stored.GetInt("lastWifiRssiDbm") != -61 {
+	if stored.GetDateTime("lastHeartbeatAt").Time() != now || stored.GetString("clientVersion") != "m5stack-1.2.0" || stored.GetInt("lastWifiRssiDbm") != -61 || stored.GetString("firmwareUpdateStatus") != "failed" || stored.GetString("firmwareUpdateErrorCode") != "hash" {
 		t.Fatalf("unexpected persisted heartbeat: %#v", terminalRecordViewAt(stored, "", now))
 	}
 }
@@ -319,6 +322,10 @@ func persistedTelemetryTerminal(t *testing.T) (*tests.TestApp, *core.Record) {
 		&core.DateField{Name: "lastNtpSyncAt"},
 		&core.NumberField{Name: "lastWifiRssiDbm"},
 		&core.NumberField{Name: "lastUptimeSeconds"},
+		&core.SelectField{Name: "firmwareUpdateStatus", MaxSelect: 1, Values: []string{"idle", "checking", "available", "downloading", "verifying", "pending_reboot", "updated", "failed", "rolled_back", "blocked"}},
+		&core.TextField{Name: "firmwareTargetVersion", Max: 32},
+		&core.DateField{Name: "lastFirmwareCheckAt"},
+		&core.SelectField{Name: "firmwareUpdateErrorCode", MaxSelect: 1, Values: []string{"manifest_fetch", "manifest_signature", "manifest_invalid", "incompatible", "download", "size", "hash", "flash", "boot_validation", "rollback"}},
 		&core.DateField{Name: "revokedAt"},
 	)
 	if err := app.Save(collection); err != nil {

@@ -364,12 +364,27 @@ bool validClockEvidence(const HeartbeatRequest& request) {
 }
 
 bool validHeartbeatRequest(const HeartbeatRequest& request) {
+  constexpr std::array<std::string_view, 10> statuses{
+      "idle",          "checking", "available", "downloading", "verifying",
+      "pending_reboot", "updated",  "failed",    "rolled_back", "blocked"};
+  constexpr std::array<std::string_view, 10> errors{
+      "", "manifest_fetch", "manifest_signature", "manifest_invalid",
+      "incompatible", "download", "size", "hash", "flash", "boot_validation"};
+  const bool validStatus =
+      std::find(statuses.begin(), statuses.end(), request.firmwareUpdateStatus) !=
+      statuses.end();
+  const bool validError =
+      std::find(errors.begin(), errors.end(), request.firmwareUpdateErrorCode) !=
+          errors.end() ||
+      request.firmwareUpdateErrorCode == "rollback";
   return request.protocolVersion == kTerminalProtocolVersion &&
          validText(request.clientVersion, kMaxTelemetryVersion, false) &&
          request.pendingCount <= OutboxCodec::kCapacity &&
          request.wifiRssiDbm >= -127 && request.wifiRssiDbm <= 0 &&
          request.uptimeSeconds <= std::numeric_limits<uint32_t>::max() &&
-         validClockEvidence(request);
+         validClockEvidence(request) && validStatus && validError &&
+         validText(request.firmwareTargetVersion, 32, true) &&
+         validText(request.lastFirmwareCheckAt, kMaxTimestamp, true);
 }
 
 bool validIpAddress(std::string_view value) {
@@ -842,6 +857,11 @@ bool ApiCodec::encodeHeartbeat(const HeartbeatRequest& request,
   root["uptimeSeconds"] = request.uptimeSeconds;
   root["clockStatus"] = request.clockStatus.c_str();
   root["lastNtpSyncAt"] = request.lastNtpSyncAt.c_str();
+  root["firmwareUpdateStatus"] = request.firmwareUpdateStatus.c_str();
+  root["firmwareTargetVersion"] = request.firmwareTargetVersion.c_str();
+  root["lastFirmwareCheckAt"] = request.lastFirmwareCheckAt.c_str();
+  root["firmwareUpdateErrorCode"] =
+      request.firmwareUpdateErrorCode.c_str();
   return serializeDocument(bounded.document, bounded.allocator, output);
 }
 

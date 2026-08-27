@@ -231,6 +231,36 @@ HeartbeatRequest AppController::heartbeatRequest(
   return value;
 }
 
+OtaSafetyContext AppController::otaSafetyContext(
+    bool networkConnected, bool primaryWorkerBusy, bool telemetryWorkerBusy,
+    uint32_t inactiveForMs, uint32_t nowMs) const {
+  const bool adminMode = screen_.kind == ScreenKind::AdminPin ||
+                         screen_.kind == ScreenKind::AdminEmployees ||
+                         screen_.kind == ScreenKind::AdminScan ||
+                         screen_.kind == ScreenKind::AdminReplaceConfirm;
+  return {screen_.pendingCount,
+          primaryWorkerBusy,
+          telemetryWorkerBusy,
+          adminMode,
+          screen_.kind == ScreenKind::Idle,
+          networkConnected,
+          screen_.ntpTrusted,
+          bootstrapReady_ &&
+              static_cast<uint32_t>(nowMs - lastCompatibleBootstrapAtMs_) <=
+                  kCompatibleBootstrapMaxAgeMs,
+          inactiveForMs};
+}
+
+void AppController::noteCompatibleServer(uint32_t nowMs,
+                                         std::string_view serverTime) {
+  if (!bootstrapReady_) return;
+  const auto epochSeconds = parseRfc3339(serverTime);
+  if (!epochSeconds.has_value() || *epochSeconds <= 0) return;
+  lastCompatibleBootstrapAtMs_ = nowMs;
+  serverTimeEpochSeconds_ = *epochSeconds;
+  serverTimeObservedAtMonotonicMs_ = monotonicMs_;
+}
+
 void AppController::updateStatus(const AppEvent& event) {
   screen_.networkConnected = event.networkConnected;
   if (event.ntpTrusted &&
@@ -265,12 +295,12 @@ void AppController::processNetworkResult(NetworkResult&& result,
   if (result.kind == NetworkJobKind::Bootstrap) {
     bootstrapQueued_ = false;
     if (!result.call.ok || result.bootstrap == nullptr) {
+      bootstrapRetryAtMs_ = event.nowMs +
+                            std::max<uint32_t>(result.suggestedRetryMs, 2000U);
       const std::string message = result.call.failure.safeMessage.empty()
                                       ? "No se pudo conectar con OpenJornada."
                                       : result.call.failure.safeMessage;
       showMessage(message, event.nowMs, kMessageMs, true);
-      bootstrapRetryAtMs_ = event.nowMs +
-                            std::max<uint32_t>(result.suggestedRetryMs, 2000U);
       return;
     }
     const bool terminalChanged =
@@ -282,6 +312,7 @@ void AppController::processNetworkResult(NetworkResult&& result,
     serverTimeObservedAtMonotonicMs_ = monotonicMs_;
     if (clockSyncedAt_.empty()) clockSyncedAt_ = result.bootstrap->serverTime;
     bootstrapReady_ = true;
+    lastCompatibleBootstrapAtMs_ = event.nowMs;
     if (terminalChanged || cache_.terminalId != terminalId_ ||
         cache_.configFingerprint != config_.configFingerprint) {
       cache_ = {};

@@ -28,6 +28,10 @@ Linked components
   the pinned source contains a public-domain declaration and author history but
   no separate license file. The exact declaration is preserved in
   `LICENSES/MFRC522-I2C-PUBLIC-DOMAIN.txt`; no different license is inferred.
+- Monocypher 4.0.3, commit
+  `ab2b16dd619ad5f6979a4fbe69cfa324a6fcc35f`: BSD-2-Clause OR CC0-1.0.
+  Sólo se usa la verificación Ed25519/SHA-512; consulta
+  `LICENSES/Monocypher-BSD-2-Clause-OR-CC0-1.0.txt`.
 - GCC runtime and Newlib material linked by the PlatformIO Xtensa toolchain:
   see `LICENSES/GCC-GPL-3.0.txt`,
   `LICENSES/GCC-RUNTIME-LIBRARY-EXCEPTION-3.1.txt` and

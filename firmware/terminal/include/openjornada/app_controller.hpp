@@ -14,6 +14,7 @@
 #include "openjornada/config.hpp"
 #include "openjornada/network_worker.hpp"
 #include "openjornada/outbox.hpp"
+#include "openjornada/ota.hpp"
 #include "openjornada/screen.hpp"
 #include "openjornada/sync_engine.hpp"
 
@@ -68,6 +69,12 @@ class AppController {
   const std::string& timezone() const { return timezone_; }
   HeartbeatRequest heartbeatRequest(int16_t wifiRssiDbm,
                                     uint64_t uptimeSeconds) const;
+  OtaSafetyContext otaSafetyContext(bool networkConnected,
+                                    bool primaryWorkerBusy,
+                                    bool telemetryWorkerBusy,
+                                    uint32_t inactiveForMs,
+                                    uint32_t nowMs) const;
+  void noteCompatibleServer(uint32_t nowMs, std::string_view serverTime);
   AppFeedback takeFeedback();
 
  private:
@@ -156,6 +163,7 @@ class AppController {
   uint32_t nextJobId_ = 1;
   uint32_t activeJobId_ = 0;
   uint32_t bootstrapRetryAtMs_ = 0;
+  uint32_t lastCompatibleBootstrapAtMs_ = 0;
   uint32_t messageNextAtMs_ = 0;
   uint32_t selectedActionDeadlineMs_ = 0;
   uint32_t interactionDeadlineMs_ = 0;

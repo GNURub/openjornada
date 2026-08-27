@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Descargar código
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Preparar Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -33,7 +33,7 @@ jobs:
         run: go test ./...
 
       - name: Preparar Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
 
@@ -56,15 +56,15 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
         working-directory: web
 
-      - name: Probar contrato E2E del terminal RFID
-        run: pnpm exec playwright test e2e/rfid-terminal.spec.ts --project=desktop-chromium
+      - name: Probar contratos E2E del terminal RFID
+        run: pnpm exec playwright test e2e/rfid-terminal.spec.ts e2e/terminal-telemetry.spec.ts --project=desktop-chromium
         working-directory: web
 
       - name: Preparar uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
 
       - name: Restaurar caché de PlatformIO
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.platformio
           key: platformio-${{ runner.os }}-${{ hashFiles('firmware/terminal/platformio.ini') }}
@@ -73,14 +73,21 @@ jobs:
 
       - name: Probar dominio del firmware
         run: |
-          python3 -m unittest scripts/test_validate_partitions.py
-          uv tool run --from platformio platformio test -e native
+          python3 -m unittest scripts/test_validate_partitions.py scripts/test_release_firmware.py
+          uv tool run --from platformio==6.1.19 platformio test -e native
         working-directory: firmware/terminal
 
       - name: Compilar firmware de desarrollo
-        run: uv tool run --from platformio platformio run -e m5stack_dev
+        run: uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev
         working-directory: firmware/terminal
 
       - name: Compilar firmware de producción
-        run: uv tool run --from platformio platformio run -e m5stack_release
+        run: uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
+        working-directory: firmware/terminal
+
+      - name: Compilar firmware del banco OTA
+        env:
+          OJ_OTA_TEST_MANIFEST_URL: http://192.168.1.20:8765/openjornada-m5stack-manifest.json
+          OJ_OTA_TEST_PUBLIC_KEY_HEX: 0000000000000000000000000000000000000000000000000000000000000000
+        run: uv tool run --from platformio==6.1.19 platformio run -e m5stack_ota_test
         working-directory: firmware/terminal

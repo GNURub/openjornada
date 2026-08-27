@@ -25,27 +25,31 @@ const terminalOnlineWindow = 45 * time.Second
 const terminalPingTimeout = 20 * time.Second
 
 type terminalView struct {
-	ID                   string `json:"id"`
-	Organization         string `json:"organization"`
-	Name                 string `json:"name"`
-	Prefix               string `json:"prefix"`
-	ProtocolVersion      int    `json:"protocolVersion"`
-	ClientVersion        string `json:"clientVersion"`
-	CacheRevision        int    `json:"cacheRevision"`
-	LastSeenAt           string `json:"lastSeenAt"`
-	LastPendingCount     int    `json:"lastPendingCount"`
-	RevokedAt            string `json:"revokedAt"`
-	CreatedBy            string `json:"createdBy"`
-	Created              string `json:"created"`
-	Token                string `json:"token,omitempty"`
-	PendingQueueWarning  bool   `json:"pendingQueueWarning"`
-	ConnectionStatus     string `json:"connectionStatus"`
-	LastHeartbeatAt      string `json:"lastHeartbeatAt"`
-	LastAttendanceSyncAt string `json:"lastAttendanceSyncAt"`
-	LastClockStatus      string `json:"lastClockStatus"`
-	LastNtpSyncAt        string `json:"lastNtpSyncAt"`
-	LastWifiRssiDbm      *int   `json:"lastWifiRssiDbm"`
-	LastUptimeSeconds    *int   `json:"lastUptimeSeconds"`
+	ID                      string `json:"id"`
+	Organization            string `json:"organization"`
+	Name                    string `json:"name"`
+	Prefix                  string `json:"prefix"`
+	ProtocolVersion         int    `json:"protocolVersion"`
+	ClientVersion           string `json:"clientVersion"`
+	CacheRevision           int    `json:"cacheRevision"`
+	LastSeenAt              string `json:"lastSeenAt"`
+	LastPendingCount        int    `json:"lastPendingCount"`
+	RevokedAt               string `json:"revokedAt"`
+	CreatedBy               string `json:"createdBy"`
+	Created                 string `json:"created"`
+	Token                   string `json:"token,omitempty"`
+	PendingQueueWarning     bool   `json:"pendingQueueWarning"`
+	ConnectionStatus        string `json:"connectionStatus"`
+	LastHeartbeatAt         string `json:"lastHeartbeatAt"`
+	LastAttendanceSyncAt    string `json:"lastAttendanceSyncAt"`
+	LastClockStatus         string `json:"lastClockStatus"`
+	LastNtpSyncAt           string `json:"lastNtpSyncAt"`
+	LastWifiRssiDbm         *int   `json:"lastWifiRssiDbm"`
+	LastUptimeSeconds       *int   `json:"lastUptimeSeconds"`
+	FirmwareUpdateStatus    string `json:"firmwareUpdateStatus"`
+	FirmwareTargetVersion   string `json:"firmwareTargetVersion"`
+	LastFirmwareCheckAt     string `json:"lastFirmwareCheckAt"`
+	FirmwareUpdateErrorCode string `json:"firmwareUpdateErrorCode"`
 }
 
 func terminalRecordView(record *core.Record, raw string) terminalView {
@@ -74,27 +78,31 @@ func terminalRecordViewAt(record *core.Record, raw string, now time.Time) termin
 	}
 
 	return terminalView{
-		ID:                   record.Id,
-		Organization:         record.GetString("organization"),
-		Name:                 record.GetString("name"),
-		Prefix:               record.GetString("prefix"),
-		ProtocolVersion:      record.GetInt("protocolVersion"),
-		ClientVersion:        record.GetString("clientVersion"),
-		CacheRevision:        record.GetInt("cacheRevision"),
-		LastSeenAt:           record.GetDateTime("lastSeenAt").String(),
-		LastPendingCount:     record.GetInt("lastPendingCount"),
-		RevokedAt:            record.GetDateTime("revokedAt").String(),
-		CreatedBy:            record.GetString("createdBy"),
-		Created:              record.GetDateTime("created").String(),
-		Token:                raw,
-		PendingQueueWarning:  record.GetInt("lastPendingCount") > 0,
-		ConnectionStatus:     terminalConnectionStatus(record, now),
-		LastHeartbeatAt:      record.GetDateTime("lastHeartbeatAt").String(),
-		LastAttendanceSyncAt: record.GetDateTime("lastAttendanceSyncAt").String(),
-		LastClockStatus:      record.GetString("lastClockStatus"),
-		LastNtpSyncAt:        record.GetDateTime("lastNtpSyncAt").String(),
-		LastWifiRssiDbm:      lastWifiRssiDbm,
-		LastUptimeSeconds:    lastUptimeSeconds,
+		ID:                      record.Id,
+		Organization:            record.GetString("organization"),
+		Name:                    record.GetString("name"),
+		Prefix:                  record.GetString("prefix"),
+		ProtocolVersion:         record.GetInt("protocolVersion"),
+		ClientVersion:           record.GetString("clientVersion"),
+		CacheRevision:           record.GetInt("cacheRevision"),
+		LastSeenAt:              record.GetDateTime("lastSeenAt").String(),
+		LastPendingCount:        record.GetInt("lastPendingCount"),
+		RevokedAt:               record.GetDateTime("revokedAt").String(),
+		CreatedBy:               record.GetString("createdBy"),
+		Created:                 record.GetDateTime("created").String(),
+		Token:                   raw,
+		PendingQueueWarning:     record.GetInt("lastPendingCount") > 0,
+		ConnectionStatus:        terminalConnectionStatus(record, now),
+		LastHeartbeatAt:         record.GetDateTime("lastHeartbeatAt").String(),
+		LastAttendanceSyncAt:    record.GetDateTime("lastAttendanceSyncAt").String(),
+		LastClockStatus:         record.GetString("lastClockStatus"),
+		LastNtpSyncAt:           record.GetDateTime("lastNtpSyncAt").String(),
+		LastWifiRssiDbm:         lastWifiRssiDbm,
+		LastUptimeSeconds:       lastUptimeSeconds,
+		FirmwareUpdateStatus:    record.GetString("firmwareUpdateStatus"),
+		FirmwareTargetVersion:   record.GetString("firmwareTargetVersion"),
+		LastFirmwareCheckAt:     record.GetDateTime("lastFirmwareCheckAt").String(),
+		FirmwareUpdateErrorCode: record.GetString("firmwareUpdateErrorCode"),
 	}
 }
 

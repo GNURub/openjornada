@@ -188,15 +188,14 @@ bool TelemetryWorker::processOne() {
 void TelemetryWorker::execute(const TelemetryJob& job,
                               TelemetryResult& output) {
   output = {};
-  HeartbeatResponse response;
   try {
     output.heartbeat = client_.heartbeat(job.credentials, job.heartbeat,
-                                         response, kRequestTimeoutMs);
-    if (!output.heartbeat.ok || response.pingChallenge.empty()) return;
+                                         output.response, kRequestTimeoutMs);
+    if (!output.heartbeat.ok || output.response.pingChallenge.empty()) return;
     output.ackAttempted = true;
     output.ack = client_.pingAck(
         job.credentials,
-        {response.pingChallenge, job.localIp, job.heartbeat.wifiRssiDbm,
+        {output.response.pingChallenge, job.localIp, job.heartbeat.wifiRssiDbm,
          job.heartbeat.uptimeSeconds},
         kRequestTimeoutMs);
   } catch (const std::bad_alloc&) {

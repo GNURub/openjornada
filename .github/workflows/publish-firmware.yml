@@ -1,0 +1,137 @@
+name: Publicar firmware del terminal
+
+on:
+  release:
+    types:
+      - published
+
+concurrency:
+  group: publish-firmware-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Compilar firmware
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar código de la release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Preparar uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+
+      - name: Restaurar caché de PlatformIO
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.platformio
+          key: platformio-firmware-${{ runner.os }}-${{ hashFiles('firmware/terminal/platformio.ini') }}
+          restore-keys: |
+            platformio-firmware-${{ runner.os }}-
+
+      - name: Probar contrato de release
+        run: python3 -m unittest scripts/test_release_firmware.py scripts/test_validate_partitions.py
+        working-directory: firmware/terminal
+
+      - name: Compilar firmware de producción
+        run: uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
+        working-directory: firmware/terminal
+
+      - name: Preparar assets sin firma
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: |
+          set -euo pipefail
+          install -d -m 0755 firmware-dist
+          install -m 0644 firmware/terminal/.pio/build/m5stack_release/firmware.bin firmware-dist/openjornada-m5stack.bin
+          python3 firmware/terminal/scripts/release_firmware.py \
+            --firmware firmware-dist/openjornada-m5stack.bin \
+            --version-header firmware/terminal/include/openjornada/version.hpp \
+            --release-tag "$RELEASE_TAG" \
+            --published-at "$PUBLISHED_AT" \
+            --output firmware-dist/openjornada-m5stack-manifest.json
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -czf firmware-dist/openjornada-m5stack-licenses.tar.gz \
+            -C firmware/terminal THIRD_PARTY_NOTICES LICENSES
+
+      - name: Transferir assets al job aislado de firma
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: openjornada-firmware-unsigned-${{ github.sha }}
+          path: firmware-dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Firmar y publicar firmware
+    needs: build
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Descargar código de la release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Descargar assets compilados
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: openjornada-firmware-unsigned-${{ github.sha }}
+          path: firmware-dist
+
+      - name: Firmar y verificar manifiesto
+        shell: bash
+        env:
+          SIGNING_KEY_B64: ${{ secrets.FIRMWARE_SIGNING_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_KEY_B64"
+          install -d -m 0700 firmware-private
+          trap 'shred -u firmware-private/signing.pem 2>/dev/null || true' EXIT
+          printf '%s' "$SIGNING_KEY_B64" | base64 --decode > firmware-private/signing.pem
+          chmod 0600 firmware-private/signing.pem
+          openssl pkey -in firmware-private/signing.pem -pubout -out firmware-private/derived-public.pem
+          cmp firmware-private/derived-public.pem firmware/terminal/keys/production-ed25519-public.pem
+          openssl pkeyutl -sign -rawin \
+            -inkey firmware-private/signing.pem \
+            -in firmware-dist/openjornada-m5stack-manifest.json \
+            -out firmware-private/manifest.sig.raw
+          base64 -w0 firmware-private/manifest.sig.raw > firmware-dist/openjornada-m5stack-manifest.sig
+          printf '\n' >> firmware-dist/openjornada-m5stack-manifest.sig
+          openssl pkeyutl -verify -rawin -pubin \
+            -inkey firmware/terminal/keys/production-ed25519-public.pem \
+            -in firmware-dist/openjornada-m5stack-manifest.json \
+            -sigfile firmware-private/manifest.sig.raw
+
+      - name: Guardar artefacto firmado
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: openjornada-firmware-${{ github.sha }}
+          path: firmware-dist/
+          if-no-files-found: error
+
+      - name: Publicar assets en la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" --clobber \
+            firmware-dist/openjornada-m5stack.bin \
+            firmware-dist/openjornada-m5stack-licenses.tar.gz \
+            firmware-dist/openjornada-m5stack-manifest.sig
+          gh release upload "$RELEASE_TAG" --clobber \
+            firmware-dist/openjornada-m5stack-manifest.json
+          test "$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name | select(startswith("openjornada-m5stack"))] | length')" -eq 4

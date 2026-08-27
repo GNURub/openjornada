@@ -18,7 +18,9 @@ def valid_partitions():
     return [
         validator.Partition("nvs", "data", "nvs", 0x9000, 0x6000),
         validator.Partition("phy_init", "data", "phy", 0xF000, 0x1000),
-        validator.Partition("factory", "app", "factory", 0x10000, 0x400000),
+        validator.Partition("ota_0", "app", "ota_0", 0x10000, 0x1F0000),
+        validator.Partition("ota_1", "app", "ota_1", 0x200000, 0x1F0000),
+        validator.Partition("otadata", "data", "ota", 0x3F0000, 0x2000),
         validator.Partition("littlefs", "data", "spiffs", 0x410000, 0xBF0000),
     ]
 
@@ -33,7 +35,7 @@ class PartitionLayoutTest(unittest.TestCase):
                 valid_partitions(),
                 validator.FLASH_SIZE,
                 validator.APP_START,
-                {0x1000, 0x8000},
+                {0x1000, 0x8000, 0x3F0000},
             ),
             [],
         )
@@ -43,7 +45,7 @@ class PartitionLayoutTest(unittest.TestCase):
             valid_partitions(),
             validator.FLASH_SIZE,
             validator.APP_START,
-            {0x1000, 0x8000, 0xE000},
+            {0x1000, 0x8000, 0xE000, 0x3F0000},
         )
         self.assertTrue(any("sobrescribiría nvs" in error for error in errors))
 
@@ -51,19 +53,19 @@ class PartitionLayoutTest(unittest.TestCase):
         partitions = valid_partitions()
         partitions[0] = validator.Partition("nvs", "data", "ota", 0xA000, 0x5000)
         errors = validator.validate_layout(
-            partitions, validator.FLASH_SIZE, validator.APP_START, {0x1000, 0x8000}
+            partitions, validator.FLASH_SIZE, validator.APP_START, {0x1000, 0x8000, 0x3F0000}
         )
         self.assertTrue(any(error.startswith("nvs debe ser") for error in errors))
 
-    def test_non_factory_app_or_wrong_app_offset_is_rejected(self):
+    def test_non_ota_app_or_wrong_app_offset_is_rejected(self):
         partitions = valid_partitions()
         partitions[2] = validator.Partition(
-            "factory", "app", "ota_0", 0x20000, 0x400000
+            "ota_0", "app", "factory", 0x20000, 0x1F0000
         )
         errors = validator.validate_layout(
-            partitions, validator.FLASH_SIZE, 0x20000, {0x1000, 0x8000}
+            partitions, validator.FLASH_SIZE, 0x20000, {0x1000, 0x8000, 0x3F0000}
         )
-        self.assertTrue(any(error.startswith("factory debe ser") for error in errors))
+        self.assertTrue(any(error.startswith("ota_0 debe ser") for error in errors))
         self.assertTrue(any("aplicación debe cargarse" in error for error in errors))
 
     def test_wrong_flash_size_is_rejected(self):
@@ -71,7 +73,7 @@ class PartitionLayoutTest(unittest.TestCase):
             valid_partitions(),
             8 * 1024 * 1024,
             validator.APP_START,
-            {0x1000, 0x8000},
+            {0x1000, 0x8000, 0x3F0000},
         )
         self.assertTrue(any("flash efectiva debe ser de 16 MB" in error for error in errors))
 
@@ -81,8 +83,8 @@ class PartitionLayoutTest(unittest.TestCase):
             ("0x8000", "partitions.bin"),
             ("0xe000", "/framework/boot_app0.bin"),
         ]
-        kept, removed = validator.remove_boot_app_image(images)
-        self.assertEqual(kept, images[:2])
+        kept, removed = validator.relocate_boot_app_image(images)
+        self.assertEqual(kept, images[:2] + [("0x3f0000", "/framework/boot_app0.bin")])
         self.assertEqual(removed, "/framework/boot_app0.bin")
 
     def test_extra_images_reject_duplicates_or_unexpected_names(self):
@@ -148,14 +150,22 @@ class PartitionLayoutTest(unittest.TestCase):
             def BoardConfig(self):
                 return {"upload.flash_size": "16MB"}
 
+            def AddPostAction(self, target, action):
+                self.values["POST_ACTION"] = (target, action)
+
         environment = FakeEnvironment()
         validator.configure_platformio(environment)
 
         self.assertEqual(
-            [offset for offset, _ in environment.values["FLASH_EXTRA_IMAGES"]],
-            ["0x1000", "0x8000"],
+            [
+                validator.parse_number(str(offset))
+                for offset, _ in environment.values["FLASH_EXTRA_IMAGES"]
+            ],
+            [0x1000, 0x8000, 0x3F0000],
         )
         self.assertNotIn("0xe000", environment.values["UPLOADERFLAGS"])
+        self.assertIn("0x3f0000", environment.values["UPLOADERFLAGS"])
+        self.assertIn("POST_ACTION", environment.values)
 
     def test_platformio_integration_fails_closed_when_flags_do_not_match(self):
         class MismatchedEnvironment:

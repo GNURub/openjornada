@@ -27,6 +27,8 @@
 #include "openjornada/hardware.hpp"
 #include "openjornada/network_worker.hpp"
 #include "openjornada/outbox.hpp"
+#include "openjornada/ota_configuration.hpp"
+#include "openjornada/ota_worker.hpp"
 #include "openjornada/provisioning.hpp"
 #include "openjornada/screen.hpp"
 #include "openjornada/signature.hpp"
@@ -57,6 +59,12 @@ std::unique_ptr<NetworkWorker> networkWorker;
 std::unique_ptr<Esp32ApiClient> telemetryApiClient;
 std::unique_ptr<TelemetryWorker> telemetryWorker;
 TelemetryScheduler telemetryScheduler;
+OtaStateStore otaStateStore;
+std::unique_ptr<OtaWorker> otaWorker;
+OtaScheduler otaScheduler;
+OtaResult otaSnapshot;
+std::optional<FirmwareManifest> otaCandidate;
+int64_t otaCandidateCheckedAt = 0;
 std::unique_ptr<AppController> app;
 std::optional<DeviceConfig> deviceConfig;
 bool terminalBlocked = false;
@@ -73,9 +81,32 @@ std::array<bool, 3> acceleratedHoldSent{};
 std::string appliedTimezone;
 std::atomic<bool> ntpSynchronizedThisBoot{false};
 std::atomic<std::time_t> lastNtpSyncEpoch{0};
+uint32_t lastInteractionAtMs = 0;
+uint32_t otaRebootAtMs = 0;
+FirmwareUpdateStatus lastDrawnOtaStatus = FirmwareUpdateStatus::Idle;
+bool otaCandidateNeedsBootValidation = false;
+bool otaInstallQueued = false;
 
 enum class BootChoice { Normal, Provisioning, FactoryReset };
 enum class ProvisioningOutcome { Saved, Cancelled, Failed };
+
+bool otaJobConfiguration(OtaJob& job) {
+  job.currentVersion = std::string(kTerminalFirmwareVersion);
+  job.protocolVersion = kTerminalProtocolVersion;
+#if defined(OPENJORNADA_OTA_TEST) && OPENJORNADA_OTA_TEST
+  job.manifestUrl = OPENJORNADA_OTA_TEST_MANIFEST_URL;
+  job.developmentTransport = true;
+  return !job.manifestUrl.empty() &&
+         decodeOtaPublicKeyHex(OPENJORNADA_OTA_TEST_PUBLIC_KEY_HEX,
+                              job.publicKey);
+#elif defined(OPENJORNADA_DEVELOPMENT) && OPENJORNADA_DEVELOPMENT
+  return false;
+#else
+  job.manifestUrl = kProductionOtaManifestUrl;
+  job.publicKey = kProductionOtaPublicKey;
+  return true;
+#endif
+}
 
 void drawBootScreen() {
   auto& display = M5.Display;
@@ -364,7 +395,22 @@ void applyDisplayPowerEvent(DisplayPowerEvent event, bool invalidateRenderer) {
   }
 }
 
+[[noreturn]] void rejectOtaCandidateAndRestart() {
+  otaSnapshot.status = FirmwareUpdateStatus::Failed;
+  otaSnapshot.error = FirmwareUpdateError::BootValidation;
+  (void)otaStateStore.rejectCandidateAndReboot();
+
+  // A successful ESP-IDF rollback never returns. If it does return because
+  // persisting or marking the slot failed, a regular reboot still makes the
+  // bootloader reject an unconfirmed PENDING_VERIFY image instead of leaving
+  // the terminal trapped in this candidate.
+  delay(100);
+  ESP.restart();
+  while (true) delay(1000);
+}
+
 void enterBlockedState(std::string title, std::string detail, bool error) {
+  if (otaCandidateNeedsBootValidation) rejectOtaCandidateAndRestart();
   blockedScreen = {std::move(title), std::move(detail), error};
   drawProvisioningStatus(blockedScreen->title, blockedScreen->detail,
                          blockedScreen->error);
@@ -392,6 +438,7 @@ size_t currentPendingCountForRecovery() {
   // Stop all API activity before the portal takes ownership of Wi-Fi. The
   // outbox and the active configuration remain stored and untouched.
   app.reset();
+  otaWorker.reset();
   telemetryWorker.reset();
   telemetryApiClient.reset();
   networkWorker.reset();
@@ -422,10 +469,43 @@ void emitFeedback() {
   if (feedback == AppFeedback::Error) hardware.toneError();
 }
 
+TelemetryJob currentTelemetryJob() {
+  TelemetryJob job;
+  job.credentials = {deviceConfig->baseUrl, deviceConfig->terminalToken};
+  job.heartbeat = app->heartbeatRequest(
+      static_cast<int16_t>(WiFi.RSSI()),
+      static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL);
+  job.heartbeat.firmwareUpdateStatus = firmwareUpdateStatusValue(
+      otaWorker != nullptr && otaWorker->busy() ? otaWorker->status()
+                                                : otaSnapshot.status);
+  job.heartbeat.firmwareTargetVersion = otaSnapshot.targetVersion;
+  job.heartbeat.lastFirmwareCheckAt =
+      otaSnapshot.checkedAtEpochSeconds > 0
+          ? isoUtc(otaSnapshot.checkedAtEpochSeconds)
+          : "";
+  job.heartbeat.firmwareUpdateErrorCode =
+      firmwareUpdateErrorValue(otaSnapshot.error);
+  job.localIp = WiFi.localIP().toString().c_str();
+  return job;
+}
+
 }  // namespace
 
 void setup() {
+  bool bootPreparationFailed =
+      !otaStateStore.prepareBoot(kTerminalFirmwareVersion, otaSnapshot,
+                                 otaCandidateNeedsBootValidation);
+  if (bootPreparationFailed && otaCandidateNeedsBootValidation) {
+    rejectOtaCandidateAndRestart();
+  }
   const bool rfidReady = hardware.begin();
+  if (bootPreparationFailed) {
+    enterBlockedState(
+        "Firmware no validado",
+        "No se pudo validar el arranque OTA. Reinicia para recuperar la versión anterior.",
+        true);
+    return;
+  }
   const BuildProfile profile = currentBuildProfile();
   ConfigError configError = ConfigError::Storage;
   deviceConfig = configStore.load(profile, &configError);
@@ -446,6 +526,14 @@ void setup() {
   pendingCountForRecovery = pendingCount;
 
   const BootChoice choice = detectBootChoice(pendingCount);
+  if (otaCandidateNeedsBootValidation &&
+      (choice != BootChoice::Normal || !deviceConfig.has_value())) {
+    enterBlockedState(
+        "Firmware no validado",
+        "La configuración necesaria no está disponible. Restaurando la versión anterior.",
+        true);
+    return;
+  }
   if (choice == BootChoice::FactoryReset) {
     outboxStorage.end();
     const bool reset = performFactoryReset(configStore, cacheStore);
@@ -541,8 +629,16 @@ void setup() {
     initialCache = {};
   }
 
-  apiClient = std::make_unique<Esp32ApiClient>(profile);
-  networkWorker = std::make_unique<NetworkWorker>(*apiClient);
+  try {
+    apiClient = std::make_unique<Esp32ApiClient>(profile);
+    networkWorker = std::make_unique<NetworkWorker>(*apiClient);
+  } catch (const std::bad_alloc&) {
+    enterBlockedState(
+        "Memoria insuficiente",
+        "No se pudo iniciar la conexión. Reiniciando para recuperar la versión anterior.",
+        true);
+    return;
+  }
   if (!networkWorker->begin()) {
     enterBlockedState(
         "Red no disponible",
@@ -561,9 +657,17 @@ void setup() {
     appConfig.clockSyncedAt = runtime->clockSyncedAt;
     appConfig.lastNtpEpochSeconds = runtime->lastNtpEpochSeconds;
   }
-  app = std::make_unique<AppController>(*networkWorker, outbox,
-                                        std::move(appConfig), &cacheStore,
-                                        &configStore);
+  try {
+    app = std::make_unique<AppController>(*networkWorker, outbox,
+                                          std::move(appConfig), &cacheStore,
+                                          &configStore);
+  } catch (const std::bad_alloc&) {
+    enterBlockedState(
+        "Memoria insuficiente",
+        "No se pudo iniciar el terminal. Reiniciando para recuperar la versión anterior.",
+        true);
+    return;
+  }
   try {
     telemetryApiClient = std::make_unique<Esp32ApiClient>(profile);
     telemetryWorker =
@@ -576,10 +680,30 @@ void setup() {
     telemetryWorker.reset();
     telemetryApiClient.reset();
   }
+  OtaJob otaConfiguration;
+  if (otaJobConfiguration(otaConfiguration)) {
+    try {
+      otaWorker = std::make_unique<OtaWorker>(otaStateStore);
+      if (!otaWorker->begin()) otaWorker.reset();
+    } catch (const std::bad_alloc&) {
+      otaWorker.reset();
+    }
+  }
   app->start(pendingCount, millis());
   app->tick(baseEvent(AppEventKind::Timer));
+  if (otaCandidateNeedsBootValidation) {
+    if (!otaStateStore.confirmBoot(kTerminalFirmwareVersion, otaSnapshot)) {
+      enterBlockedState(
+          "Firmware no validado",
+          "La comprobación de arranque falló. Restaurando la versión anterior.",
+          true);
+      return;
+    }
+    otaCandidateNeedsBootValidation = false;
+  }
   renderer.render(app->screen(), std::time(nullptr));
   displayPower.reset(millis());
+  lastInteractionAtMs = millis();
 }
 
 void loop() {
@@ -592,6 +716,10 @@ void loop() {
     down[index] = hardware.down(kButtons[index]);
   }
   const auto uid = hardware.pollUid();
+  if (uid.has_value() ||
+      std::any_of(pressed.begin(), pressed.end(), [](bool value) { return value; })) {
+    lastInteractionAtMs = millis();
+  }
 
   const DisplayPowerDecision displayDecision = displayPower.update(
       millis(), DisplayActivity{
@@ -631,6 +759,27 @@ void loop() {
     return;
   }
 
+  const bool otaBusy = otaWorker != nullptr && otaWorker->busy();
+  const FirmwareUpdateStatus activeOtaStatus =
+      otaBusy ? otaWorker->status() : FirmwareUpdateStatus::Idle;
+  const bool otaInstalling =
+      otaInstallQueued ||
+      (otaBusy &&
+       (activeOtaStatus == FirmwareUpdateStatus::Downloading ||
+        activeOtaStatus == FirmwareUpdateStatus::Verifying ||
+        activeOtaStatus == FirmwareUpdateStatus::PendingReboot));
+  const bool otaUnavailable = otaInstalling || otaRebootAtMs != 0;
+  if (otaInstalling) {
+    const FirmwareUpdateStatus status = activeOtaStatus;
+    if (status != lastDrawnOtaStatus) {
+      lastDrawnOtaStatus = status;
+      const char* detail = status == FirmwareUpdateStatus::Downloading
+                               ? "Descargando la nueva versión. No desconectes el terminal."
+                               : "Verificando la actualización. No desconectes el terminal.";
+      drawProvisioningStatus("Actualizando firmware", detail, false);
+    }
+  }
+
   const bool present = hardware.tagPresent();
   const bool acceptedUid =
       uid.has_value() && uidGate.accept(*uid, present, millis());
@@ -642,7 +791,7 @@ void loop() {
                       displayDecision.dispatchButtons));
   applyServerTimezone(app->timezone());
 
-  if (displayDecision.dispatchButtons) {
+  if (!otaUnavailable && displayDecision.dispatchButtons) {
     dispatchButton(Button::A, recovery.dispatchA);
     dispatchButton(Button::B, recovery.dispatchB);
     dispatchButton(Button::C, pressed[2]);
@@ -650,7 +799,7 @@ void loop() {
     acceleratedHoldSent.fill(false);
   }
 
-  if (acceptedUid && displayDecision.dispatchTag) {
+  if (!otaUnavailable && acceptedUid && displayDecision.dispatchTag) {
     AppEvent event = baseEvent(AppEventKind::TagScanned);
     event.uid = *uid;
     app->tick(event);
@@ -658,27 +807,100 @@ void loop() {
 
   if (telemetryWorker != nullptr && networkWorker != nullptr &&
       deviceConfig.has_value()) {
-    TelemetryResult ignoredTelemetry;
-    while (telemetryWorker->poll(ignoredTelemetry)) ignoredTelemetry = {};
+    TelemetryResult telemetryResult;
+    while (telemetryWorker->poll(telemetryResult)) {
+      // A successful heartbeat has already passed terminal authentication and
+      // the strict protocol contract. It is therefore fresh compatibility
+      // evidence without consuming the primary attendance worker.
+      if (telemetryResult.heartbeat.ok) {
+        app->noteCompatibleServer(millis(),
+                                  telemetryResult.response.serverTime);
+      }
+      telemetryResult = {};
+    }
 
     const uint32_t nowMs = millis();
-    if (telemetryScheduler.due(nowMs, WiFi.status() == WL_CONNECTED,
+    if (!otaUnavailable && telemetryScheduler.due(nowMs, WiFi.status() == WL_CONNECTED,
                                networkWorker->busy(),
                                telemetryWorker->busy())) {
-      TelemetryJob job;
-      job.credentials = {deviceConfig->baseUrl,
-                         deviceConfig->terminalToken};
-      job.heartbeat = app->heartbeatRequest(
-          static_cast<int16_t>(WiFi.RSSI()),
-          static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL);
-      job.localIp = WiFi.localIP().toString().c_str();
+      TelemetryJob job = currentTelemetryJob();
       if (telemetryWorker->enqueue(std::move(job))) {
         telemetryScheduler.markEnqueued(nowMs);
       }
     }
   }
 
+  if (otaWorker != nullptr) {
+    OtaResult result;
+    if (otaWorker->poll(result)) {
+      if (result.kind == OtaJobKind::Install) otaInstallQueued = false;
+      if (result.kind == OtaJobKind::Check) {
+        if (result.status == FirmwareUpdateStatus::Available &&
+            result.candidate.has_value()) {
+          otaCandidate = std::move(result.candidate);
+          otaCandidateCheckedAt = result.checkedAtEpochSeconds;
+        } else {
+          otaCandidate.reset();
+          otaCandidateCheckedAt = 0;
+        }
+      }
+      otaSnapshot = std::move(result);
+      lastDrawnOtaStatus = FirmwareUpdateStatus::Idle;
+      if (otaSnapshot.rebootRequired) {
+        drawProvisioningStatus(
+            "Actualización preparada",
+            "La firma es válida. Reiniciando con la nueva versión...", false);
+        const uint32_t nowMs = millis();
+        if (telemetryWorker != nullptr && !telemetryWorker->busy() &&
+            WiFi.status() == WL_CONNECTED &&
+            telemetryWorker->enqueue(currentTelemetryJob())) {
+          telemetryScheduler.markEnqueued(nowMs);
+        }
+        otaRebootAtMs = nowMs + 12000U;
+      }
+    }
+    const uint32_t nowMs = millis();
+    const bool telemetryBusy =
+        telemetryWorker != nullptr && telemetryWorker->busy();
+    const uint32_t inactiveForMs = nowMs - lastInteractionAtMs;
+    const auto safety = app->otaSafetyContext(
+        WiFi.status() == WL_CONNECTED, networkWorker->busy(), telemetryBusy,
+        inactiveForMs, nowMs);
+    if (!otaWorker->busy() && otaRebootAtMs == 0 &&
+        otaCandidate.has_value() && otaSafetyAllowsInstall(safety)) {
+      OtaJob install;
+      if (otaJobConfiguration(install)) {
+        install.kind = OtaJobKind::Install;
+        install.candidate = *otaCandidate;
+        install.checkedAtEpochSeconds = otaCandidateCheckedAt;
+        if (otaWorker->enqueue(std::move(install))) {
+          otaInstallQueued = true;
+          otaCandidate.reset();
+          otaCandidateCheckedAt = 0;
+        }
+      }
+    } else if (!otaWorker->busy() && otaRebootAtMs == 0 &&
+               otaScheduler.due(nowMs) && !safety.primaryWorkerBusy &&
+               !safety.telemetryWorkerBusy && safety.networkConnected &&
+               safety.clockTrusted && safety.compatibleBootstrapRecent) {
+      OtaJob check;
+      if (otaJobConfiguration(check)) {
+        check.kind = OtaJobKind::Check;
+        if (otaWorker->enqueue(std::move(check))) {
+          otaScheduler.markChecked(nowMs);
+        }
+      }
+    }
+  }
+
+  if (otaRebootAtMs != 0 &&
+      static_cast<int32_t>(millis() - otaRebootAtMs) >= 0) {
+    ESP.restart();
+  }
+
   emitFeedback();
-  renderer.render(app->screen(), std::time(nullptr));
+  if (!otaInstalling && otaRebootAtMs == 0) {
+    renderer.render(app->screen(), std::time(nullptr));
+  }
   delay(20);
 }

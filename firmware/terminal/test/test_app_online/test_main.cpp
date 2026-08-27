@@ -99,12 +99,13 @@ class FakeApi final : public ApiClient {
   bool lastAssignReplace = false;
   std::string lastAssignedEmployee;
   std::string lastResolvedUid;
+  std::string bootstrapServerTime = "2026-08-21T10:00:00Z";
   size_t pendingObservedByResolve = 0;
 
   ApiCallResult bootstrap(const ApiCredentials&, const BootstrapRequest&,
                           BootstrapResponse& output, uint32_t) override {
     output.protocol = {1, 1, 1};
-    output.serverTime = "2026-08-21T10:00:00Z";
+    output.serverTime = bootstrapServerTime;
     output.timezone = "Europe/Madrid";
     output.terminal.id = "terminal-test";
     output.maxOfflineSeconds = 86400;
@@ -1431,7 +1432,12 @@ void test_online_action_uses_bootstrap_clock_after_ntp_trust_expires() {
       static_cast<uint32_t>((ClockTrust::kMaximumOfflineAgeSeconds + 1) *
                             1000);
   fixture.timestampEpochOffset = 60 * 60;
+  fixture.api.bootstrapServerTime = "2026-08-22T10:00:01Z";
   fixture.tick();
+  // The independent authenticated heartbeat renews compatibility and server
+  // time without occupying the primary attendance worker.
+  fixture.app.noteCompatibleServer(fixture.nowMs,
+                                   fixture.api.bootstrapServerTime);
   TEST_ASSERT_FALSE(fixture.app.screen().ntpTrusted);
   fixture.scan(work(WorkKind::Idle));
   fixture.accepted(WorkKind::Working);
@@ -1761,6 +1767,30 @@ void test_heartbeat_snapshot_reports_runtime_and_strict_ntp_state_silently() {
   TEST_ASSERT_EQUAL_UINT32(0, unsyncedHeartbeat.pendingCount);
 }
 
+void test_authenticated_heartbeat_refreshes_ota_compatibility_wrap_safely() {
+  Fixture fixture;
+  OtaSafetyContext safety = fixture.app.otaSafetyContext(
+      true, false, false, kOtaInteractionIdleMs, fixture.nowMs);
+  TEST_ASSERT_TRUE(safety.compatibleBootstrapRecent);
+
+  fixture.nowMs += kCompatibleBootstrapMaxAgeMs + 1U;
+  safety = fixture.app.otaSafetyContext(
+      true, false, false, kOtaInteractionIdleMs, fixture.nowMs);
+  TEST_ASSERT_FALSE(safety.compatibleBootstrapRecent);
+
+  fixture.app.noteCompatibleServer(fixture.nowMs,
+                                   "2026-08-27T12:00:00Z");
+  safety = fixture.app.otaSafetyContext(
+      true, false, false, kOtaInteractionIdleMs, fixture.nowMs);
+  TEST_ASSERT_TRUE(safety.compatibleBootstrapRecent);
+
+  fixture.app.noteCompatibleServer(UINT32_MAX - 500U,
+                                   "2026-08-27T12:01:00Z");
+  safety = fixture.app.otaSafetyContext(
+      true, false, false, kOtaInteractionIdleMs, 500U);
+  TEST_ASSERT_TRUE(safety.compatibleBootstrapRecent);
+}
+
 void test_late_employee_response_cannot_restore_an_expired_admin_session() {
   Fixture fixture;
   fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
@@ -1843,5 +1873,6 @@ int main(int, char**) {
   RUN_TEST(test_admin_inactivity_returns_directly_to_idle);
   RUN_TEST(test_late_employee_response_cannot_restore_an_expired_admin_session);
   RUN_TEST(test_heartbeat_snapshot_reports_runtime_and_strict_ntp_state_silently);
+  RUN_TEST(test_authenticated_heartbeat_refreshes_ota_compatibility_wrap_safely);
   return UNITY_END();
 }

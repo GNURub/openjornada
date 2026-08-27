@@ -21,14 +21,18 @@ const (
 )
 
 type heartbeatRequest struct {
-	ProtocolVersion int    `json:"protocolVersion"`
-	ClientVersion   string `json:"clientVersion"`
-	CacheRevision   int    `json:"cacheRevision"`
-	PendingCount    int    `json:"pendingCount"`
-	WifiRSSIDbm     int    `json:"wifiRssiDbm"`
-	UptimeSeconds   uint64 `json:"uptimeSeconds"`
-	ClockStatus     string `json:"clockStatus"`
-	LastNtpSyncAt   string `json:"lastNtpSyncAt"`
+	ProtocolVersion         int    `json:"protocolVersion"`
+	ClientVersion           string `json:"clientVersion"`
+	CacheRevision           int    `json:"cacheRevision"`
+	PendingCount            int    `json:"pendingCount"`
+	WifiRSSIDbm             int    `json:"wifiRssiDbm"`
+	UptimeSeconds           uint64 `json:"uptimeSeconds"`
+	ClockStatus             string `json:"clockStatus"`
+	LastNtpSyncAt           string `json:"lastNtpSyncAt"`
+	FirmwareUpdateStatus    string `json:"firmwareUpdateStatus"`
+	FirmwareTargetVersion   string `json:"firmwareTargetVersion"`
+	LastFirmwareCheckAt     string `json:"lastFirmwareCheckAt"`
+	FirmwareUpdateErrorCode string `json:"firmwareUpdateErrorCode"`
 }
 
 type pingAckRequest struct {
@@ -76,6 +80,29 @@ func (request heartbeatRequest) validate(now time.Time) error {
 	default:
 		return errors.New("invalid clock status")
 	}
+	validFirmwareStatuses := map[string]bool{
+		"": true, "idle": true, "checking": true, "available": true,
+		"downloading": true, "verifying": true, "pending_reboot": true,
+		"updated": true, "failed": true, "rolled_back": true, "blocked": true,
+	}
+	validFirmwareErrors := map[string]bool{
+		"": true, "manifest_fetch": true, "manifest_signature": true,
+		"manifest_invalid": true, "incompatible": true, "download": true,
+		"size": true, "hash": true, "flash": true,
+		"boot_validation": true, "rollback": true,
+	}
+	if !validFirmwareStatuses[request.FirmwareUpdateStatus] ||
+		!validFirmwareErrors[request.FirmwareUpdateErrorCode] ||
+		len(request.FirmwareTargetVersion) > 32 ||
+		strings.ContainsAny(request.FirmwareTargetVersion, "\r\n\x00") {
+		return errors.New("invalid firmware update status")
+	}
+	if request.LastFirmwareCheckAt != "" {
+		checkedAt, err := time.Parse(time.RFC3339Nano, request.LastFirmwareCheckAt)
+		if err != nil || checkedAt.After(now.Add(maxNTPFutureSkew)) {
+			return errors.New("invalid firmware check time")
+		}
+	}
 	return nil
 }
 
@@ -118,6 +145,10 @@ func applyHeartbeat(record *core.Record, request heartbeatRequest, serverNow tim
 	record.Set("lastNtpSyncAt", strings.TrimSpace(request.LastNtpSyncAt))
 	record.Set("lastWifiRssiDbm", request.WifiRSSIDbm)
 	record.Set("lastUptimeSeconds", request.UptimeSeconds)
+	record.Set("firmwareUpdateStatus", request.FirmwareUpdateStatus)
+	record.Set("firmwareTargetVersion", strings.TrimSpace(request.FirmwareTargetVersion))
+	record.Set("lastFirmwareCheckAt", strings.TrimSpace(request.LastFirmwareCheckAt))
+	record.Set("firmwareUpdateErrorCode", request.FirmwareUpdateErrorCode)
 }
 
 func persistHeartbeat(app core.App, terminalID string, request heartbeatRequest, serverNow time.Time) error {

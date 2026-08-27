@@ -104,6 +104,10 @@ struct HeartbeatRequest {
   uint64_t uptimeSeconds = 0;
   std::string clockStatus;
   std::string lastNtpSyncAt;
+  std::string firmwareUpdateStatus = "idle";
+  std::string firmwareTargetVersion;
+  std::string lastFirmwareCheckAt;
+  std::string firmwareUpdateErrorCode;
 };
 
 struct HeartbeatResponse {

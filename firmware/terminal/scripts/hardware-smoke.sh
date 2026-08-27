@@ -10,8 +10,8 @@ if [[ ! -c "$device" ]]; then
 fi
 
 cd "$project_dir"
-uv tool run --from platformio platformio run -e m5stack_dev
-uv tool run --from platformio platformio run -e m5stack_dev \
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev \
   --target upload --upload-port "$device"
 
 echo "Firmware cargado. Comprueba en la pantalla:"
@@ -22,5 +22,5 @@ echo "  4. Mantenlo apoyado: no debe volver a generar una acción."
 echo "  5. Retíralo al menos 300 ms y acércalo de nuevo."
 echo "Abriendo monitor serie (Ctrl+C para salir)..."
 
-exec uv tool run --from platformio platformio device monitor \
+exec uv tool run --from platformio==6.1.19 platformio device monitor \
   --port "$device" --baud 115200
