@@ -1,7 +1,7 @@
 # Diseño de telemetría y ping para terminales RFID
 
 **Fecha:** 2026-08-27
-**Estado:** aprobado en conversación; pendiente de revisión documental
+**Estado:** aprobado
 **Componentes:** PocketBase, Angular y firmware M5Stack RFID
 
 ## Objetivo
@@ -57,8 +57,13 @@ offline: si falla, se descarta y se intenta de nuevo en el siguiente ciclo.
 El heartbeat evita incorporar un canal servidor-dispositivo nuevo. Su
 respuesta puede incluir un reto de ping pendiente. Cuando lo recibe, el
 terminal envía inmediatamente un acuse autenticado; esta operación continúa
-siendo silenciosa y queda por debajo de los fichajes y la sincronización en la
-prioridad del worker.
+siendo silenciosa.
+
+El transporte de telemetría vive en un worker ligero, independiente del worker
+que atiende fichajes, sincronización, caché y administración. Tiene una sola
+ranura, no accede a pantalla, outbox o estado de jornada y se planifica solo
+cuando el canal principal está libre. Así una petición de heartbeat que ya
+esté en vuelo no ocupa `activeJobId_` ni impide leer un tag nuevo.
 
 ### Coordinador de ping en memoria
 
@@ -188,18 +193,24 @@ No se añade ningún campo para IP local o pública.
 
 ## Prioridades y comportamiento del firmware
 
-El worker de red conserva una única ejecución serializada. El orden de
+El worker principal conserva una única ejecución serializada. El orden de
 prioridad es:
 
 1. acciones de fichaje y confirmaciones solicitadas por la persona;
 2. sincronización de la cola pendiente;
-3. operaciones administrativas locales y actualización necesaria de caché;
-4. heartbeat y acuse de ping.
+3. operaciones administrativas locales y actualización necesaria de caché.
+
+El worker de telemetría queda fuera de esa cola principal y solo acepta un
+ciclo heartbeat/acuse a la vez. El coordinador de aplicación no espera su
+resultado ni cambia `activeJobId_` por él.
 
 El temporizador de 15 segundos indica que un heartbeat está disponible, pero
-no interrumpe un trabajo superior ni acumula varios heartbeats. Al quedar
-libre, se envía como máximo uno. El ping puede por ello agotar sus 20 segundos
-si el terminal está ocupado sincronizando; el fichaje siempre gana.
+no interrumpe un trabajo principal ni acumula varios heartbeats. Al quedar
+libre el canal principal, se envía como máximo uno al worker de telemetría. El
+ping puede por ello agotar sus 20 segundos si el terminal está ocupado
+sincronizando; el fichaje siempre gana. Si comienza un fichaje mientras la
+telemetría ya está en vuelo, ambos transportes pueden terminar, pero solo el
+worker principal afecta al flujo de jornada.
 
 Recibir o contestar un ping no modifica el estado de pantalla, no reproduce
 sonido, no enciende una pantalla apagada y no altera la máquina de estados de
