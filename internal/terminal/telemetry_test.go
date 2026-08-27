@@ -156,31 +156,34 @@ func TestHeartbeatRequestValidation(t *testing.T) {
 
 func TestObservedPingPublicIP(t *testing.T) {
 	for _, test := range []struct {
-		name, remoteAddr, forwardedProto, forwardedFor, want string
-		wantErr                                              bool
+		name, remoteAddr, headerName, headerValue, want string
+		trustedHeaders                                  []string
+		useLeftmost                                     bool
 	}{
-		{name: "direct connection", remoteAddr: "198.51.100.10:43110", want: "198.51.100.10"},
-		{name: "direct private connection", remoteAddr: "192.168.1.20:43110", want: "192.168.1.20"},
-		{name: "private HTTPS proxy", remoteAddr: "10.0.0.5:43110", forwardedProto: "https", forwardedFor: "198.51.100.44", want: "198.51.100.44"},
-		{name: "rightmost valid forwarded IP", remoteAddr: "127.0.0.1:43110", forwardedProto: "https", forwardedFor: "198.51.100.44, invalid", want: "198.51.100.44"},
-		{name: "spoof from public peer", remoteAddr: "203.0.113.9:43110", forwardedProto: "https", forwardedFor: "198.51.100.44", want: "203.0.113.9"},
-		{name: "invalid forwarded values", remoteAddr: "10.0.0.5:43110", forwardedProto: "https", forwardedFor: "invalid, also-invalid", want: "10.0.0.5"},
-		{name: "first forwarded protocol must be HTTPS", remoteAddr: "10.0.0.5:43110", forwardedProto: "http, https", forwardedFor: "198.51.100.44", want: "10.0.0.5"},
-		{name: "invalid remote address", remoteAddr: "invalid", wantErr: true},
+		{name: "unconfigured headers ignore spoof", remoteAddr: "203.0.113.9:43110", headerName: "X-Forwarded-For", headerValue: "198.51.100.44", want: "203.0.113.9"},
+		{name: "configured header uses leftmost", remoteAddr: "10.0.0.5:43110", trustedHeaders: []string{"X-Forwarded-For"}, useLeftmost: true, headerName: "X-Forwarded-For", headerValue: "198.51.100.41, 198.51.100.42", want: "198.51.100.41"},
+		{name: "configured header uses rightmost", remoteAddr: "10.0.0.5:43110", trustedHeaders: []string{"X-Forwarded-For"}, headerName: "X-Forwarded-For", headerValue: "198.51.100.41, 198.51.100.42", want: "198.51.100.42"},
+		{name: "unconfigured header name is ignored", remoteAddr: "192.168.1.20:43110", trustedHeaders: []string{"CF-Connecting-IP"}, headerName: "X-Forwarded-For", headerValue: "198.51.100.44", want: "192.168.1.20"},
+		{name: "invalid trusted values fall back", remoteAddr: "192.168.1.20:43110", trustedHeaders: []string{"X-Forwarded-For"}, headerName: "X-Forwarded-For", headerValue: "invalid, also-invalid", want: "192.168.1.20"},
+		{name: "forwarded IPv6 is canonicalized", remoteAddr: "127.0.0.1:43110", trustedHeaders: []string{"X-Forwarded-For"}, headerName: "X-Forwarded-For", headerValue: "2001:0db8:0000:0000:0000:0000:0000:0001", want: "2001:db8::1"},
+		{name: "direct IPv6 is canonicalized", remoteAddr: "[2001:0db8:0000:0000:0000:0000:0000:0002]:43110", want: "2001:db8::2"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			app, err := tests.NewTestApp()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer app.Cleanup()
+			app.Settings().TrustedProxy.Headers = test.trustedHeaders
+			app.Settings().TrustedProxy.UseLeftmostIP = test.useLeftmost
+
 			request := httptest.NewRequest("POST", "http://127.0.0.1/api/openjornada/terminal/v1/ping-ack", nil)
 			request.RemoteAddr = test.remoteAddr
-			request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
-			request.Header.Set("X-Forwarded-For", test.forwardedFor)
-			event := &core.RequestEvent{Event: router.Event{Request: request}}
-			got, err := observedPingPublicIP(event)
-			if test.wantErr {
-				if err == nil {
-					t.Fatalf("observedPingPublicIP() = %q, expected error", got)
-				}
-				return
+			if test.headerName != "" {
+				request.Header.Set(test.headerName, test.headerValue)
 			}
+			event := &core.RequestEvent{App: app, Event: router.Event{Request: request}}
+			got, err := observedPingPublicIP(event)
 			if err != nil || got != test.want {
 				t.Fatalf("observedPingPublicIP() = (%q, %v), want %q", got, err, test.want)
 			}

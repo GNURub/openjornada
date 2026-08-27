@@ -104,28 +104,7 @@ func canonicalIP(raw string) (string, error) {
 }
 
 func observedPingPublicIP(e *core.RequestEvent) (string, error) {
-	remoteIP, err := canonicalIP(e.RemoteIP())
-	if err != nil {
-		return "", err
-	}
-	parsedRemote := net.ParseIP(remoteIP)
-	trustedPeer := parsedRemote != nil && (parsedRemote.IsLoopback() || parsedRemote.IsPrivate())
-	forwardedHTTPS := strings.EqualFold(strings.TrimSpace(strings.Split(e.Request.Header.Get("X-Forwarded-Proto"), ",")[0]), "https")
-	if !trustedPeer || !forwardedHTTPS {
-		return remoteIP, nil
-	}
-
-	forwardedValues := e.Request.Header.Values("X-Forwarded-For")
-	if len(forwardedValues) == 0 {
-		return remoteIP, nil
-	}
-	candidates := strings.Split(forwardedValues[len(forwardedValues)-1], ",")
-	for index := len(candidates) - 1; index >= 0; index-- {
-		if forwardedIP, err := canonicalIP(strings.TrimSpace(candidates[index])); err == nil {
-			return forwardedIP, nil
-		}
-	}
-	return remoteIP, nil
+	return canonicalIP(e.RealIP())
 }
 
 func applyHeartbeat(record *core.Record, request heartbeatRequest, serverNow time.Time) {
