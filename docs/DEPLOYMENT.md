@@ -428,6 +428,15 @@ jornada.example.com {
 Si necesitas el panel de superusuario, publícalo sólo mediante VPN, túnel SSH o
 una lista de IP autorizadas. No elimines el bloqueo global sin otro control.
 
+La comprobación de conexión de los terminales obtiene la IP pública mediante
+la configuración **Trusted proxy** de PocketBase. Si PocketBase sólo es
+accesible a través de tu proxy, configura allí la cabecera que éste controla
+por completo —por ejemplo, `X-Forwarded-For`— y selecciona `UseLeftmostIP`
+según la topología real de proxies. Sin una cabecera confiable configurada se
+muestra la IP del peer directo, normalmente la del proxy. No confíes en una
+cabecera reenviada mientras PocketBase también sea accesible directamente ni
+permitas que el cliente sustituya el valor escrito por el proxy.
+
 Configura el proxy para aceptar el tamaño máximo de los documentos permitidos
 por la aplicación y transmitir correctamente conexiones HTTP largas.
 `/mcp` usa Streamable HTTP: conserva `Authorization`, `Origin`, `Accept` y

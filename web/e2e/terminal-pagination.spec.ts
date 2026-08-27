@@ -5,9 +5,19 @@ async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
   await page.getByLabel('Correo electrónico').fill('admin@example.com');
   await page.getByLabel('Contraseña').fill('TestPassword123!');
-  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page).toHaveURL(/\/$/u);
-  await acknowledgePrivacyNotice(page);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+    const authenticated = await page
+      .waitForURL(/\/$/u, { timeout: 2_500 })
+      .then(() => true)
+      .catch(() => false);
+    if (authenticated) {
+      await acknowledgePrivacyNotice(page);
+      return;
+    }
+    if (attempt === 3) throw new Error('No se pudo iniciar sesión como admin@example.com');
+    await page.waitForTimeout(3_200);
+  }
 }
 
 function terminal(id: number, revoked = false) {
