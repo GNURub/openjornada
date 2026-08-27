@@ -15,6 +15,62 @@ interface CreatedTerminal {
   token: string;
 }
 
+interface CleanupResponse {
+  ok(): boolean;
+  status(): number;
+  text(): Promise<string>;
+}
+
+interface CleanupAttempt {
+  label: string;
+  run(): Promise<CleanupResponse>;
+}
+
+const cleanupSecretKey = /authorization|password|secret|token|api.?key/iu;
+const cleanupSecretValue = /bearer\s+|ojterm_/iu;
+
+function redactCleanupBody(raw: string): string {
+  try {
+    const redact = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(redact);
+      if (typeof value === 'string' && cleanupSecretValue.test(value)) return '[REDACTADO]';
+      if (typeof value !== 'object' || value === null) return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [
+          key,
+          cleanupSecretKey.test(key) ? '[REDACTADO]' : redact(nested),
+        ]),
+      );
+    };
+    return JSON.stringify(redact(JSON.parse(raw))).slice(0, 2_000);
+  } catch {
+    return '<cuerpo no JSON omitido por seguridad>';
+  }
+}
+
+async function cleanupFixtures(attempts: CleanupAttempt[]): Promise<void> {
+  const failures: string[] = [];
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt.run();
+      if (!response.ok()) {
+        let body = '<cuerpo no disponible>';
+        try {
+          body = redactCleanupBody(await response.text());
+        } catch {
+          // Conserva el status aunque no pueda leerse la respuesta.
+        }
+        failures.push(`${attempt.label}: HTTP ${response.status()}; body=${body}`);
+      }
+    } catch {
+      failures.push(`${attempt.label}: error de transporte sin respuesta HTTP`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Falló la limpieza de fixtures de telemetría:\n${failures.join('\n')}`);
+  }
+}
+
 async function apiSignIn(
   request: APIRequestContext,
   identity: string,
@@ -132,6 +188,54 @@ function terminalFixture(
   };
 }
 
+test('intenta toda la limpieza y agrega fallos sin exponer secretos', async () => {
+  const attempted: string[] = [];
+  const response = (status: number, body: string): CleanupResponse => ({
+    ok: () => status >= 200 && status < 300,
+    status: () => status,
+    text: async () => body,
+  });
+  let cleanupError: unknown;
+
+  try {
+    await cleanupFixtures([
+      {
+        label: 'revocar terminal terminal-a',
+        run: async () => {
+          attempted.push('terminal-a');
+          return response(
+            500,
+            JSON.stringify({ message: 'fallo controlado', token: 'secreto', data: {} }),
+          );
+        },
+      },
+      {
+        label: 'desactivar usuario user-a',
+        run: async () => {
+          attempted.push('user-a');
+          throw new Error('fallo de red con otro-secreto');
+        },
+      },
+      {
+        label: 'desactivar usuario user-b',
+        run: async () => {
+          attempted.push('user-b');
+          return response(200, '{}');
+        },
+      },
+    ]);
+  } catch (error) {
+    cleanupError = error;
+  }
+
+  const message = cleanupError instanceof Error ? cleanupError.message : '';
+  expect(attempted).toEqual(['terminal-a', 'user-a', 'user-b']);
+  expect(message).toContain('revocar terminal terminal-a: HTTP 500');
+  expect(message).toContain('"message":"fallo controlado"');
+  expect(message).toContain('desactivar usuario user-a: error de transporte');
+  expect(message).not.toContain('secreto');
+});
+
 test('completa el reto de ping y aplica permisos, revocación, timeout y privacidad', async ({
   request,
 }, testInfo) => {
@@ -142,6 +246,8 @@ test('completa el reto de ping y aplica permisos, revocación, timeout y privaci
   const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const terminalIds: string[] = [];
   const userIds: string[] = [];
+  let originalFailure: unknown;
+  let hasOriginalFailure = false;
 
   try {
     const managerUser = await createUser(request, admin, suffix, 'manager');
@@ -254,19 +360,40 @@ test('completa el reto de ping y aplica permisos, revocación, timeout y privaci
     });
     expect(revokedHeartbeat.status()).toBe(401);
     expect((await revokedHeartbeat.json()).code).toBe('authentication_required');
+  } catch (error) {
+    hasOriginalFailure = true;
+    originalFailure = error;
   } finally {
-    for (const terminalId of terminalIds.reverse()) {
-      await request.post(`${apiBase}/openjornada/terminals/${terminalId}/revoke`, {
-        headers: { Authorization: admin.token },
-      });
-    }
-    for (const userId of userIds.reverse()) {
-      await request.patch(`${apiBase}/collections/users/records/${userId}`, {
-        headers: { Authorization: admin.token },
-        data: { active: false },
-      });
+    const cleanupAttempts: CleanupAttempt[] = [
+      ...[...terminalIds].reverse().map((terminalId) => ({
+        label: `revocar terminal ${terminalId}`,
+        run: () =>
+          request.post(`${apiBase}/openjornada/terminals/${terminalId}/revoke`, {
+            headers: { Authorization: admin.token },
+          }),
+      })),
+      ...[...userIds].reverse().map((userId) => ({
+        label: `desactivar usuario ${userId}`,
+        run: () =>
+          request.patch(`${apiBase}/collections/users/records/${userId}`, {
+            headers: { Authorization: admin.token },
+            data: { active: false },
+          }),
+      })),
+    ];
+    try {
+      await cleanupFixtures(cleanupAttempts);
+    } catch (cleanupFailure) {
+      if (hasOriginalFailure) {
+        throw new AggregateError(
+          [originalFailure, cleanupFailure],
+          'La prueba y la limpieza de fixtures de telemetría fallaron.',
+        );
+      }
+      throw cleanupFailure;
     }
   }
+  if (hasOriginalFailure) throw originalFailure;
 });
 
 test('muestra telemetría y ping efímero para estados online, offline y revocado', async ({
