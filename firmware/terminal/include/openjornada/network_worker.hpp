@@ -80,6 +80,9 @@ class NetworkWorker {
   bool begin();
   bool enqueue(NetworkJob&& job);
   bool poll(NetworkResult& output);
+  bool busy() const {
+    return outstanding_.load(std::memory_order_acquire) != 0U;
+  }
   // Host tests and deterministic diagnostics execute one queued job directly.
   // Production uses exactly one FreeRTOS task calling the same path.
   bool processOne();
@@ -108,6 +111,7 @@ class NetworkWorker {
   std::deque<NetworkJob> pending_;
   std::deque<NetworkResult> results_;
 #endif
+  std::atomic<uint8_t> outstanding_{0};
   ApiClient& client_;
 };
 

@@ -212,6 +212,25 @@ AppFeedback AppController::takeFeedback() {
   return result;
 }
 
+HeartbeatRequest AppController::heartbeatRequest(
+    int16_t wifiRssiDbm, uint64_t uptimeSeconds) const {
+  HeartbeatRequest value;
+  value.protocolVersion = kTerminalProtocolVersion;
+  value.clientVersion = config_.clientVersion;
+  value.cacheRevision = cache_.revision;
+  value.pendingCount = static_cast<uint32_t>(screen_.pendingCount);
+  value.wifiRssiDbm = wifiRssiDbm;
+  value.uptimeSeconds = uptimeSeconds;
+  value.clockStatus = clockTrust_.synchronizedThisBoot()
+                          ? "synced"
+                          : (clockTrust_.lastNtpEpochSeconds() > 0 ? "stale"
+                                                                  : "unsynced");
+  value.lastNtpSyncAt = value.clockStatus == "unsynced"
+                            ? ""
+                            : isoUtc(clockTrust_.lastNtpEpochSeconds());
+  return value;
+}
+
 void AppController::updateStatus(const AppEvent& event) {
   screen_.networkConnected = event.networkConnected;
   if (event.ntpTrusted &&

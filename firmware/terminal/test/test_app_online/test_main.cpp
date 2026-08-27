@@ -1714,6 +1714,53 @@ void test_admin_inactivity_returns_directly_to_idle() {
                            fixture.app.screen().detail.c_str());
 }
 
+void test_heartbeat_snapshot_reports_runtime_and_strict_ntp_state_silently() {
+  Fixture synced;
+  synced.scan(work(WorkKind::Idle));
+  synced.accepted(WorkKind::Working);
+  synced.press(Button::B);
+  synced.networkRoundTrip();
+  const ScreenKind syncedKind = synced.app.screen().kind;
+  const std::string syncedTitle = synced.app.screen().title;
+  const std::string syncedDetail = synced.app.screen().detail;
+  const HeartbeatRequest syncedHeartbeat =
+      synced.app.heartbeatRequest(-61, 1234U);
+  TEST_ASSERT_EQUAL_UINT8(kTerminalProtocolVersion,
+                          syncedHeartbeat.protocolVersion);
+  TEST_ASSERT_EQUAL_STRING("m5stack-test",
+                           syncedHeartbeat.clientVersion.c_str());
+  TEST_ASSERT_EQUAL_UINT32(0, syncedHeartbeat.cacheRevision);
+  TEST_ASSERT_EQUAL_UINT32(synced.app.screen().pendingCount,
+                           syncedHeartbeat.pendingCount);
+  TEST_ASSERT_EQUAL_INT16(-61, syncedHeartbeat.wifiRssiDbm);
+  TEST_ASSERT_EQUAL_UINT64(1234U, syncedHeartbeat.uptimeSeconds);
+  TEST_ASSERT_EQUAL_STRING("synced", syncedHeartbeat.clockStatus.c_str());
+  TEST_ASSERT_EQUAL_STRING("2026-08-21T10:00:00Z",
+                           syncedHeartbeat.lastNtpSyncAt.c_str());
+  TEST_ASSERT_EQUAL(syncedKind, synced.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING(syncedTitle.c_str(),
+                           synced.app.screen().title.c_str());
+  TEST_ASSERT_EQUAL_STRING(syncedDetail.c_str(),
+                           synced.app.screen().detail.c_str());
+  TEST_ASSERT_EQUAL(AppFeedback::Success, synced.app.takeFeedback());
+
+  OfflineFixture stale;
+  const HeartbeatRequest staleHeartbeat =
+      stale.app.heartbeatRequest(-78, 55U);
+  TEST_ASSERT_EQUAL_STRING("stale", staleHeartbeat.clockStatus.c_str());
+  TEST_ASSERT_EQUAL_STRING("2026-08-21T09:59:59Z",
+                           staleHeartbeat.lastNtpSyncAt.c_str());
+  TEST_ASSERT_EQUAL_UINT32(7, staleHeartbeat.cacheRevision);
+
+  Fixture unsynced(false);
+  const HeartbeatRequest unsyncedHeartbeat =
+      unsynced.app.heartbeatRequest(-90, 1U);
+  TEST_ASSERT_EQUAL_STRING("unsynced",
+                           unsyncedHeartbeat.clockStatus.c_str());
+  TEST_ASSERT_TRUE(unsyncedHeartbeat.lastNtpSyncAt.empty());
+  TEST_ASSERT_EQUAL_UINT32(0, unsyncedHeartbeat.pendingCount);
+}
+
 void test_late_employee_response_cannot_restore_an_expired_admin_session() {
   Fixture fixture;
   fixture.api.nextAdminSession.token = "ojtadmin_test-capability";
@@ -1795,5 +1842,6 @@ int main(int, char**) {
   RUN_TEST(test_rfid_activity_outside_admin_scan_is_ignored_and_resets_timeout);
   RUN_TEST(test_admin_inactivity_returns_directly_to_idle);
   RUN_TEST(test_late_employee_response_cannot_restore_an_expired_admin_session);
+  RUN_TEST(test_heartbeat_snapshot_reports_runtime_and_strict_ntp_state_silently);
   return UNITY_END();
 }

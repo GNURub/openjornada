@@ -172,7 +172,12 @@ bool NetworkWorker::enqueue(NetworkJob&& job) {
   slots_[index].inUse = true;
   xSemaphoreGive(slotsMutex_);
   const uint8_t queued = static_cast<uint8_t>(index);
+  // Reserve the outstanding count before making the job visible to the
+  // consumer task. This prevents a concurrent poll from observing a result
+  // before the count has been incremented; a failed send rolls it back.
+  outstanding_.fetch_add(1U, std::memory_order_release);
   if (xQueueSend(pendingQueue_, &queued, 0) != pdTRUE) {
+    outstanding_.fetch_sub(1U, std::memory_order_acq_rel);
     if (xSemaphoreTake(slotsMutex_, portMAX_DELAY) == pdTRUE) {
       slots_[index].inUse = false;
       slots_[index].job = {};
@@ -188,6 +193,7 @@ bool NetworkWorker::enqueue(NetworkJob&& job) {
   } catch (const std::bad_alloc&) {
     return false;
   }
+  outstanding_.fetch_add(1U, std::memory_order_release);
   return true;
 #endif
 }
@@ -206,11 +212,13 @@ bool NetworkWorker::poll(NetworkResult& output) {
   slots_[index].result = {};
   slots_[index].inUse = false;
   xSemaphoreGive(slotsMutex_);
+  outstanding_.fetch_sub(1U, std::memory_order_acq_rel);
   return true;
 #else
   if (results_.empty()) return false;
   output = std::move(results_.front());
   results_.pop_front();
+  outstanding_.fetch_sub(1U, std::memory_order_acq_rel);
   return true;
 #endif
 }

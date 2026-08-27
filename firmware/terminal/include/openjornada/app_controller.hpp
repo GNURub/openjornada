@@ -66,6 +66,8 @@ class AppController {
     return lastAuthoritativeState_;
   }
   const std::string& timezone() const { return timezone_; }
+  HeartbeatRequest heartbeatRequest(int16_t wifiRssiDbm,
+                                    uint64_t uptimeSeconds) const;
   AppFeedback takeFeedback();
 
  private:

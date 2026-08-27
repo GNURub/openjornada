@@ -4,6 +4,7 @@
 #include <esp_partition.h>
 #include <esp_sntp.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 
 #include <algorithm>
 #include <array>
@@ -30,6 +31,8 @@
 #include "openjornada/screen.hpp"
 #include "openjornada/signature.hpp"
 #include "openjornada/storage_layout.hpp"
+#include "openjornada/telemetry_scheduler.hpp"
+#include "openjornada/telemetry_worker.hpp"
 #include "openjornada/timezone.hpp"
 #include "openjornada/uid_gate.hpp"
 
@@ -50,6 +53,9 @@ DisplayPowerPolicy displayPower{0};
 RuntimeProvisioningGesture runtimeProvisioningGesture;
 std::unique_ptr<Esp32ApiClient> apiClient;
 std::unique_ptr<NetworkWorker> networkWorker;
+std::unique_ptr<Esp32ApiClient> telemetryApiClient;
+std::unique_ptr<TelemetryWorker> telemetryWorker;
+TelemetryScheduler telemetryScheduler;
 std::unique_ptr<AppController> app;
 std::optional<DeviceConfig> deviceConfig;
 bool terminalBlocked = false;
@@ -385,6 +391,8 @@ size_t currentPendingCountForRecovery() {
   // Stop all API activity before the portal takes ownership of Wi-Fi. The
   // outbox and the active configuration remain stored and untouched.
   app.reset();
+  telemetryWorker.reset();
+  telemetryApiClient.reset();
   networkWorker.reset();
   apiClient.reset();
 
@@ -555,6 +563,18 @@ void setup() {
   app = std::make_unique<AppController>(*networkWorker, outbox,
                                         std::move(appConfig), &cacheStore,
                                         &configStore);
+  try {
+    telemetryApiClient = std::make_unique<Esp32ApiClient>(profile);
+    telemetryWorker =
+        std::make_unique<TelemetryWorker>(*telemetryApiClient);
+    if (!telemetryWorker->begin()) {
+      telemetryWorker.reset();
+      telemetryApiClient.reset();
+    }
+  } catch (const std::bad_alloc&) {
+    telemetryWorker.reset();
+    telemetryApiClient.reset();
+  }
   app->start(pendingCount, millis());
   app->tick(baseEvent(AppEventKind::Timer));
   renderer.render(app->screen(), std::time(nullptr));
@@ -633,6 +653,28 @@ void loop() {
     AppEvent event = baseEvent(AppEventKind::TagScanned);
     event.uid = *uid;
     app->tick(event);
+  }
+
+  if (telemetryWorker != nullptr && networkWorker != nullptr &&
+      deviceConfig.has_value()) {
+    TelemetryResult ignoredTelemetry;
+    while (telemetryWorker->poll(ignoredTelemetry)) ignoredTelemetry = {};
+
+    const uint32_t nowMs = millis();
+    if (telemetryScheduler.due(nowMs, WiFi.status() == WL_CONNECTED,
+                               networkWorker->busy(),
+                               telemetryWorker->busy())) {
+      TelemetryJob job;
+      job.credentials = {deviceConfig->baseUrl,
+                         deviceConfig->terminalToken};
+      job.heartbeat = app->heartbeatRequest(
+          static_cast<int16_t>(WiFi.RSSI()),
+          static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL);
+      job.localIp = WiFi.localIP().toString().c_str();
+      if (telemetryWorker->enqueue(std::move(job))) {
+        telemetryScheduler.markEnqueued(nowMs);
+      }
+    }
   }
 
   emitFeedback();

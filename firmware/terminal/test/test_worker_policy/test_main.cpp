@@ -115,24 +115,30 @@ void test_timeout_and_backoff_policy() {
 void test_jobs_are_serialized_and_polling_is_non_blocking() {
   FakeApiClient api;
   NetworkWorker worker(api);
+  TEST_ASSERT_FALSE(worker.busy());
   TEST_ASSERT_TRUE(worker.enqueue(makeJob(NetworkJobKind::Bootstrap, 1)));
+  TEST_ASSERT_TRUE(worker.busy());
   TEST_ASSERT_TRUE(worker.enqueue(makeJob(NetworkJobKind::Action, 2)));
 
   NetworkResult result;
   TEST_ASSERT_FALSE(worker.poll(result));
   TEST_ASSERT_EQUAL_INT(0, api.calls);
   TEST_ASSERT_TRUE(worker.processOne());
+  TEST_ASSERT_TRUE(worker.busy());
   TEST_ASSERT_EQUAL_INT(1, api.calls);
   TEST_ASSERT_EQUAL_INT(1, api.maximumActive);
   TEST_ASSERT_TRUE(worker.poll(result));
+  TEST_ASSERT_TRUE(worker.busy());
   TEST_ASSERT_EQUAL_UINT32(1, result.id);
   TEST_ASSERT_EQUAL_UINT32(10000, api.lastTimeoutMs);
 
   TEST_ASSERT_TRUE(worker.processOne());
   TEST_ASSERT_EQUAL_INT(2, api.calls);
   TEST_ASSERT_EQUAL_INT(1, api.maximumActive);
+  TEST_ASSERT_TRUE(worker.busy());
   TEST_ASSERT_TRUE(worker.poll(result));
   TEST_ASSERT_EQUAL_UINT32(2, result.id);
+  TEST_ASSERT_FALSE(worker.busy());
 }
 
 void test_worker_queues_are_bounded() {
