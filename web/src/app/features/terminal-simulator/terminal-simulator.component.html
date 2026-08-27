@@ -42,6 +42,19 @@
                   <p class="mt-3 font-display text-3xl font-bold sm:text-5xl">
                     {{ resolved()?.employee?.displayName }}
                   </p>
+                  <div
+                    class="mt-3 space-y-1 font-display text-base font-bold text-cyan-700 sm:mt-5 sm:space-y-2 sm:text-2xl"
+                  >
+                    @if (buttonLabels().A) {
+                      <p>A. {{ buttonLabels().A }}</p>
+                    }
+                    @if (buttonLabels().B) {
+                      <p>B. {{ buttonLabels().B }}</p>
+                    }
+                    @if (buttonLabels().C) {
+                      <p>C. {{ buttonLabels().C }}</p>
+                    }
+                  </div>
                   @if (resolved()?.state?.staleBreak) {
                     <p class="mt-3 font-bold text-amber-700">Pausa abierta hace más de 25 min</p>
                   }
@@ -71,6 +84,13 @@
                     ¿Deseas cerrar ahora la jornada?
                   </p>
                   <p class="mt-5 font-bold text-stone-500">A: No · C: Sí</p>
+                  <p class="mt-3 text-sm font-bold text-stone-500">
+                    {{
+                      closeBreakPendingSync()
+                        ? 'El fin de pausa está pendiente de sincronizar'
+                        : 'La pausa ya está cerrada'
+                    }}
+                  </p>
                 </div>
               }
               @case ('admin-pin') {
@@ -86,9 +106,7 @@
                     }
                   </div>
                   <p class="mt-4 text-sm text-stone-500">A − · B siguiente · C +</p>
-                  <p class="mt-2 text-sm font-bold text-coral-700">
-                    Mantén A+C 3 s para salir
-                  </p>
+                  <p class="mt-2 text-sm font-bold text-coral-700">Mantén A+C 3 s para salir</p>
                 </div>
               }
               @case ('admin-employees') {
@@ -106,9 +124,7 @@
                     {{ currentEmployee()?.hasRfidTag ? 'Tag asignado' : 'Sin tag' }}
                   </p>
                   <p class="mt-4 text-sm text-stone-500">A/C navegar · B seleccionar</p>
-                  <p class="mt-2 text-sm font-bold text-coral-700">
-                    Mantén A+C 3 s para salir
-                  </p>
+                  <p class="mt-2 text-sm font-bold text-coral-700">Mantén A+C 3 s para salir</p>
                 </div>
               }
               @case ('admin-scan') {
@@ -117,9 +133,7 @@
                     Acerca el tag para {{ currentEmployee()?.name }}
                   </p>
                   <p class="mt-4 text-sm text-stone-500">A para volver</p>
-                  <p class="mt-2 text-sm font-bold text-coral-700">
-                    Mantén A+C 3 s para salir
-                  </p>
+                  <p class="mt-2 text-sm font-bold text-coral-700">Mantén A+C 3 s para salir</p>
                 </div>
               }
             }
@@ -138,7 +152,7 @@
             <span>{{ screen() === 'time-picker' ? 'Confirmar' : buttonLabels().B || 'B' }}</span>
             <span
               [class.text-coral-700]="
-                buttonLabels().C === 'Antes' ||
+                buttonLabels().C === 'Ya terminé antes' ||
                 (screen() === 'actions' && resolved()?.state?.staleBreak)
               "
               >{{

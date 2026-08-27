@@ -50,6 +50,7 @@ struct AppControllerConfig {
 enum class AppFeedback { None, Success, Error };
 
 std::string isoUtc(int64_t epochSeconds);
+const char* greetingForLocalHour(int hour);
 
 class AppController {
  public:
@@ -102,6 +103,8 @@ class AppController {
                      std::optional<int64_t> appliedEpoch = std::nullopt,
                      bool closeAfterBreak = false);
   void handleActionResult(NetworkResult&& result, const AppEvent& event);
+  void showActionMessage(Command command, std::string detail,
+                         const AppEvent& event, uint32_t durationMs);
   void showMessage(std::string detail, uint32_t nowMs, uint32_t durationMs,
                    bool error = false);
   void returnToIdle();

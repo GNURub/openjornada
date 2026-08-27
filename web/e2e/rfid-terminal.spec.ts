@@ -25,8 +25,7 @@ function signOfflineAction(
 }
 
 test('the firmware HMAC vector stays byte-for-byte compatible with the server', () => {
-  const token =
-    'ojterm_abcdefghijkl_secret0123456789012345678901234567890123456789';
+  const token = 'ojterm_abcdefghijkl_secret0123456789012345678901234567890123456789';
   const action = {
     clientRequestId: 'req-1',
     uid: '04A1B2C3',
@@ -174,10 +173,10 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
   expect(cache.unchanged).toBe(false);
   expect(cache.items.length).toBeLessThanOrEqual(30);
   expect(cache.items.map((item) => item.employeeId)).toContain(employee.id);
-  const unchangedCache = await request.get(
-    `${apiBase}/openjornada/terminal/v1/cache`,
-    { headers: deviceHeaders, params: { revision: cache.revision } },
-  );
+  const unchangedCache = await request.get(`${apiBase}/openjornada/terminal/v1/cache`, {
+    headers: deviceHeaders,
+    params: { revision: cache.revision },
+  });
   expect(unchangedCache.ok(), await unchangedCache.text()).toBeTruthy();
   expect(await unchangedCache.json()).toMatchObject({
     revision: cache.revision,
@@ -266,8 +265,7 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
     token: string;
     idleExpiresAt: string;
   };
-  const adminIdleMs =
-    new Date(adminSession.idleExpiresAt).getTime() - Date.now();
+  const adminIdleMs = new Date(adminSession.idleExpiresAt).getTime() - Date.now();
   expect(adminIdleMs).toBeGreaterThan(290_000);
   expect(adminIdleMs).toBeLessThanOrEqual(300_000);
   const employeesResponse = await request.get(`${apiBase}/openjornada/terminal/v1/employees`, {
@@ -379,11 +377,17 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
   await page.getByRole('button', { name: 'Acercar tag' }).click();
   await expect(page.getByText('En pausa')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Perder red' }).click();
   await page.getByRole('button', { name: 'C', exact: true }).click();
   await expect(page.getByText('¿A qué hora terminaste la pausa?')).toBeVisible();
   await page.getByRole('button', { name: 'B', exact: true }).click();
   await expect(page.getByText('¿Deseas cerrar ahora la jornada?')).toBeVisible();
+  await expect(page.getByText('El fin de pausa está pendiente de sincronizar')).toBeVisible();
   await page.getByRole('button', { name: 'A', exact: true }).click();
+  await page.getByRole('button', { name: 'Recuperar red' }).click();
+  await expect(page.getByText('Terminal conectado')).toBeVisible();
+  await page.getByRole('button', { name: 'Sincronizar' }).click();
+  await expect(page.getByText('Sincronización completada')).toBeVisible();
 
   await page.getByRole('button', { name: 'Acercar tag' }).click();
   await expect(page.getByText('Trabajando')).toBeVisible();
@@ -394,7 +398,7 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
   await page.getByRole('button', { name: 'B', exact: true }).click();
   await expect(page.getByText('¿Deseas cerrar ahora la jornada?')).toBeVisible();
   await page.getByRole('button', { name: 'C', exact: true }).click();
-  await expect(page.getByText('Jornada terminada')).toBeVisible();
+  await expect(page.getByText(/Hasta luego, .* · Jornada finalizada/)).toBeVisible();
 
   const policy = await request.patch(
     `${apiBase}/collections/organizations/records/${admin.record.organization}`,

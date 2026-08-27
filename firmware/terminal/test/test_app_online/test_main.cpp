@@ -389,6 +389,8 @@ void openAdminEmployeeList(Fixture& fixture) {
 void test_idle_clock_in_is_durable_before_network_and_completes() {
   Fixture fixture;
   fixture.scan(work(WorkKind::Idle));
+  TEST_ASSERT_EQUAL_STRING("Comenzar jornada",
+                           fixture.app.screen().buttons.b.c_str());
   fixture.accepted(WorkKind::Working);
   fixture.press(Button::B);
   TEST_ASSERT_EQUAL_UINT32(1, fixture.app.screen().pendingCount);
@@ -397,6 +399,19 @@ void test_idle_clock_in_is_durable_before_network_and_completes() {
   TEST_ASSERT_EQUAL(Command::ClockIn, fixture.api.lastAction.command);
   TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
   TEST_ASSERT_EQUAL(ScreenKind::Message, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("Buenos días, Marina",
+                           fixture.app.screen().title.c_str());
+  TEST_ASSERT_EQUAL_STRING("Jornada iniciada",
+                           fixture.app.screen().detail.c_str());
+}
+
+void test_greetings_follow_the_local_time_of_day() {
+  TEST_ASSERT_EQUAL_STRING("Buenas noches", greetingForLocalHour(5));
+  TEST_ASSERT_EQUAL_STRING("Buenos días", greetingForLocalHour(6));
+  TEST_ASSERT_EQUAL_STRING("Buenos días", greetingForLocalHour(13));
+  TEST_ASSERT_EQUAL_STRING("Buenas tardes", greetingForLocalHour(14));
+  TEST_ASSERT_EQUAL_STRING("Buenas tardes", greetingForLocalHour(20));
+  TEST_ASSERT_EQUAL_STRING("Buenas noches", greetingForLocalHour(21));
 }
 
 void test_pending_network_work_keeps_its_busy_screen_until_result() {
@@ -424,17 +439,20 @@ void test_pending_network_work_keeps_its_busy_screen_until_result() {
 void test_working_buttons_and_long_shift_layout_match_simulator() {
   Fixture fixture;
   fixture.scan(work(WorkKind::Working));
-  TEST_ASSERT_EQUAL_STRING("Pausa", fixture.app.screen().buttons.a.c_str());
+  TEST_ASSERT_EQUAL_STRING("Comenzar pausa",
+                           fixture.app.screen().buttons.a.c_str());
   TEST_ASSERT_TRUE(fixture.app.screen().buttons.b.empty());
-  TEST_ASSERT_EQUAL_STRING("Terminar", fixture.app.screen().buttons.c.c_str());
+  TEST_ASSERT_EQUAL_STRING("Terminar jornada",
+                           fixture.app.screen().buttons.c.c_str());
 
   fixture.tick(10001);
   TEST_ASSERT_EQUAL(ScreenKind::Idle, fixture.app.screen().kind);
   fixture.scan(work(WorkKind::Working, true));
-  TEST_ASSERT_EQUAL_STRING("Pausa", fixture.app.screen().buttons.a.c_str());
+  TEST_ASSERT_EQUAL_STRING("Comenzar pausa",
+                           fixture.app.screen().buttons.a.c_str());
   TEST_ASSERT_EQUAL_STRING("Terminar ahora",
                            fixture.app.screen().buttons.b.c_str());
-  TEST_ASSERT_EQUAL_STRING("Terminé antes",
+  TEST_ASSERT_EQUAL_STRING("Ya terminé antes",
                            fixture.app.screen().buttons.c.c_str());
 
   fixture.tick(10001);
@@ -460,6 +478,10 @@ void test_working_pause_and_clock_out_commands() {
   finish.press(Button::C);
   finish.networkRoundTrip();
   TEST_ASSERT_EQUAL(Command::ClockOut, finish.api.lastAction.command);
+  TEST_ASSERT_EQUAL_STRING("Hasta luego, Marina",
+                           finish.app.screen().title.c_str());
+  TEST_ASSERT_EQUAL_STRING("Jornada finalizada",
+                           finish.app.screen().detail.c_str());
 }
 
 void test_duplicate_and_action_rejection_are_definitive() {
@@ -885,7 +907,8 @@ void test_operational_screens_keep_status_icons_and_button_labels() {
   TEST_ASSERT_TRUE(fixture.app.screen().networkConnected);
   TEST_ASSERT_TRUE(fixture.app.screen().ntpTrusted);
   fixture.scan(work(WorkKind::Idle));
-  TEST_ASSERT_EQUAL_STRING("Comenzar", fixture.app.screen().buttons.b.c_str());
+  TEST_ASSERT_EQUAL_STRING("Comenzar jornada",
+                           fixture.app.screen().buttons.b.c_str());
 }
 
 void test_offline_action_requires_fresh_ntp_and_advances_only_after_append() {
@@ -918,7 +941,8 @@ void test_offline_action_requires_fresh_ntp_and_advances_only_after_append() {
   scan.uid = "04AABBCC";
   fixture.app.tick(scan);
   TEST_ASSERT_EQUAL(ScreenKind::Actions, fixture.app.screen().kind);
-  TEST_ASSERT_EQUAL_STRING("Pausa", fixture.app.screen().buttons.a.c_str());
+  TEST_ASSERT_EQUAL_STRING("Comenzar pausa",
+                           fixture.app.screen().buttons.a.c_str());
 }
 
 void test_offline_confirmation_rechecks_clock_trust_after_scan() {
@@ -1567,6 +1591,7 @@ void test_late_employee_response_cannot_restore_an_expired_admin_session() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_idle_clock_in_is_durable_before_network_and_completes);
+  RUN_TEST(test_greetings_follow_the_local_time_of_day);
   RUN_TEST(test_pending_network_work_keeps_its_busy_screen_until_result);
   RUN_TEST(test_working_buttons_and_long_shift_layout_match_simulator);
   RUN_TEST(test_working_pause_and_clock_out_commands);

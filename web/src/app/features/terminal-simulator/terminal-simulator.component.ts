@@ -9,7 +9,9 @@ import {
 } from '../../core/terminal.models';
 import { TerminalService } from '../../core/terminal.service';
 import {
+  actionConfirmation,
   adjustedTime,
+  hourInTimezone,
   offlineClockTrusted,
   pinDigit,
   refreshedLocalState,
@@ -53,6 +55,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
   protected readonly selectedTime = signal(new Date());
   protected readonly pickerCommand = signal<TerminalCommand>('clock_out');
   protected readonly pickerClosesBreak = signal(false);
+  protected readonly closeBreakPendingSync = signal(false);
   protected readonly pinDigits = signal([0, 0, 0, 0]);
   protected readonly pinIndex = signal(0);
   protected readonly adminSession = signal('');
@@ -71,15 +74,13 @@ export class TerminalSimulatorComponent implements OnDestroy {
   protected readonly currentEmployee = computed(
     () => this.adminEmployees()[this.adminEmployeeIndex()],
   );
-  protected readonly clockTrusted = computed(() =>
-    offlineClockTrusted(this.lastNtpAt, this.now(), this.rebooted),
-  );
   protected token = '';
   protected uid = '';
   protected clientVersion = 'simulator-1.0.0';
   protected nowOffsetMs = 0;
   private sequence = 0;
   private terminalId = '';
+  private terminalTimezone = 'Europe/Madrid';
   private rebootId = crypto.randomUUID();
   private lastNtpAt: Date | null = null;
   private rebooted = false;
@@ -103,10 +104,16 @@ export class TerminalSimulatorComponent implements OnDestroy {
     return new Date(Date.now() + this.nowOffsetMs);
   }
 
+  protected clockTrusted(): boolean {
+    return offlineClockTrusted(this.lastNtpAt, this.now(), this.rebooted);
+  }
+
   protected formattedTime(): string {
-    return new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(
-      this.now(),
-    );
+    return new Intl.DateTimeFormat('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: this.terminalTimezone,
+    }).format(this.now());
   }
 
   protected formattedSelectedTime(): string {
@@ -115,6 +122,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
       month: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: this.terminalTimezone,
     }).format(this.selectedTime());
   }
 
@@ -129,6 +137,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
       });
       this.connected.set(true);
       this.terminalId = response.terminal.id;
+      this.terminalTimezone = response.timezone;
       this.lastNtpAt = new Date(response.serverTime);
       this.rebooted = false;
       this.cacheRevision.set(response.cacheRevision);
@@ -195,10 +204,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
         const session = this.adminSession();
         this.clearAdminMode();
         if (session && this.online()) void this.closeAdminCapability(session);
-        this.showMessage(
-          this.errorMessage(error, 'No se pudo asignar el tag'),
-          5_000,
-        );
+        this.showMessage(this.errorMessage(error, 'No se pudo asignar el tag'), 5_000);
       } else if (adminGeneration === null) {
         this.showMessage(
           this.errorMessage(error, 'Tag no asignado; avisa a un responsable'),
@@ -216,11 +222,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
     const next = new Set(this.heldButtons());
     next.add(button);
     this.heldButtons.set(next);
-    if (
-      next.has('A') &&
-      next.has('C') &&
-      (this.screen() === 'idle' || this.adminModeActive())
-    ) {
+    if (next.has('A') && next.has('C') && (this.screen() === 'idle' || this.adminModeActive())) {
       this.startAdminHold();
     }
   }
@@ -334,6 +336,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
     clearTimeout(this.actionTimer);
     this.pickerCommand.set(command);
     this.pickerClosesBreak.set(closesBreak);
+    this.closeBreakPendingSync.set(false);
     this.selectedTime.set(this.now());
     this.screen.set('time-picker');
   }
@@ -357,6 +360,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
     this.busy.set(true);
     const capturedAt = this.now().toISOString();
     const requestId = `${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    let pendingSync = false;
     try {
       if (this.online()) {
         const result = await this.terminals.performAction(this.token, {
@@ -391,6 +395,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
         };
         queued.signature = await this.signQueuedAction(queued);
         this.queue.update((items) => [...items, queued]);
+        pendingSync = true;
         resolved.state = this.advanceLocalState(resolved.state, command);
         this.cache.update((items) =>
           items.map((item) =>
@@ -398,7 +403,15 @@ export class TerminalSimulatorComponent implements OnDestroy {
           ),
         );
       }
-      if (returnToIdle) this.showMessage(this.actionMessage(command), 2_500);
+      if (returnToIdle) {
+        const confirmation = this.actionMessage(command);
+        this.showMessage(
+          pendingSync ? `${confirmation} · Guardado; se sincronizará` : confirmation,
+          pendingSync ? 5_000 : 2_500,
+        );
+      } else if (command === 'break_end') {
+        this.closeBreakPendingSync.set(pendingSync);
+      }
       return true;
     } catch (error) {
       this.showMessage(this.errorMessage(error, 'No se pudo registrar la acción'), 5_000);
@@ -564,6 +577,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
 
   private returnToIdle(): void {
     clearTimeout(this.actionTimer);
+    this.closeBreakPendingSync.set(false);
     this.resolved.set(null);
     this.screen.set('idle');
   }
@@ -590,12 +604,11 @@ export class TerminalSimulatorComponent implements OnDestroy {
   }
 
   private actionMessage(command: TerminalCommand): string {
-    return {
-      clock_in: 'Jornada iniciada',
-      break_start: 'Pausa iniciada',
-      break_end: 'Pausa terminada',
-      clock_out: 'Jornada terminada',
-    }[command];
+    return actionConfirmation(
+      command,
+      this.resolved()?.employee.displayName ?? '',
+      hourInTimezone(this.now(), this.terminalTimezone),
+    );
   }
 
   private normalizeUid(uid: string): string {

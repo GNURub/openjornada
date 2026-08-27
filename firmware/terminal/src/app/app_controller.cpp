@@ -10,6 +10,14 @@
 #include "openjornada/signature.hpp"
 
 namespace openjornada {
+
+const char* greetingForLocalHour(int hour) {
+  if (hour < 0 || hour > 23) return "Hola";
+  if (hour >= 6 && hour < 14) return "Buenos días";
+  if (hour >= 14 && hour < 21) return "Buenas tardes";
+  return "Buenas noches";
+}
+
 namespace {
 
 constexpr char kAdminExitHint[] = "Mantén A+C 3 s para salir";
@@ -29,9 +37,21 @@ const char* actionSuccessMessage(Command command) {
     case Command::ClockIn: return "Jornada iniciada";
     case Command::BreakStart: return "Pausa iniciada";
     case Command::BreakEnd: return "Pausa terminada";
-    case Command::ClockOut: return "Jornada terminada";
+    case Command::ClockOut: return "Jornada finalizada";
   }
   return "Fichaje registrado";
+}
+
+const char* greetingFor(int64_t epochSeconds) {
+  if (epochSeconds <= 0) return "Hola";
+  const std::time_t raw = static_cast<std::time_t>(epochSeconds);
+  std::tm local{};
+#ifdef _WIN32
+  if (localtime_s(&local, &raw) != 0) return "Hola";
+#else
+  if (localtime_r(&raw, &local) == nullptr) return "Hola";
+#endif
+  return greetingForLocalHour(local.tm_hour);
 }
 
 bool decimal(std::string_view value, size_t offset, size_t length,
@@ -1173,8 +1193,9 @@ void AppController::executeAction(Command command, const AppEvent& event,
       feedback_ = AppFeedback::Success;
       return;
     }
+    showActionMessage(command, "Guardado; se sincronizará", event,
+                      kMessageMs);
     clearActiveActionTracking();
-    showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
     feedback_ = AppFeedback::Success;
     return;
   }
@@ -1199,7 +1220,8 @@ void AppController::handleActionResult(NetworkResult&& result,
     if (activeActionClosesBreak_) {
       showQueuedCloseConfirm(event.nowMs);
     } else {
-      showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
+      showActionMessage(activeActionCommand_, "Guardado; se sincronizará",
+                        event, kMessageMs);
     }
     clearActiveActionTracking();
     feedback_ = AppFeedback::Success;
@@ -1210,7 +1232,8 @@ void AppController::handleActionResult(NetworkResult&& result,
     if (activeActionClosesBreak_) {
       showQueuedCloseConfirm(event.nowMs);
     } else {
-      showMessage("Guardado; se sincronizará", event.nowMs, kMessageMs);
+      showActionMessage(activeActionCommand_, "Guardado; se sincronizará",
+                        event, kMessageMs);
     }
     clearActiveActionTracking();
     feedback_ = AppFeedback::Success;
@@ -1292,10 +1315,24 @@ void AppController::handleActionResult(NetworkResult&& result,
     feedback_ = AppFeedback::Success;
     return;
   }
-  showMessage(actionSuccessMessage(activeActionCommand_),
-              event.nowMs, kSuccessMessageMs);
+  showActionMessage(activeActionCommand_,
+                    actionSuccessMessage(activeActionCommand_), event,
+                    kSuccessMessageMs);
   clearActiveActionTracking();
   feedback_ = AppFeedback::Success;
+}
+
+void AppController::showActionMessage(Command command, std::string detail,
+                                      const AppEvent& event,
+                                      uint32_t durationMs) {
+  showMessage(std::move(detail), event.nowMs, durationMs);
+  if (!resolved_.has_value() || resolved_->employee.displayName.empty()) return;
+  if (command == Command::ClockIn) {
+    screen_.title = std::string(greetingFor(event.nowEpochSeconds)) + ", " +
+                    resolved_->employee.displayName;
+  } else if (command == Command::ClockOut) {
+    screen_.title = "Hasta luego, " + resolved_->employee.displayName;
+  }
 }
 
 void AppController::showMessage(std::string detail, uint32_t nowMs,
@@ -1524,17 +1561,17 @@ void AppController::setActionButtons() {
   screen_.buttons = {};
   const auto& state = resolved_->state;
   if (state.kind == WorkKind::Idle) {
-    screen_.buttons.b = "Comenzar";
+    screen_.buttons.b = "Comenzar jornada";
   } else if (state.kind == WorkKind::OnBreak) {
-    screen_.buttons.a = "Fin pausa";
+    screen_.buttons.a = "Terminar pausa";
     screen_.buttons.c = "Acabar jornada";
   } else if (state.longShift) {
-    screen_.buttons.a = "Pausa";
+    screen_.buttons.a = "Comenzar pausa";
     screen_.buttons.b = "Terminar ahora";
-    screen_.buttons.c = "Terminé antes";
+    screen_.buttons.c = "Ya terminé antes";
   } else {
-    screen_.buttons.a = "Pausa";
-    screen_.buttons.c = "Terminar";
+    screen_.buttons.a = "Comenzar pausa";
+    screen_.buttons.c = "Terminar jornada";
   }
 }
 

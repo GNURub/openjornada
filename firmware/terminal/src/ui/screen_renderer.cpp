@@ -95,6 +95,32 @@ void drawButtons(const ScreenButtons& buttons) {
   }
 }
 
+void drawActionChoices(const ScreenButtons& buttons, bool warning) {
+  auto& display = M5.Display;
+  const std::array<std::string, 3> labels{buttons.a, buttons.b, buttons.c};
+  constexpr std::array<char, 3> names{'A', 'B', 'C'};
+  size_t count = 0;
+  for (const auto& label : labels) {
+    if (!label.empty()) ++count;
+  }
+  if (count == 0) return;
+
+  const int startY = count == 1 ? 133 : (count == 2 ? 116 : 103);
+  const int step = count == 3 ? 30 : 36;
+  const int textSize = count == 1 ? 2 : 1;
+  display.setTextDatum(middle_center);
+  display.setTextSize(textSize);
+  size_t visibleIndex = 0;
+  for (size_t index = 0; index < labels.size(); ++index) {
+    if (labels[index].empty()) continue;
+    const std::string choice = std::string(1, names[index]) + ". " + labels[index];
+    display.setTextColor(warning && names[index] == 'C' ? TFT_ORANGE : TFT_CYAN,
+                         TFT_BLACK);
+    display.drawString(fitted(choice, 296).c_str(), 160,
+                       startY + static_cast<int>(visibleIndex++) * step);
+  }
+}
+
 void drawTwoLineDetail(const std::string& detail, uint16_t color, int y) {
   auto& display = M5.Display;
   display.setTextDatum(top_left);
@@ -155,6 +181,10 @@ void ScreenRenderer::render(const ScreenState& state,
                        160, 142);
     display.setTextColor(TFT_CYAN, TFT_BLACK);
     display.drawString(fitted(state.detail, 296).c_str(), 160, 170);
+  } else if (state.kind == ScreenKind::Actions) {
+    drawTwoLineDetail(state.detail,
+                      state.warning ? TFT_ORANGE : TFT_WHITE, 76);
+    drawActionChoices(state.buttons, state.warning);
   } else {
     if (!state.employee.empty() && state.employee != state.title) {
       display.setTextSize(1);

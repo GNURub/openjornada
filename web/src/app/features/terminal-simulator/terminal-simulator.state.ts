@@ -1,4 +1,4 @@
-import { TerminalWorkState } from '../../core/terminal.models';
+import { TerminalCommand, TerminalWorkState } from '../../core/terminal.models';
 
 export type SimulatorButton = 'A' | 'B' | 'C';
 
@@ -10,11 +10,41 @@ export function adjustedTime(current: Date, button: 'A' | 'C', held = false): Da
 export function visibleButtonLabels(
   state: TerminalWorkState,
 ): Partial<Record<SimulatorButton, string>> {
-  if (state.kind === 'idle') return { B: 'Comenzar' };
-  if (state.kind === 'on_break') return { A: 'Fin pausa', C: 'Acabar' };
+  if (state.kind === 'idle') return { B: 'Comenzar jornada' };
+  if (state.kind === 'on_break') return { A: 'Terminar pausa', C: 'Acabar jornada' };
   return state.longShift
-    ? { A: 'Pausa', B: 'Terminar', C: 'Antes' }
-    : { A: 'Pausa', C: 'Terminar' };
+    ? { A: 'Comenzar pausa', B: 'Terminar ahora', C: 'Ya terminé antes' }
+    : { A: 'Comenzar pausa', C: 'Terminar jornada' };
+}
+
+export function timeGreeting(hour: number): string {
+  if (hour >= 6 && hour < 14) return 'Buenos días';
+  if (hour >= 14 && hour < 21) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+export function hourInTimezone(value: Date, timezone: string): number {
+  try {
+    return Number(
+      new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        hourCycle: 'h23',
+        timeZone: timezone,
+      }).format(value),
+    );
+  } catch {
+    return value.getHours();
+  }
+}
+
+export function actionConfirmation(
+  command: TerminalCommand,
+  employee: string,
+  localHour: number,
+): string {
+  if (command === 'clock_in') return `${timeGreeting(localHour)}, ${employee} · Jornada iniciada`;
+  if (command === 'clock_out') return `Hasta luego, ${employee} · Jornada finalizada`;
+  return command === 'break_start' ? 'Pausa iniciada' : 'Pausa terminada';
 }
 
 export function pinDigit(value: number, button: 'A' | 'C'): number {

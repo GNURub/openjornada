@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  actionConfirmation,
   adjustedTime,
+  hourInTimezone,
   offlineClockTrusted,
   pinDigit,
   refreshedLocalState,
@@ -30,7 +32,32 @@ describe('M5Stack simulator controls', () => {
         staleBreak: false,
         actions: [],
       }),
-    ).toEqual({ A: 'Pausa', B: 'Terminar', C: 'Antes' });
+    ).toEqual({
+      A: 'Comenzar pausa',
+      B: 'Terminar ahora',
+      C: 'Ya terminé antes',
+    });
+  });
+
+  it('personalizes clock-in and clock-out confirmations', () => {
+    expect(actionConfirmation('clock_in', 'Marina', 8)).toBe(
+      'Buenos días, Marina · Jornada iniciada',
+    );
+    expect(actionConfirmation('clock_in', 'Marina', 16)).toBe(
+      'Buenas tardes, Marina · Jornada iniciada',
+    );
+    expect(actionConfirmation('clock_in', 'Marina', 23)).toBe(
+      'Buenas noches, Marina · Jornada iniciada',
+    );
+    expect(actionConfirmation('clock_out', 'Marina', 23)).toBe(
+      'Hasta luego, Marina · Jornada finalizada',
+    );
+  });
+
+  it('uses the terminal timezone for greeting boundaries', () => {
+    const instant = new Date('2026-08-27T12:00:00.000Z');
+    expect(hourInTimezone(instant, 'Europe/Madrid')).toBe(14);
+    expect(hourInTimezone(instant, 'Atlantic/Canary')).toBe(13);
   });
 
   it('expires offline clock trust at 24 hours and after reboot', () => {
