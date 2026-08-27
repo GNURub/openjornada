@@ -62,7 +62,9 @@ offline.
 
 El inventario de terminales RFID se pagina en el servidor de diez en diez y se
 ordena por estado y fecha de creación: activos primero y, dentro de cada estado,
-los más recientes primero.
+los más recientes primero. Su API key no caduca y continúa activa hasta rotarla
+o revocar el terminal. Integraciones separa visualmente estas credenciales
+permanentes de los tokens MCP, que sí requieren fecha de caducidad.
 
 Cada terminal activo envía telemetría operativa mediante un heartbeat
 silencioso cada 15 segundos desde un worker aislado del fichaje y de su cola

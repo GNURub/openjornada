@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -278,6 +278,7 @@ function terminalRecord(id: string, token?: string): TerminalRecord {
 }
 
 describe('IntegrationsComponent terminal credential lifecycle', () => {
+  let authUser: WritableSignal<{ role: string }>;
   let createTerminal: ReturnType<typeof vi.fn>;
   let listTerminals: ReturnType<typeof vi.fn>;
   let rotateTerminalKey: ReturnType<typeof vi.fn>;
@@ -288,6 +289,7 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
 
   beforeEach(async () => {
     vi.useFakeTimers();
+    authUser = signal({ role: 'admin' });
     createTerminal = vi.fn();
     listTerminals = vi.fn().mockResolvedValue({
       items: [terminalRecord('terminal-1')],
@@ -303,7 +305,7 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
     await TestBed.configureTestingModule({
       imports: [IntegrationsComponent],
       providers: [
-        { provide: AuthService, useValue: { user: signal({ role: 'admin' }) } },
+        { provide: AuthService, useValue: { user: authUser } },
         {
           provide: PocketBaseService,
           useValue: { client: { send: vi.fn().mockResolvedValue({ items: [], mcpUrl: '' }) } },
@@ -330,6 +332,42 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
     fixture.destroy();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('clearly separates permanent terminal keys from expiring MCP tokens', () => {
+    const host = fixture.nativeElement as HTMLElement;
+    const terminalSection = host.querySelector<HTMLElement>(
+      '[data-testid="rfid-terminal-section"]',
+    );
+    const mcpSection = host.querySelector<HTMLElement>('[data-testid="mcp-access-section"]');
+
+    expect(terminalSection).not.toBeNull();
+    expect(terminalSection?.textContent).toContain(
+      'La API key no caduca. Permanece activa hasta que administración la rote o revoque el terminal.',
+    );
+    expect(terminalSection?.textContent).toContain('Crear terminal y generar API key');
+    expect(terminalSection?.textContent).not.toContain('Caduca el');
+
+    expect(mcpSection).not.toBeNull();
+    expect(mcpSection?.textContent).toContain('Acceso MCP / Codex');
+    expect(mcpSection?.textContent).toContain('Nuevo token MCP');
+    expect(mcpSection?.textContent).toContain('Caduca el');
+    expect(mcpSection?.querySelector<HTMLInputElement>('input[name="expiresOn"]')?.required).toBe(
+      true,
+    );
+  });
+
+  it('describes who can revoke a permanent key when rendered for a manager', () => {
+    authUser.set({ role: 'manager' });
+    fixture.detectChanges();
+    const terminalSection = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
+      '[data-testid="rfid-terminal-section"]',
+    );
+
+    expect(terminalSection?.textContent).toContain(
+      'Permanece activa hasta que administración la rote o revoque el terminal.',
+    );
+    expect(terminalSection?.textContent).not.toContain('Crear terminal y generar API key');
   });
 
   it('refreshes the current terminal page silently every thirty seconds', async () => {

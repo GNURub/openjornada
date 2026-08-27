@@ -66,7 +66,10 @@ el servidor, derivada de `PB_PUBLIC_URL`.
 La sección **Integraciones → Terminales RFID** permite a `admin` crear, rotar y
 revocar una credencial por dispositivo y configurar el PIN empresarial. Los
 perfiles `admin` y `manager` consultan los terminales; sólo administración ve o
-cambia secretos. El listado carga diez dispositivos por página, con activos
+cambia secretos. La API key del dispositivo no caduca: permanece activa hasta
+que administración la rota o revoca el terminal. La interfaz separa estas keys
+permanentes de los tokens MCP, que sí exigen una fecha de caducidad. El listado
+carga diez dispositivos por página, con activos
 primero y fecha de creación descendente dentro de cada estado. En `/equipo`
 ambos perfiles pueden comprobar si una persona
 tiene tag, asignar uno, sustituirlo o revocarlo. El UID se envía una vez y no se
