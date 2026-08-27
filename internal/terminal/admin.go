@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -20,6 +21,8 @@ const terminalListPageSize = 10
 const terminalListSort = "-created,-id"
 
 const terminalOnlineWindow = 45 * time.Second
+
+const terminalPingTimeout = 20 * time.Second
 
 type terminalView struct {
 	ID                   string `json:"id"`
@@ -235,9 +238,21 @@ func (s *Service) createTerminal(e *core.RequestEvent) error {
 }
 
 func (s *Service) findOwnedTerminal(e *core.RequestEvent) (*core.Record, error) {
-	record, err := e.App.FindRecordById("attendance_terminals", e.Request.PathValue("id"))
-	if err != nil || record.GetString("organization") != e.Auth.GetString("organization") {
+	record, err := findTerminalForOrganization(e.App, e.Request.PathValue("id"), e.Auth.GetString("organization"))
+	if err != nil {
 		return nil, e.NotFoundError("No se ha encontrado el terminal.", err)
+	}
+	return record, nil
+}
+
+func findTerminalForOrganization(app core.App, terminalID, organizationID string) (*core.Record, error) {
+	record, err := app.FindFirstRecordByFilter(
+		"attendance_terminals",
+		"id = {:id} && organization = {:organization}",
+		map[string]any{"id": terminalID, "organization": organizationID},
+	)
+	if err != nil {
+		return nil, err
 	}
 	return record, nil
 }
@@ -301,11 +316,102 @@ func (s *Service) revokeTerminal(e *core.RequestEvent) error {
 	}
 	if record.GetString("revokedAt") == "" {
 		record.Set("revokedAt", time.Now())
-		if err := e.App.Save(record); err != nil {
+		if err := s.pings.cancelTerminalAfter(record.Id, errTerminalRevoked, func() error {
+			return e.App.Save(record)
+		}); err != nil {
 			return e.InternalServerError("No se pudo revocar el terminal.", err)
 		}
 	}
 	return e.JSON(http.StatusOK, terminalRecordView(record, ""))
+}
+
+func (s *Service) pingTerminal(e *core.RequestEvent) error {
+	if err := requireRFIDManager(e.Auth); err != nil {
+		return e.ForbiddenError(err.Error(), nil)
+	}
+	record, err := s.findOwnedTerminal(e)
+	if err != nil {
+		return err
+	}
+	if record.GetString("revokedAt") != "" {
+		return apiError(e, http.StatusConflict, "terminal_revoked", "El terminal está revocado.")
+	}
+
+	startedAt := time.Now()
+	waiter, err := s.beginTerminalPing(record, e.Auth.GetString("organization"), startedAt)
+	if errors.Is(err, errPingInProgress) {
+		return apiError(e, http.StatusConflict, "ping_in_progress", "Ya hay una comprobación en curso para este terminal.")
+	}
+	if errors.Is(err, errTerminalRevoked) {
+		return apiError(e, http.StatusConflict, "terminal_revoked", "El terminal está revocado.")
+	}
+	if err != nil {
+		return e.InternalServerError("No se pudo iniciar la comprobación del terminal.", err)
+	}
+
+	remaining := time.Until(startedAt.Add(s.pingTimeout))
+	if remaining <= 0 {
+		if s.pings.cancel(record.Id, waiter.Challenge, errPingExpired) {
+			return apiError(e, http.StatusGatewayTimeout, "terminal_ping_timeout", "El terminal no respondió.")
+		}
+		return pingCompletionResponse(e, record.Id, <-waiter.Completion)
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case completion := <-waiter.Completion:
+		return pingCompletionResponse(e, record.Id, completion)
+	case <-timer.C:
+		if s.pings.cancel(record.Id, waiter.Challenge, errPingExpired) {
+			return apiError(e, http.StatusGatewayTimeout, "terminal_ping_timeout", "El terminal no respondió.")
+		}
+		return pingCompletionResponse(e, record.Id, <-waiter.Completion)
+	case <-e.Request.Context().Done():
+		cause := e.Request.Context().Err()
+		s.pings.cancel(record.Id, waiter.Challenge, cause)
+		return cause
+	}
+}
+
+func (s *Service) beginTerminalPing(record *core.Record, organizationID string, startedAt time.Time) (pingWaiter, error) {
+	waiter, err := s.pings.begin(record.Id, startedAt)
+	if err != nil {
+		return pingWaiter{}, err
+	}
+	current, err := findTerminalForOrganization(s.app, record.Id, organizationID)
+	if err != nil {
+		s.pings.cancel(record.Id, waiter.Challenge, err)
+		return pingWaiter{}, err
+	}
+	if current.GetString("revokedAt") != "" {
+		s.pings.cancel(record.Id, waiter.Challenge, errTerminalRevoked)
+		return pingWaiter{}, errTerminalRevoked
+	}
+	return waiter, nil
+}
+
+func pingCompletionResponse(e *core.RequestEvent, terminalID string, completion pingCompletion) error {
+	if errors.Is(completion.Err, errTerminalRevoked) {
+		return apiError(e, http.StatusConflict, "terminal_revoked", "El terminal está revocado.")
+	}
+	if errors.Is(completion.Err, errPingExpired) {
+		return apiError(e, http.StatusGatewayTimeout, "terminal_ping_timeout", "El terminal no respondió.")
+	}
+	if completion.Err != nil {
+		return e.InternalServerError("No se pudo comprobar la conexión del terminal.", completion.Err)
+	}
+	result := completion.Result
+	return e.JSON(http.StatusOK, map[string]any{
+		"terminalId":         terminalID,
+		"localIp":            result.LocalIP,
+		"publicIp":           result.PublicIP,
+		"wifiRssiDbm":        result.WifiRSSIDbm,
+		"uptimeSeconds":      result.UptimeSeconds,
+		"waitForHeartbeatMs": result.WaitForHeartbeatMs,
+		"responseMs":         result.ResponseMs,
+		"totalLatencyMs":     result.TotalLatencyMs,
+		"checkedAt":          result.CheckedAt.UTC().Format(time.RFC3339Nano),
+	})
 }
 
 func (s *Service) updateAdminPIN(e *core.RequestEvent) error {

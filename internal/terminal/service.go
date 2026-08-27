@@ -25,6 +25,8 @@ type Service struct {
 	app              core.App
 	demoEnabled      bool
 	allowPrivateHTTP bool
+	pings            *pingBroker
+	pingTimeout      time.Duration
 }
 
 type terminalPrincipal struct {
@@ -38,6 +40,8 @@ func New(app core.App) *Service {
 		app:              app,
 		demoEnabled:      enabledEnvironmentVariable("PB_DEMO_ENABLED"),
 		allowPrivateHTTP: enabledEnvironmentVariable("PB_TERMINAL_DEV_INSECURE_HTTP"),
+		pings:            newPingBroker(terminalPingTimeout),
+		pingTimeout:      terminalPingTimeout,
 	}
 }
 
@@ -51,6 +55,7 @@ func (s *Service) Register(e *core.ServeEvent) {
 	e.Router.PATCH("/api/openjornada/terminals/{id}", s.renameTerminal).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
 	e.Router.POST("/api/openjornada/terminals/{id}/rotate-key", s.rotateTerminalKey).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
 	e.Router.POST("/api/openjornada/terminals/{id}/revoke", s.revokeTerminal).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
+	e.Router.POST("/api/openjornada/terminals/{id}/ping", s.pingTerminal).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
 	e.Router.PUT("/api/openjornada/terminals/admin-pin", s.updateAdminPIN).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
 	e.Router.GET("/api/openjornada/rfid-employees", s.listRFIDEmployees).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
 	e.Router.PUT("/api/openjornada/employees/{id}/rfid", s.assignRFIDWeb).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
@@ -59,6 +64,8 @@ func (s *Service) Register(e *core.ServeEvent) {
 	e.Router.POST("/api/openjornada/terminal-incidents/{id}/resolve", s.resolveIncident).Bind(apis.RequireAuth("users"), apis.SkipSuccessActivityLog())
 
 	e.Router.POST("/api/openjornada/terminal/v1/bootstrap", s.bootstrap).Bind(apis.SkipSuccessActivityLog())
+	e.Router.POST("/api/openjornada/terminal/v1/heartbeat", s.heartbeat).Bind(apis.SkipSuccessActivityLog())
+	e.Router.POST("/api/openjornada/terminal/v1/ping-ack", s.ackPing).Bind(apis.SkipSuccessActivityLog())
 	e.Router.POST("/api/openjornada/terminal/v1/admin-sessions", s.createAdminSession).Bind(apis.SkipSuccessActivityLog())
 	e.Router.DELETE("/api/openjornada/terminal/v1/admin-sessions/current", s.closeAdminSession).Bind(apis.SkipSuccessActivityLog())
 	e.Router.GET("/api/openjornada/terminal/v1/employees", s.listDeviceEmployees).Bind(apis.SkipSuccessActivityLog())

@@ -1,10 +1,15 @@
 package terminal
 
 import (
+	"errors"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 func telemetryTerminalRecord(t *testing.T, heartbeat, revoked string) *core.Record {
@@ -101,5 +106,257 @@ func TestTerminalRecordViewNumericTelemetryRequiresHeartbeat(t *testing.T) {
 	view = terminalRecordViewAt(withHeartbeat, "", now)
 	if view.LastWifiRssiDbm == nil || *view.LastWifiRssiDbm != 0 || view.LastUptimeSeconds == nil || *view.LastUptimeSeconds != 0 {
 		t.Fatalf("zero numeric telemetry after heartbeat must be preserved: %#v", view)
+	}
+}
+
+func TestHeartbeatRequestValidation(t *testing.T) {
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	valid := heartbeatRequest{ProtocolVersion: 1, ClientVersion: "m5stack-1.1.0", CacheRevision: 2, PendingCount: 0, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z"}
+	if err := valid.validate(now); err != nil {
+		t.Fatal(err)
+	}
+	maximumCacheRevision := valid
+	maximumCacheRevision.CacheRevision = int(maxTerminalCacheRevision)
+	if err := maximumCacheRevision.validate(now); err != nil {
+		t.Fatalf("maximum cache revision rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*heartbeatRequest){
+		"protocol":       func(v *heartbeatRequest) { v.ProtocolVersion = 2 },
+		"client empty":   func(v *heartbeatRequest) { v.ClientVersion = " " },
+		"client long":    func(v *heartbeatRequest) { v.ClientVersion = "12345678901234567890123456789012345678901" },
+		"cache negative": func(v *heartbeatRequest) { v.CacheRevision = -1 },
+		"cache too high": func(v *heartbeatRequest) { v.CacheRevision = int(maxTerminalCacheRevision) + 1 },
+		"pending":        func(v *heartbeatRequest) { v.PendingCount = 10001 },
+		"rssi":           func(v *heartbeatRequest) { v.WifiRSSIDbm = 1 },
+		"uptime":         func(v *heartbeatRequest) { v.UptimeSeconds = 4294967296 },
+		"clock":          func(v *heartbeatRequest) { v.ClockStatus = "invented" },
+		"ntp missing":    func(v *heartbeatRequest) { v.LastNtpSyncAt = "" },
+		"ntp future":     func(v *heartbeatRequest) { v.LastNtpSyncAt = now.Add(6 * time.Minute).Format(time.RFC3339) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := valid
+			mutate(&candidate)
+			if candidate.validate(now) == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	unsynced := valid
+	unsynced.ClockStatus = "unsynced"
+	unsynced.LastNtpSyncAt = ""
+	if err := unsynced.validate(now); err != nil {
+		t.Fatalf("valid unsynced request: %v", err)
+	}
+	unsynced.LastNtpSyncAt = valid.LastNtpSyncAt
+	if err := unsynced.validate(now); err == nil {
+		t.Fatal("unsynced request must not contain NTP evidence")
+	}
+}
+
+func TestObservedPingPublicIP(t *testing.T) {
+	for _, test := range []struct {
+		name, remoteAddr, forwardedProto, forwardedFor, want string
+		wantErr                                              bool
+	}{
+		{name: "direct connection", remoteAddr: "198.51.100.10:43110", want: "198.51.100.10"},
+		{name: "direct private connection", remoteAddr: "192.168.1.20:43110", want: "192.168.1.20"},
+		{name: "private HTTPS proxy", remoteAddr: "10.0.0.5:43110", forwardedProto: "https", forwardedFor: "198.51.100.44", want: "198.51.100.44"},
+		{name: "rightmost valid forwarded IP", remoteAddr: "127.0.0.1:43110", forwardedProto: "https", forwardedFor: "198.51.100.44, invalid", want: "198.51.100.44"},
+		{name: "spoof from public peer", remoteAddr: "203.0.113.9:43110", forwardedProto: "https", forwardedFor: "198.51.100.44", want: "203.0.113.9"},
+		{name: "invalid forwarded values", remoteAddr: "10.0.0.5:43110", forwardedProto: "https", forwardedFor: "invalid, also-invalid", want: "10.0.0.5"},
+		{name: "first forwarded protocol must be HTTPS", remoteAddr: "10.0.0.5:43110", forwardedProto: "http, https", forwardedFor: "198.51.100.44", want: "10.0.0.5"},
+		{name: "invalid remote address", remoteAddr: "invalid", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest("POST", "http://127.0.0.1/api/openjornada/terminal/v1/ping-ack", nil)
+			request.RemoteAddr = test.remoteAddr
+			request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
+			request.Header.Set("X-Forwarded-For", test.forwardedFor)
+			event := &core.RequestEvent{Event: router.Event{Request: request}}
+			got, err := observedPingPublicIP(event)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("observedPingPublicIP() = %q, expected error", got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("observedPingPublicIP() = (%q, %v), want %q", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalIP(t *testing.T) {
+	for _, test := range []struct {
+		name, input, want string
+		valid             bool
+	}{
+		{name: "IPv4", input: "192.168.001.44", valid: false},
+		{name: "canonical IPv4", input: "192.168.1.44", want: "192.168.1.44", valid: true},
+		{name: "IPv6", input: "2001:0db8:0000:0000:0000:0000:0000:0001", want: "2001:db8::1", valid: true},
+		{name: "invalid", input: "not-an-ip", valid: false},
+		{name: "oversized", input: "2001:db8::1                                      ", valid: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := canonicalIP(test.input)
+			if test.valid && (err != nil || got != test.want) {
+				t.Fatalf("canonicalIP() = (%q, %v), want %q", got, err, test.want)
+			}
+			if !test.valid && err == nil {
+				t.Fatalf("canonicalIP() = %q, expected error", got)
+			}
+		})
+	}
+}
+
+func TestApplyHeartbeatWritesOnlyApprovedFields(t *testing.T) {
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	record := telemetryTerminalRecord(t, "", "")
+	request := heartbeatRequest{ProtocolVersion: 1, ClientVersion: "m5stack-1.1.0", CacheRevision: 2, PendingCount: 3, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z"}
+	applyHeartbeat(record, request, now)
+
+	want := map[string]any{
+		"protocolVersion": 1, "clientVersion": "m5stack-1.1.0", "cacheRevision": 2, "lastPendingCount": 3,
+		"lastSeenAt": now, "lastHeartbeatAt": now, "lastClockStatus": "synced", "lastNtpSyncAt": time.Date(2026, 8, 27, 11, 59, 0, 0, time.UTC),
+		"lastWifiRssiDbm": -61, "lastUptimeSeconds": 90,
+	}
+	for field, expected := range want {
+		var got any
+		switch expected.(type) {
+		case time.Time:
+			got = record.GetDateTime(field).Time()
+		case int:
+			got = record.GetInt(field)
+		default:
+			got = record.GetString(field)
+		}
+		if !reflect.DeepEqual(got, expected) {
+			t.Errorf("field %s = %#v, want %#v", field, got, expected)
+		}
+	}
+	for _, forbidden := range []string{"ip", "localIp", "publicIp"} {
+		if record.Collection().Fields.GetByName(forbidden) != nil {
+			t.Fatalf("heartbeat record must not define %q", forbidden)
+		}
+	}
+}
+
+func TestPersistHeartbeatRejectsRevocationAfterAuthentication(t *testing.T) {
+	app, terminal := persistedTelemetryTerminal(t)
+	defer app.Cleanup()
+
+	// This record represents the principal loaded while authentication still
+	// considered the terminal active.
+	authenticatedBeforeRevocation, err := app.FindRecordById("attendance_terminals", terminal.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := app.FindRecordById("attendance_terminals", terminal.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revokedAt := time.Date(2026, 8, 27, 11, 59, 59, 0, time.UTC)
+	revoked.Set("revokedAt", revokedAt)
+	if err := app.Save(revoked); err != nil {
+		t.Fatal(err)
+	}
+
+	request := heartbeatRequest{ProtocolVersion: 1, ClientVersion: "m5stack-1.1.0", CacheRevision: 2, PendingCount: 3, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z"}
+	if err := persistHeartbeat(app, authenticatedBeforeRevocation.Id, request, revokedAt.Add(time.Second)); !errors.Is(err, errTerminalRevoked) {
+		t.Fatalf("persistHeartbeat() error = %v, want terminal revoked", err)
+	}
+	stored, err := app.FindRecordById("attendance_terminals", terminal.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.GetDateTime("revokedAt").Time() != revokedAt {
+		t.Fatalf("revocation was overwritten: %s", stored.GetDateTime("revokedAt"))
+	}
+	if !stored.GetDateTime("lastHeartbeatAt").Time().IsZero() {
+		t.Fatalf("revoked terminal accepted heartbeat: %s", stored.GetDateTime("lastHeartbeatAt"))
+	}
+}
+
+func TestPersistHeartbeatUpdatesActiveTerminal(t *testing.T) {
+	app, terminal := persistedTelemetryTerminal(t)
+	defer app.Cleanup()
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	request := heartbeatRequest{ProtocolVersion: 1, ClientVersion: " m5stack-1.1.0 ", CacheRevision: 2, PendingCount: 3, WifiRSSIDbm: -61, UptimeSeconds: 90, ClockStatus: "synced", LastNtpSyncAt: "2026-08-27T11:59:00Z"}
+	if err := persistHeartbeat(app, terminal.Id, request, now); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := app.FindRecordById("attendance_terminals", terminal.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.GetDateTime("lastHeartbeatAt").Time() != now || stored.GetString("clientVersion") != "m5stack-1.1.0" || stored.GetInt("lastWifiRssiDbm") != -61 {
+		t.Fatalf("unexpected persisted heartbeat: %#v", terminalRecordViewAt(stored, "", now))
+	}
+}
+
+func persistedTelemetryTerminal(t *testing.T) (*tests.TestApp, *core.Record) {
+	t.Helper()
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	collection := core.NewBaseCollection("attendance_terminals")
+	collection.Fields.Add(
+		&core.TextField{Name: "organization", Required: true},
+		&core.TextField{Name: "name"},
+		&core.NumberField{Name: "protocolVersion"},
+		&core.TextField{Name: "clientVersion"},
+		&core.NumberField{Name: "cacheRevision"},
+		&core.NumberField{Name: "lastPendingCount"},
+		&core.DateField{Name: "lastSeenAt"},
+		&core.DateField{Name: "lastHeartbeatAt"},
+		&core.SelectField{Name: "lastClockStatus", MaxSelect: 1, Values: []string{"synced", "stale", "unsynced"}},
+		&core.DateField{Name: "lastNtpSyncAt"},
+		&core.NumberField{Name: "lastWifiRssiDbm"},
+		&core.NumberField{Name: "lastUptimeSeconds"},
+		&core.DateField{Name: "revokedAt"},
+	)
+	if err := app.Save(collection); err != nil {
+		app.Cleanup()
+		t.Fatal(err)
+	}
+	record := core.NewRecord(collection)
+	record.Set("organization", "organization-a")
+	record.Set("name", "Terminal A")
+	if err := app.Save(record); err != nil {
+		app.Cleanup()
+		t.Fatal(err)
+	}
+	return app, record
+}
+
+func TestFindTerminalForOrganizationHidesForeignTerminal(t *testing.T) {
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+	collection := core.NewBaseCollection("attendance_terminals")
+	collection.Fields.Add(&core.TextField{Name: "organization", Required: true})
+	if err := app.Save(collection); err != nil {
+		t.Fatal(err)
+	}
+	save := func(organization string) *core.Record {
+		record := core.NewRecord(collection)
+		record.Set("organization", organization)
+		if err := app.Save(record); err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	terminalA := save("organization-a")
+	terminalB := save("organization-b")
+	if got, err := findTerminalForOrganization(app, terminalA.Id, "organization-a"); err != nil || got.Id != terminalA.Id {
+		t.Fatalf("own terminal lookup = (%v, %v)", got, err)
+	}
+	if got, err := findTerminalForOrganization(app, terminalB.Id, "organization-a"); err == nil || got != nil {
+		t.Fatalf("foreign terminal must be hidden, got (%v, %v)", got, err)
 	}
 }
