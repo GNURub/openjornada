@@ -20,7 +20,7 @@ namespace openjornada {
 namespace {
 
 constexpr std::array<uint8_t, 4> kMagic{'O', 'J', 'C', 'A'};
-constexpr uint8_t kFormatVersion = 2;
+constexpr uint8_t kFormatVersion = 3;
 constexpr size_t kCrcSize = 4;
 constexpr const char* kSlotAPath = "/cache-a.bin";
 constexpr const char* kSlotBPath = "/cache-b.bin";
@@ -86,6 +86,11 @@ bool validState(const WorkState& state) {
          state.workedSeconds >= 0 && state.breakSeconds >= 0;
 }
 
+bool validStateSince(const CacheEntry& entry) {
+  if (entry.state.kind == WorkKind::Idle) return entry.stateSince.empty();
+  return validText(entry.stateSince, CacheCodec::kMaxTimestamp, false);
+}
+
 bool validFingerprint(std::string_view value) {
   return value.size() == CacheCodec::kFingerprintLength &&
          std::all_of(value.begin(), value.end(), [](unsigned char byte) {
@@ -111,6 +116,7 @@ CacheError validateSnapshot(const CacheSnapshot& snapshot) {
     if (!validText(entry.employeeId, CacheCodec::kMaxEmployeeId, false) ||
         !validText(entry.displayName, CacheCodec::kMaxDisplayName, false) ||
         !validUid(entry.uid) || !validState(entry.state) ||
+        !validStateSince(entry) ||
         !employeeIds.insert(entry.employeeId).second ||
         !uids.insert(entry.uid).second) {
       return CacheError::InvalidData;
@@ -293,6 +299,7 @@ CacheError CacheCodec::encode(const CacheSnapshot& snapshot,
     if (entry.state.longShift) flags |= 0x01U;
     if (entry.state.staleBreak) flags |= 0x02U;
     payload.push_back(flags);
+    appendString(payload, entry.stateSince);
   }
   if (payload.size() > std::numeric_limits<uint32_t>::max() ||
       kHeaderSize + payload.size() + kCrcSize > kMaxEncodedSize) {
@@ -354,7 +361,9 @@ CacheError CacheCodec::decode(const std::vector<uint8_t>& input,
         !takeByte(input, payloadEnd, cursor, kind) ||
         !takeI32(input, payloadEnd, cursor, entry.state.workedSeconds) ||
         !takeI32(input, payloadEnd, cursor, entry.state.breakSeconds) ||
-        !takeByte(input, payloadEnd, cursor, flags)) {
+        !takeByte(input, payloadEnd, cursor, flags) ||
+        !takeString(input, payloadEnd, cursor, kMaxTimestamp,
+                    entry.stateSince)) {
       return CacheError::Truncated;
     }
     if (kind > static_cast<uint8_t>(WorkKind::OnBreak) || (flags & ~0x03U) != 0) {
@@ -434,12 +443,16 @@ CacheError CacheStore::replaceAtomically(const CacheSnapshot& snapshot) {
 
   CacheSlot active = inspection.selection.slot;
   if (active == CacheSlot::None) active = selectorSlot(inspection.selector);
+  const bool bothSlotsUsePriorFormat =
+      inspection.errorA == CacheError::Version &&
+      inspection.errorB == CacheError::Version;
   CacheSlot target = CacheSlot::A;
   if (active == CacheSlot::A) {
     target = CacheSlot::B;
   } else if (active == CacheSlot::None &&
              inspection.errorA != CacheError::NotFound) {
-    if (inspection.errorB != CacheError::NotFound) {
+    if (inspection.errorB != CacheError::NotFound &&
+        !bothSlotsUsePriorFormat) {
       return noValidSnapshotError(inspection);
     }
     target = CacheSlot::B;

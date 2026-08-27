@@ -14,6 +14,7 @@ struct CacheEntry {
   std::string displayName;
   std::string uid;
   WorkState state;
+  std::string stateSince;
 };
 
 struct CacheSnapshot {
@@ -61,6 +62,7 @@ class CacheCodec {
   static constexpr size_t kMaxEmployeeId = 64;
   static constexpr size_t kMaxDisplayName = 96;
   static constexpr size_t kMaxUid = 20;
+  static constexpr size_t kMaxTimestamp = 64;
   static constexpr size_t kMaxTerminalId = 64;
   static constexpr size_t kFingerprintLength = 64;
   static constexpr size_t kMaxEncodedSize = 8192;

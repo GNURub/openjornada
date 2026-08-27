@@ -2,9 +2,18 @@ import { TerminalCommand, TerminalWorkState } from '../../core/terminal.models';
 
 export type SimulatorButton = 'A' | 'B' | 'C';
 
-export function adjustedTime(current: Date, button: 'A' | 'C', held = false): Date {
+export function adjustedTime(
+  current: Date,
+  button: 'A' | 'C',
+  held = false,
+  minimum?: Date,
+  maximum?: Date,
+): Date {
   const minutes = (held ? 30 : 5) * (button === 'A' ? -1 : 1);
-  return new Date(current.getTime() + minutes * 60_000);
+  const requested = current.getTime() + minutes * 60_000;
+  const lower = minimum?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const upper = maximum?.getTime() ?? Number.POSITIVE_INFINITY;
+  return new Date(Math.min(upper, Math.max(lower, requested)));
 }
 
 export function visibleButtonLabels(

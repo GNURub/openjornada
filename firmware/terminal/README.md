@@ -102,6 +102,12 @@ otra pantalla frente a observadores.
 ## Uso y recuperación
 
 - Acerca un tag y usa A/B/C según las etiquetas inferiores.
+- Al terminar una pausa o una jornada, el terminal abre siempre el selector de
+  hora con el instante de lectura del tag como valor inicial. A y C ajustan en
+  intervalos de cinco minutos y B confirma la hora aplicada.
+- Si se termina la jornada con una pausa abierta, primero se confirma la hora
+  de fin de la pausa y, tras aceptar el cierre, un segundo selector confirma la
+  hora de fin de jornada sin tener que volver a acercar la tarjeta.
 - Tras diez minutos sin botones ni lecturas RFID se apaga sólo la pantalla.
   Wi-Fi, lector y sincronización continúan activos. El primer botón únicamente
   despierta la pantalla y debe soltarse antes de ejecutar otra acción; un tag

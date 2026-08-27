@@ -52,6 +52,14 @@ activos. La primera pulsación despierta la pantalla y se consume hasta soltar
 todos los botones para impedir acciones a ciegas; acercar un tag la despierta y
 procesa el fichaje inmediatamente.
 
+Las acciones de terminar pausa y terminar jornada muestran un selector de hora
+antes de registrar el evento. Parte siempre del instante en que se leyó el tag,
+admite ajustes de cinco minutos y conserva los límites del estado vigente. Si
+se cierra una jornada con una pausa abierta, se confirma primero el fin de la
+pausa y después, en un segundo selector, el fin de jornada, sin exigir una nueva
+lectura. El firmware y el simulador reproducen el mismo recorrido online y
+offline.
+
 El inventario de terminales RFID se pagina en el servidor de diez en diez y se
 ordena por estado y fecha de creación: activos primero y, dentro de cada estado,
 los más recientes primero.

@@ -11,6 +11,9 @@ describe('TerminalSimulatorComponent', () => {
     deviceEmployees: vi.fn(),
     deviceAssign: vi.fn(),
     resolveTag: vi.fn(),
+    performAction: vi.fn(),
+    bootstrap: vi.fn(),
+    deviceCache: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -22,6 +25,17 @@ describe('TerminalSimulatorComponent', () => {
     });
     terminalService.closeAdminSession.mockResolvedValue(undefined);
     terminalService.deviceAssign.mockResolvedValue(undefined);
+    terminalService.bootstrap.mockResolvedValue({
+      terminal: { id: 'terminal-test' },
+      timezone: 'Europe/Madrid',
+      serverTime: new Date().toISOString(),
+      cacheRevision: 1,
+    });
+    terminalService.deviceCache.mockResolvedValue({
+      unchanged: true,
+      revision: 1,
+      items: [],
+    });
     terminalService.deviceEmployees.mockResolvedValue({
       items: [{ id: 'employee-1', name: 'Marina', hasRfidTag: false }],
     });
@@ -176,6 +190,95 @@ describe('TerminalSimulatorComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('Acerca tu tarjeta');
+  });
+
+  it('refreshes an expired scan context while preserving the selected scan time', async () => {
+    const component = fixture.componentInstance;
+    const scanTime = new Date('2026-08-27T09:00:00.000Z');
+    const workingState = {
+      kind: 'working' as const,
+      since: '2026-08-27T08:00:00.000Z',
+      workedSeconds: 3_600,
+      breakSeconds: 0,
+      longShift: false,
+      staleBreak: false,
+      actions: [],
+    };
+    Reflect.set(component, 'token', 'ojterm_test');
+    Reflect.set(component, 'uid', '04AABBCC');
+    Reflect.set(component, 'scanCapturedAt', scanTime);
+    Reflect.get(component, 'online').set(true);
+    Reflect.get(component, 'resolved').set({
+      scanContext: 'expired-context',
+      expiresAt: '2026-08-27T09:00:10.000Z',
+      employee: { id: 'employee-1', displayName: 'Marina' },
+      state: workingState,
+    });
+    terminalService.resolveTag.mockResolvedValueOnce({
+      scanContext: 'fresh-context',
+      expiresAt: '2026-08-27T09:00:25.000Z',
+      employee: { id: 'employee-1', displayName: 'Marina' },
+      state: workingState,
+    });
+    terminalService.performAction.mockResolvedValueOnce({
+      state: { ...workingState, kind: 'idle', since: null },
+    });
+
+    Reflect.get(component, 'openTimePicker').call(component, 'clock_out', false);
+    vi.advanceTimersByTime(15_000);
+    await Reflect.get(component, 'confirmSelectedTime').call(component);
+
+    expect(terminalService.resolveTag).toHaveBeenCalledWith('ojterm_test', '04AABBCC');
+    expect(terminalService.performAction).toHaveBeenCalledWith(
+      'ojterm_test',
+      expect.objectContaining({
+        scanContext: 'fresh-context',
+        command: 'clock_out',
+        appliedAt: scanTime.toISOString(),
+      }),
+    );
+  });
+
+  it('keeps both offline close events queued if the network returns between pickers', async () => {
+    const component = fixture.componentInstance;
+    const scanTime = new Date();
+    Reflect.set(component, 'token', 'ojterm_test');
+    Reflect.set(component, 'uid', '04AABBCC');
+    Reflect.set(component, 'terminalId', 'terminal-test');
+    Reflect.set(component, 'lastNtpAt', scanTime);
+    Reflect.set(component, 'scanCapturedAt', scanTime);
+    Reflect.set(component, 'resolvedOffline', true);
+    Reflect.get(component, 'online').set(false);
+    Reflect.get(component, 'connected').set(true);
+    Reflect.get(component, 'resolved').set({
+      scanContext: '',
+      expiresAt: '',
+      employee: { id: 'employee-1', displayName: 'Marina' },
+      state: {
+        kind: 'on_break',
+        since: new Date(scanTime.getTime() - 30 * 60_000).toISOString(),
+        workedSeconds: 3_600,
+        breakSeconds: 1_800,
+        longShift: false,
+        staleBreak: true,
+        actions: [],
+      },
+    });
+
+    Reflect.get(component, 'openTimePicker').call(component, 'break_end', true);
+    await Reflect.get(component, 'confirmSelectedTime').call(component);
+    await Reflect.get(component, 'toggleOnline').call(component);
+    expect(Reflect.get(component, 'screen')()).toBe('close-confirm');
+    Reflect.get(component, 'openTimePicker').call(component, 'clock_out', false);
+    await Reflect.get(component, 'confirmSelectedTime').call(component);
+
+    const queued = Reflect.get(component, 'queue')();
+    expect(queued.map((item: { command: string }) => item.command)).toEqual([
+      'break_end',
+      'clock_out',
+    ]);
+    expect(queued[1].previousLocalHash).toBe(queued[0].signature);
+    expect(terminalService.performAction).not.toHaveBeenCalled();
   });
 
   it('ignores RFID outside assignment and resets administrative inactivity', async () => {

@@ -81,6 +81,11 @@ export class TerminalSimulatorComponent implements OnDestroy {
   private sequence = 0;
   private terminalId = '';
   private terminalTimezone = 'Europe/Madrid';
+  private scanCapturedAt = new Date();
+  private pickerMinimumAt = new Date();
+  private pickerMaximumAt = new Date();
+  private confirmedBreakEndAt: Date | null = null;
+  private resolvedOffline = false;
   private rebootId = crypto.randomUUID();
   private lastNtpAt: Date | null = null;
   private rebooted = false;
@@ -126,7 +131,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
     }).format(this.selectedTime());
   }
 
-  protected async connect(): Promise<void> {
+  protected async connect(preserveCloseFlow = false): Promise<void> {
     if (!this.token.trim()) return;
     this.busy.set(true);
     try {
@@ -142,9 +147,13 @@ export class TerminalSimulatorComponent implements OnDestroy {
       this.rebooted = false;
       this.cacheRevision.set(response.cacheRevision);
       await this.refreshCache(0);
-      this.showMessage('Terminal conectado', 2_000);
+      if (!preserveCloseFlow) this.showMessage('Terminal conectado', 2_000);
     } catch (error) {
-      this.showMessage(this.errorMessage(error, 'API key no válida'), 5_000);
+      if (preserveCloseFlow) {
+        this.online.set(false);
+      } else {
+        this.showMessage(this.errorMessage(error, 'API key no válida'), 5_000);
+      }
     } finally {
       this.busy.set(false);
     }
@@ -175,9 +184,11 @@ export class TerminalSimulatorComponent implements OnDestroy {
         this.showMessage(`Tag asignado a ${employee.name}`, 3_000, 'admin-employees');
         return;
       }
+      this.scanCapturedAt = this.now();
       if (this.online()) {
         const response = await this.terminals.resolveTag(this.token, this.uid);
         this.resolved.set(response);
+        this.resolvedOffline = false;
       } else {
         if (!this.clockTrusted()) {
           this.showMessage('Sin hora fiable. Conecta Internet.', 5_000);
@@ -196,6 +207,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
           employee: { id: employee.employeeId, displayName: employee.displayName },
           state: employee.state,
         });
+        this.resolvedOffline = true;
       }
       this.screen.set('actions');
       this.armActionTimeout();
@@ -286,11 +298,11 @@ export class TerminalSimulatorComponent implements OnDestroy {
         break;
       case 'time-picker':
         if (button === 'B') await this.confirmSelectedTime();
-        else this.selectedTime.set(adjustedTime(this.selectedTime(), button, false));
+        else this.adjustPicker(button, false);
         break;
       case 'close-confirm':
         if (button === 'A') this.returnToIdle();
-        if (button === 'C') await this.execute('clock_out');
+        if (button === 'C') this.openTimePicker('clock_out', false);
         break;
       case 'admin-pin':
         await this.pressPin(button);
@@ -312,8 +324,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
   }
 
   protected holdTime(button: 'A' | 'C'): void {
-    if (this.screen() === 'time-picker')
-      this.selectedTime.set(adjustedTime(this.selectedTime(), button, true));
+    if (this.screen() === 'time-picker') this.adjustPicker(button, true);
   }
 
   private async pressAction(button: SimulatorButton): Promise<void> {
@@ -323,11 +334,11 @@ export class TerminalSimulatorComponent implements OnDestroy {
     if (state.kind === 'working') {
       if (button === 'A') await this.execute('break_start');
       if ((!state.longShift && button === 'C') || (state.longShift && button === 'B'))
-        await this.execute('clock_out');
+        this.openTimePicker('clock_out', false);
       if (state.longShift && button === 'C') this.openTimePicker('clock_out', false);
     }
     if (state.kind === 'on_break') {
-      if (button === 'A') await this.execute('break_end');
+      if (button === 'A') this.openTimePicker('break_end', false);
       if (button === 'C') this.openTimePicker('break_end', true);
     }
   }
@@ -336,24 +347,48 @@ export class TerminalSimulatorComponent implements OnDestroy {
     clearTimeout(this.actionTimer);
     this.pickerCommand.set(command);
     this.pickerClosesBreak.set(closesBreak);
-    this.closeBreakPendingSync.set(false);
-    this.selectedTime.set(this.now());
+    this.pickerMaximumAt = new Date(this.scanCapturedAt);
+    const stateSince = this.resolved()?.state.since;
+    const minimum =
+      command === 'clock_out' && this.confirmedBreakEndAt
+        ? this.confirmedBreakEndAt
+        : stateSince
+          ? new Date(stateSince)
+          : this.pickerMaximumAt;
+    this.pickerMinimumAt =
+      Number.isFinite(minimum.getTime()) && minimum <= this.pickerMaximumAt
+        ? new Date(minimum)
+        : new Date(this.pickerMaximumAt);
+    this.selectedTime.set(new Date(this.pickerMaximumAt));
     this.screen.set('time-picker');
   }
 
+  private adjustPicker(button: 'A' | 'C', held: boolean): void {
+    this.selectedTime.set(
+      adjustedTime(this.selectedTime(), button, held, this.pickerMinimumAt, this.pickerMaximumAt),
+    );
+  }
+
   private async confirmSelectedTime(): Promise<void> {
+    const closesBreak = this.pickerClosesBreak();
+    const selected = new Date(this.selectedTime());
     const succeeded = await this.execute(
       this.pickerCommand(),
-      this.selectedTime().toISOString(),
-      false,
+      selected.toISOString(),
+      !closesBreak,
+      this.closeBreakPendingSync() || this.resolvedOffline,
     );
-    if (succeeded && this.pickerClosesBreak()) this.screen.set('close-confirm');
+    if (succeeded && closesBreak) {
+      this.confirmedBreakEndAt = selected;
+      this.screen.set('close-confirm');
+    }
   }
 
   private async execute(
     command: TerminalCommand,
     appliedAt?: string,
     returnToIdle = true,
+    forceQueue = false,
   ): Promise<boolean> {
     const resolved = this.resolved();
     if (!resolved) return false;
@@ -362,17 +397,31 @@ export class TerminalSimulatorComponent implements OnDestroy {
     const requestId = `${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     let pendingSync = false;
     try {
-      if (this.online()) {
+      if (this.online() && !forceQueue) {
+        if (appliedAt && ['break_end', 'clock_out'].includes(command)) {
+          const refreshed = await this.terminals.resolveTag(this.token, this.uid);
+          const expectedKind = command === 'break_end' ? 'on_break' : 'working';
+          if (
+            refreshed.employee.id !== resolved.employee.id ||
+            refreshed.state.kind !== expectedKind
+          ) {
+            this.showMessage('El estado o la persona ha cambiado; acerca de nuevo el tag', 5_000);
+            return false;
+          }
+          this.resolved.set(refreshed);
+        }
+        const current = this.resolved();
+        if (!current) return false;
         const result = await this.terminals.performAction(this.token, {
           clientRequestId: requestId,
-          scanContext: resolved.scanContext,
+          scanContext: current.scanContext,
           command,
           deviceCapturedAt: capturedAt,
           appliedAt,
           clockSyncedAt: (this.lastNtpAt ?? this.now()).toISOString(),
           deviceSequence: this.sequence,
         });
-        resolved.state = result.state;
+        current.state = result.state;
       } else {
         if (!this.clockTrusted() || this.queue().length >= 10_000) {
           this.showMessage('No se puede guardar otro fichaje offline', 5_000);
@@ -396,7 +445,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
         queued.signature = await this.signQueuedAction(queued);
         this.queue.update((items) => [...items, queued]);
         pendingSync = true;
-        resolved.state = this.advanceLocalState(resolved.state, command);
+        resolved.state = this.advanceLocalState(resolved.state, command, appliedAt);
         this.cache.update((items) =>
           items.map((item) =>
             item.employeeId === resolved.employee.id ? { ...item, state: resolved.state } : item,
@@ -410,7 +459,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
           pendingSync ? 5_000 : 2_500,
         );
       } else if (command === 'break_end') {
-        this.closeBreakPendingSync.set(pendingSync);
+        this.closeBreakPendingSync.set(pendingSync || forceQueue);
       }
       return true;
     } catch (error) {
@@ -442,13 +491,14 @@ export class TerminalSimulatorComponent implements OnDestroy {
     }
   }
 
-  protected toggleOnline(): void {
+  protected async toggleOnline(): Promise<void> {
+    const preserveCloseFlow = ['close-confirm', 'time-picker'].includes(this.screen());
     this.online.update((value) => !value);
     if (!this.online() && this.adminModeActive()) {
       void this.exitAdmin();
       return;
     }
-    if (this.online() && this.connected()) void this.connect();
+    if (this.online() && this.connected()) await this.connect(preserveCloseFlow);
   }
 
   protected advance(minutes: number): void {
@@ -578,12 +628,19 @@ export class TerminalSimulatorComponent implements OnDestroy {
   private returnToIdle(): void {
     clearTimeout(this.actionTimer);
     this.closeBreakPendingSync.set(false);
+    this.confirmedBreakEndAt = null;
+    this.resolvedOffline = false;
     this.resolved.set(null);
     this.screen.set('idle');
   }
 
-  private advanceLocalState(state: TerminalWorkState, command: TerminalCommand): TerminalWorkState {
-    const refreshed = refreshedLocalState(state, this.now());
+  private advanceLocalState(
+    state: TerminalWorkState,
+    command: TerminalCommand,
+    appliedAt?: string,
+  ): TerminalWorkState {
+    const transitionAt = appliedAt ? new Date(appliedAt) : this.now();
+    const refreshed = refreshedLocalState(state, transitionAt);
     const kind =
       command === 'clock_in' || command === 'break_end'
         ? 'working'
@@ -593,7 +650,7 @@ export class TerminalSimulatorComponent implements OnDestroy {
     return {
       ...refreshed,
       kind,
-      since: kind === 'idle' ? null : this.now().toISOString(),
+      since: kind === 'idle' ? null : transitionAt.toISOString(),
       workedSeconds:
         command === 'clock_in' || command === 'clock_out' ? 0 : refreshed.workedSeconds,
       breakSeconds: command === 'clock_in' || command === 'clock_out' ? 0 : refreshed.breakSeconds,

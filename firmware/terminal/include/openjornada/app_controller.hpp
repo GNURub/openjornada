@@ -94,7 +94,7 @@ class AppController {
   void enqueueSync(const AppEvent& event);
   void handleCacheResult(NetworkResult&& result, const AppEvent& event);
   void handleSyncResult(NetworkResult&& result, const AppEvent& event);
-  void enqueueCloseRefresh(const AppEvent& event);
+  void enqueuePickerRefresh(const AppEvent& event);
   void showQueuedCloseConfirm(uint32_t nowMs);
   void showActions(uint32_t nowMs);
   void openTimePicker(Command command, bool closesBreak,
@@ -146,7 +146,7 @@ class AppController {
   bool monotonicInitialized_ = false;
   std::string lastLocalHash_;
   std::string activeActionRequestId_;
-  std::string closeExpectedEmployeeId_;
+  std::string pickerExpectedEmployeeId_;
   std::vector<QueuedAction> activeSyncBatch_;
   EmployeeListResponse adminEmployees_;
   std::string pendingAdminUid_;
@@ -161,14 +161,19 @@ class AppController {
   size_t selectedEmployeeIndex_ = 0;
   int64_t pickerMinEpochSeconds_ = 0;
   int64_t pickerMaxEpochSeconds_ = 0;
+  int64_t scanCapturedEpochSeconds_ = 0;
+  int64_t confirmedBreakEndEpochSeconds_ = 0;
   std::optional<Button> lastPickerPress_;
+  std::optional<int64_t> pendingPickerAppliedEpochSeconds_;
+  Command pendingPickerCommand_ = Command::ClockOut;
   Command pickerCommand_ = Command::ClockOut;
   Command activeActionCommand_ = Command::ClockIn;
+  bool pendingPickerClosesBreak_ = false;
   bool pickerClosesBreak_ = false;
   bool activeActionClosesBreak_ = false;
   bool interactionDeadlineActive_ = false;
   bool messageDeadlineActive_ = false;
-  bool resolveForClockOut_ = false;
+  bool resolveForPickerAction_ = false;
   bool started_ = false;
   bool bootstrapReady_ = false;
   bool bootstrapQueued_ = false;

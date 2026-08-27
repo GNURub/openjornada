@@ -16,6 +16,14 @@ describe('M5Stack simulator controls', () => {
     expect(adjustedTime(time, 'C', true).toISOString()).toBe('2026-08-18T16:25:00.000Z');
   });
 
+  it('clamps time adjustments to the state start and accepted tag scan', () => {
+    const minimum = new Date('2026-08-18T15:45:00Z');
+    const maximum = new Date('2026-08-18T15:55:00Z');
+    expect(adjustedTime(minimum, 'A', false, minimum, maximum)).toEqual(minimum);
+    expect(adjustedTime(maximum, 'C', true, minimum, maximum)).toEqual(maximum);
+    expect(adjustedTime(maximum, 'A', true, minimum, maximum)).toEqual(minimum);
+  });
+
   it('wraps PIN digits', () => {
     expect(pinDigit(0, 'A')).toBe(9);
     expect(pinDigit(9, 'C')).toBe(0);

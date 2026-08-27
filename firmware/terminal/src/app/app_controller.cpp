@@ -273,11 +273,11 @@ void AppController::processNetworkResult(NetworkResult&& result,
     return;
   }
   if (result.kind == NetworkJobKind::Resolve) {
-    const bool closeAfterRefresh = resolveForClockOut_;
-    resolveForClockOut_ = false;
+    const bool pickerActionAfterRefresh = resolveForPickerAction_;
+    resolveForPickerAction_ = false;
     const std::string expectedEmployeeId =
-        std::move(closeExpectedEmployeeId_);
-    closeExpectedEmployeeId_.clear();
+        std::move(pickerExpectedEmployeeId_);
+    pickerExpectedEmployeeId_.clear();
     if (!result.call.ok || result.resolve == nullptr) {
       const std::string message = result.call.failure.safeMessage.empty()
                                       ? "Tag no asignado; avisa a un responsable."
@@ -295,7 +295,7 @@ void AppController::processNetworkResult(NetworkResult&& result,
         candidate.state.kind == WorkKind::OnBreak &&
         (candidate.state.staleBreak ||
          candidate.state.breakSeconds > 25 * 60);
-    if (closeAfterRefresh) {
+    if (pickerActionAfterRefresh) {
       if (expectedEmployeeId.empty() ||
           candidate.employee.id != expectedEmployeeId) {
         showMessage("La tarjeta ahora pertenece a otra persona; acerca de "
@@ -306,14 +306,20 @@ void AppController::processNetworkResult(NetworkResult&& result,
       }
       lastAuthoritativeState_ = candidate.state;
       resolved_ = std::move(candidate);
-      if (resolved_->state.kind != WorkKind::Working) {
+      const WorkKind expectedState =
+          pendingPickerCommand_ == Command::BreakEnd ? WorkKind::OnBreak
+                                                     : WorkKind::Working;
+      if (resolved_->state.kind != expectedState) {
         showMessage("El estado de la jornada ha cambiado; acerca de nuevo el "
                     "tag.",
                     event.nowMs, kMessageMs, true);
         feedback_ = AppFeedback::Error;
         return;
       }
-      executeAction(Command::ClockOut, event);
+      const auto appliedEpoch = pendingPickerAppliedEpochSeconds_;
+      pendingPickerAppliedEpochSeconds_.reset();
+      executeAction(pendingPickerCommand_, event, appliedEpoch,
+                    pendingPickerClosesBreak_);
       return;
     }
     lastAuthoritativeState_ = candidate.state;
@@ -473,6 +479,7 @@ void AppController::handleTag(const AppEvent& event) {
       event.uid.empty()) {
     return;
   }
+  scanCapturedEpochSeconds_ = effectiveCapturedEpoch(event);
   if (!event.networkConnected) {
     if (!clockTrust_.canCreateOffline(event.nowEpochSeconds)) {
       showMessage("Reloj no fiable; conecta la red.", event.nowMs,
@@ -528,6 +535,13 @@ void AppController::handleButton(const AppEvent& event, bool held) {
   if (screen_.kind == ScreenKind::TimePicker) {
     if (held && event.button != Button::A && event.button != Button::C) return;
     if (!held && event.button == Button::B) {
+      if (event.networkConnected && !resolvedOffline_ && !closeBreakQueued_) {
+        pendingPickerAppliedEpochSeconds_ = screen_.selectedEpochSeconds;
+        pendingPickerCommand_ = pickerCommand_;
+        pendingPickerClosesBreak_ = pickerClosesBreak_;
+        enqueuePickerRefresh(event);
+        return;
+      }
       executeAction(pickerCommand_, event, screen_.selectedEpochSeconds,
                     pickerClosesBreak_);
       return;
@@ -550,7 +564,7 @@ void AppController::handleButton(const AppEvent& event, bool held) {
           requested, pickerMinEpochSeconds_, pickerMaxEpochSeconds_);
       if (hitLowerBound || hitUpperBound) {
         screen_.detail = hitLowerBound
-                             ? (pickerClosesBreak_
+                             ? (pickerCommand_ == Command::BreakEnd
                                     ? "Límite: inicio de la pausa"
                                     : "Límite: inicio de la jornada")
                              : "No puedes elegir una hora futura";
@@ -620,11 +634,7 @@ void AppController::handleButton(const AppEvent& event, bool held) {
   if (screen_.kind == ScreenKind::CloseConfirm) {
     if (event.button == Button::A) returnToIdle();
     if (event.button == Button::C) {
-      if (closeBreakQueued_) {
-        executeAction(Command::ClockOut, event);
-      } else {
-        enqueueCloseRefresh(event);
-      }
+      openTimePicker(Command::ClockOut, false, event);
     }
     return;
   }
@@ -637,13 +647,13 @@ void AppController::handleButton(const AppEvent& event, bool held) {
       executeAction(Command::BreakStart, event);
     } else if ((!state.longShift && event.button == Button::C) ||
                (state.longShift && event.button == Button::B)) {
-      executeAction(Command::ClockOut, event);
+      openTimePicker(Command::ClockOut, false, event);
     } else if (state.longShift && event.button == Button::C) {
       openTimePicker(Command::ClockOut, false, event);
     }
   } else if (state.kind == WorkKind::OnBreak) {
     if (event.button == Button::A) {
-      executeAction(Command::BreakEnd, event);
+      openTimePicker(Command::BreakEnd, false, event);
     } else if (event.button == Button::C) {
       openTimePicker(Command::BreakEnd, true, event);
     }
@@ -931,7 +941,8 @@ void AppController::handleCacheResult(NetworkResult&& result,
           {item.employeeId, item.displayName, item.uid,
            {item.state.kind, item.state.workedSeconds,
             item.state.breakSeconds, item.state.longShift,
-            item.state.staleBreak}});
+            item.state.staleBreak},
+           item.state.since});
     }
     if (cacheStore_ != nullptr &&
         cacheStore_->replaceAtomically(candidate) != CacheError::None) {
@@ -982,6 +993,7 @@ void AppController::handleSyncResult(NetworkResult&& result,
       const ApiWorkState& state = result.sync->items[index].state;
       entry.state = {state.kind, state.workedSeconds, state.breakSeconds,
                      state.longShift, state.staleBreak};
+      entry.stateSince = state.since;
       return true;
     }
     // A full cache refresh is authoritative. If the UID is absent, there is
@@ -1048,7 +1060,7 @@ void AppController::handleSyncResult(NetworkResult&& result,
   }
 }
 
-void AppController::enqueueCloseRefresh(const AppEvent& event) {
+void AppController::enqueuePickerRefresh(const AppEvent& event) {
   interactionDeadlineActive_ = false;
   if (!event.networkConnected || currentUid_.empty() ||
       !resolved_.has_value() || resolved_->employee.id.empty()) {
@@ -1069,8 +1081,8 @@ void AppController::enqueueCloseRefresh(const AppEvent& event) {
     return;
   }
   activeJobId_ = job.id;
-  closeExpectedEmployeeId_ = resolved_->employee.id;
-  resolveForClockOut_ = true;
+  pickerExpectedEmployeeId_ = resolved_->employee.id;
+  resolveForPickerAction_ = true;
   screen_.kind = ScreenKind::Message;
   screen_.title = "Actualizando jornada";
   screen_.detail = "Comprobando el estado antes de cerrar...";
@@ -1081,7 +1093,12 @@ void AppController::enqueueCloseRefresh(const AppEvent& event) {
 
 void AppController::showQueuedCloseConfirm(uint32_t nowMs) {
   closeBreakQueued_ = true;
-  if (resolved_.has_value()) resolved_->state.kind = WorkKind::Working;
+  if (resolved_.has_value()) {
+    resolved_->state.kind = WorkKind::Working;
+    if (confirmedBreakEndEpochSeconds_ > 0) {
+      resolved_->state.since = isoUtc(confirmedBreakEndEpochSeconds_);
+    }
+  }
   screen_.kind = ScreenKind::CloseConfirm;
   screen_.title = "¿Deseas cerrar ahora la jornada?";
   screen_.detail = "El fin de pausa está pendiente de sincronizar";
@@ -1113,12 +1130,19 @@ void AppController::openTimePicker(Command command, bool closesBreak,
   pickerCommand_ = command;
   pickerClosesBreak_ = closesBreak;
   screen_.kind = ScreenKind::TimePicker;
-  screen_.title = closesBreak ? "¿A qué hora terminaste la pausa?"
-                              : "¿A qué hora terminaste?";
+  screen_.title = command == Command::BreakEnd
+                      ? "¿A qué hora terminaste la pausa?"
+                      : "¿A qué hora terminaste?";
   screen_.detail = kPickerHelp;
-  pickerMaxEpochSeconds_ = effectiveCapturedEpoch(event);
-  pickerMinEpochSeconds_ =
-      parseRfc3339(resolved_->state.since).value_or(pickerMaxEpochSeconds_);
+  pickerMaxEpochSeconds_ = scanCapturedEpochSeconds_ > 0
+                               ? scanCapturedEpochSeconds_
+                               : effectiveCapturedEpoch(event);
+  if (command == Command::ClockOut && confirmedBreakEndEpochSeconds_ > 0) {
+    pickerMinEpochSeconds_ = confirmedBreakEndEpochSeconds_;
+  } else {
+    pickerMinEpochSeconds_ =
+        parseRfc3339(resolved_->state.since).value_or(pickerMaxEpochSeconds_);
+  }
   if (pickerMinEpochSeconds_ < 0 ||
       pickerMinEpochSeconds_ > pickerMaxEpochSeconds_) {
     pickerMinEpochSeconds_ = pickerMaxEpochSeconds_;
@@ -1182,6 +1206,9 @@ void AppController::executeAction(Command command, const AppEvent& event,
   lastLocalHash_ = queued.signature;
   if (!refreshPendingCount()) return;
   (void)applyLocalAction(queued);
+  if (closeAfterBreak && appliedEpoch.has_value()) {
+    confirmedBreakEndEpochSeconds_ = *appliedEpoch;
+  }
 
   NetworkJob job;
   job.id = nextJobId_++;
@@ -1379,12 +1406,16 @@ void AppController::returnToIdle() {
   screen_.selectedEpochSeconds = 0;
   interactionDeadlineActive_ = false;
   messageDeadlineActive_ = false;
-  resolveForClockOut_ = false;
-  closeExpectedEmployeeId_.clear();
+  resolveForPickerAction_ = false;
+  pickerExpectedEmployeeId_.clear();
   resolved_.reset();
   currentUid_.clear();
   pickerClosesBreak_ = false;
   activeActionClosesBreak_ = false;
+  scanCapturedEpochSeconds_ = 0;
+  confirmedBreakEndEpochSeconds_ = 0;
+  pendingPickerAppliedEpochSeconds_.reset();
+  pendingPickerClosesBreak_ = false;
   resolvedOffline_ = false;
   closeBreakQueued_ = false;
 }
@@ -1408,6 +1439,10 @@ bool AppController::applyLocalAction(const QueuedAction& action) {
   for (auto& entry : cache_.entries) {
     if (entry.uid != action.uid) continue;
     entry.state.kind = replayCommand(entry.state.kind, action.command);
+    entry.stateSince = entry.state.kind == WorkKind::Idle
+                           ? ""
+                           : (!action.appliedAt.empty() ? action.appliedAt
+                                                       : action.deviceCapturedAt);
     entry.state.longShift = entry.state.kind == WorkKind::Working &&
                             entry.state.workedSeconds >= 4 * 60 * 60;
     entry.state.staleBreak = entry.state.kind == WorkKind::OnBreak &&
@@ -1419,6 +1454,7 @@ bool AppController::applyLocalAction(const QueuedAction& action) {
     }
     if (resolved_.has_value() && currentUid_ == action.uid) {
       resolved_->state.kind = entry.state.kind;
+      resolved_->state.since = entry.stateSince;
     }
     return true;
   }
@@ -1431,6 +1467,7 @@ bool AppController::updateCachedState(const std::string& uid,
     if (entry.uid != uid) continue;
     entry.state = {state.kind, state.workedSeconds, state.breakSeconds,
                    state.longShift, state.staleBreak};
+    entry.stateSince = state.since;
     if (cacheStore_ != nullptr) {
       if (cacheStore_->replaceAtomically(cache_) != CacheError::None) {
         return false;
@@ -1448,7 +1485,8 @@ bool AppController::updateCachedState(const std::string& uid,
   cache_.entries.push_back(
       {resolved_->employee.id, resolved_->employee.displayName, uid,
        {state.kind, state.workedSeconds, state.breakSeconds, state.longShift,
-        state.staleBreak}});
+        state.staleBreak},
+       state.since});
   return cacheStore_ == nullptr ||
          cacheStore_->replaceAtomically(cache_) == CacheError::None;
 }
@@ -1522,6 +1560,11 @@ bool AppController::rehydratePending() {
         for (auto& entry : candidate.entries) {
           if (entry.uid == action.uid) {
             entry.state.kind = replayCommand(entry.state.kind, action.command);
+            entry.stateSince = entry.state.kind == WorkKind::Idle
+                                   ? ""
+                                   : (!action.appliedAt.empty()
+                                          ? action.appliedAt
+                                          : action.deviceCapturedAt);
             break;
           }
         }
@@ -1549,6 +1592,7 @@ std::optional<ResolveResponse> AppController::resolveFromCache(
     ResolveResponse result;
     result.employee = {entry.employeeId, entry.displayName};
     result.state.kind = entry.state.kind;
+    result.state.since = entry.stateSince;
     result.state.workedSeconds = entry.state.workedSeconds;
     result.state.breakSeconds = entry.state.breakSeconds;
     result.state.longShift = entry.state.longShift;

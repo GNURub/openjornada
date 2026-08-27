@@ -15,9 +15,11 @@ CacheSnapshot fixture() {
   CacheSnapshot result{
       42,
       {{"employee-1", "Ada", "04A1B2C3",
-        {WorkKind::Working, 3600, 300, false, false}},
+        {WorkKind::Working, 3600, 300, false, false},
+        "2026-08-27T08:00:00Z"},
        {"employee-2", "Lin", "11223344",
-        {WorkKind::OnBreak, 7200, 1501, false, true}}}};
+        {WorkKind::OnBreak, 7200, 1501, false, true},
+        "2026-08-27T12:00:00Z"}}};
   result.terminalId = "terminal-a";
   result.configFingerprint = std::string(64, 'a');
   return result;
@@ -44,6 +46,7 @@ void assertRoundTrip(const CacheSnapshot& expected,
                             got.state.breakSeconds);
     TEST_ASSERT_EQUAL(wanted.state.longShift, got.state.longShift);
     TEST_ASSERT_EQUAL(wanted.state.staleBreak, got.state.staleBreak);
+    TEST_ASSERT_EQUAL_STRING(wanted.stateSince.c_str(), got.stateSince.c_str());
   }
 }
 
@@ -118,7 +121,7 @@ void test_rejects_bad_magic_version_and_truncation() {
   TEST_ASSERT_EQUAL_UINT32(999, decoded.revision);
 
   auto badVersion = encoded;
-  badVersion[4] = 3;
+  badVersion[4] = 2;
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::Version),
                         static_cast<int>(CacheCodec::decode(badVersion, decoded)));
 
@@ -167,6 +170,16 @@ void test_rejects_invalid_entries_without_partial_mutation() {
 
   invalid = fixture();
   invalid.configFingerprint = std::string(64, 'A');
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::InvalidData),
+                        static_cast<int>(CacheCodec::encode(invalid, encoded)));
+
+  invalid = fixture();
+  invalid.entries[0].stateSince.clear();
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::InvalidData),
+                        static_cast<int>(CacheCodec::encode(invalid, encoded)));
+
+  invalid = fixture();
+  invalid.entries[0].state.kind = WorkKind::Idle;
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CacheError::InvalidData),
                         static_cast<int>(CacheCodec::encode(invalid, encoded)));
 }

@@ -473,15 +473,54 @@ void test_working_pause_and_clock_out_commands() {
   TEST_ASSERT_EQUAL(Command::BreakStart, pause.api.lastAction.command);
 
   Fixture finish;
+  const auto scannedAt = finish.epoch;
   finish.scan(work(WorkKind::Working));
   finish.accepted(WorkKind::Idle);
   finish.press(Button::C);
+  finish.tick(15000);
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, finish.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("¿A qué hora terminaste?",
+                           finish.app.screen().title.c_str());
+  TEST_ASSERT_EQUAL_INT64(scannedAt,
+                          finish.app.screen().selectedEpochSeconds);
+  finish.api.nextResolve.scanContext = "fresh-clockout-context";
+  finish.press(Button::B);
+  finish.networkRoundTrip();
   finish.networkRoundTrip();
   TEST_ASSERT_EQUAL(Command::ClockOut, finish.api.lastAction.command);
+  TEST_ASSERT_EQUAL_STRING(isoUtc(scannedAt).c_str(),
+                           finish.api.lastAction.appliedAt.c_str());
+  TEST_ASSERT_EQUAL_STRING("fresh-clockout-context",
+                           finish.api.lastAction.scanContext.c_str());
   TEST_ASSERT_EQUAL_STRING("Hasta luego, Marina",
                            finish.app.screen().title.c_str());
   TEST_ASSERT_EQUAL_STRING("Jornada finalizada",
                            finish.app.screen().detail.c_str());
+
+  Fixture breakEnd;
+  const auto breakScannedAt = breakEnd.epoch;
+  breakEnd.scan(work(WorkKind::OnBreak));
+  breakEnd.tick(2000);
+  breakEnd.accepted(WorkKind::Working);
+  breakEnd.press(Button::A);
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, breakEnd.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("¿A qué hora terminaste la pausa?",
+                           breakEnd.app.screen().title.c_str());
+  TEST_ASSERT_EQUAL_INT64(breakScannedAt,
+                          breakEnd.app.screen().selectedEpochSeconds);
+  breakEnd.press(Button::B);
+  breakEnd.networkRoundTrip();
+  breakEnd.networkRoundTrip();
+  TEST_ASSERT_EQUAL(Command::BreakEnd, breakEnd.api.lastAction.command);
+  TEST_ASSERT_EQUAL_STRING(isoUtc(breakScannedAt).c_str(),
+                           breakEnd.api.lastAction.appliedAt.c_str());
+  TEST_ASSERT_EQUAL_STRING("Pausa terminada",
+                           breakEnd.app.screen().detail.c_str());
+
+  Fixture longShift;
+  longShift.scan(work(WorkKind::Working, true));
+  longShift.press(Button::B);
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, longShift.app.screen().kind);
 }
 
 void test_duplicate_and_action_rejection_are_definitive() {
@@ -611,6 +650,7 @@ void test_time_picker_steps_five_and_held_steps_thirty() {
   fixture.accepted(WorkKind::Idle);
   fixture.press(Button::B);
   fixture.networkRoundTrip();
+  fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL(Command::ClockOut, fixture.api.lastAction.command);
   TEST_ASSERT_FALSE(fixture.api.lastAction.appliedAt.empty());
 
@@ -698,13 +738,17 @@ void test_time_picker_repeats_valid_steps_and_explains_limits() {
 
 void test_close_from_break_asks_time_then_close_confirmation() {
   Fixture fixture;
+  const auto scannedAt = fixture.epoch;
   fixture.scan(work(WorkKind::OnBreak));
   fixture.press(Button::C);
   TEST_ASSERT_EQUAL(ScreenKind::TimePicker, fixture.app.screen().kind);
   TEST_ASSERT_EQUAL_STRING("¿A qué hora terminaste la pausa?",
                            fixture.app.screen().title.c_str());
+  fixture.press(Button::A);
+  const auto breakEndedAt = scannedAt - 5 * 60;
   fixture.accepted(WorkKind::Working);
   fixture.press(Button::B);
+  fixture.networkRoundTrip();
   fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL(Command::BreakEnd, fixture.api.lastAction.command);
   TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm, fixture.app.screen().kind);
@@ -715,6 +759,15 @@ void test_close_from_break_asks_time_then_close_confirmation() {
   fixture.api.nextResolve.state = work(WorkKind::Working);
   fixture.accepted(WorkKind::Idle);
   fixture.press(Button::C);
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, fixture.app.screen().kind);
+  TEST_ASSERT_EQUAL_STRING("¿A qué hora terminaste?",
+                           fixture.app.screen().title.c_str());
+  TEST_ASSERT_EQUAL_INT64(scannedAt,
+                          fixture.app.screen().selectedEpochSeconds);
+  fixture.press(Button::A);
+  TEST_ASSERT_EQUAL_INT64(breakEndedAt,
+                          fixture.app.screen().selectedEpochSeconds);
+  fixture.press(Button::B);
   TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
   TEST_ASSERT_EQUAL_INT(1, fixture.api.actionCalls);
   TEST_ASSERT_TRUE(fixture.app.screen().busy);
@@ -725,9 +778,11 @@ void test_close_from_break_asks_time_then_close_confirmation() {
   fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL_INT(2, fixture.api.actionCalls);
   TEST_ASSERT_EQUAL(Command::ClockOut, fixture.api.lastAction.command);
+  TEST_ASSERT_EQUAL_STRING(isoUtc(breakEndedAt).c_str(),
+                           fixture.api.lastAction.appliedAt.c_str());
   TEST_ASSERT_EQUAL_STRING("fresh-scan-context",
                            fixture.api.lastAction.scanContext.c_str());
-  TEST_ASSERT_EQUAL_INT(2, fixture.api.resolveCalls);
+  TEST_ASSERT_EQUAL_INT(3, fixture.api.resolveCalls);
 }
 
 void test_close_from_break_refresh_failure_never_appends_clock_out() {
@@ -737,12 +792,14 @@ void test_close_from_break_refresh_failure_never_appends_clock_out() {
   fixture.accepted(WorkKind::Working);
   fixture.press(Button::B);
   fixture.networkRoundTrip();
+  fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm, fixture.app.screen().kind);
 
   fixture.api.resolveCall.ok = false;
   fixture.api.resolveCall.failure.code = ApiErrorCode::ScanContextExpired;
   fixture.api.resolveCall.failure.safeMessage = "Vuelve a acercar el tag.";
   fixture.press(Button::C);
+  fixture.press(Button::B);
   TEST_ASSERT_EQUAL_UINT32(0, fixture.app.screen().pendingCount);
   fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL_INT(1, fixture.api.actionCalls);
@@ -757,12 +814,14 @@ void test_close_refresh_rejects_reassigned_uid_and_unexpected_state() {
   reassigned.accepted(WorkKind::Working);
   reassigned.press(Button::B);
   reassigned.networkRoundTrip();
+  reassigned.networkRoundTrip();
   TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm,
                     reassigned.app.screen().kind);
   reassigned.api.nextResolve.scanContext = "other-employee-context";
   reassigned.api.nextResolve.employee = {"employee-2", "Otra persona"};
   reassigned.api.nextResolve.state = work(WorkKind::Working);
   reassigned.press(Button::C);
+  reassigned.press(Button::B);
   TEST_ASSERT_EQUAL_UINT32(0, reassigned.app.screen().pendingCount);
   reassigned.networkRoundTrip();
   TEST_ASSERT_EQUAL_INT(1, reassigned.api.actionCalls);
@@ -777,10 +836,12 @@ void test_close_refresh_rejects_reassigned_uid_and_unexpected_state() {
   changedState.accepted(WorkKind::Working);
   changedState.press(Button::B);
   changedState.networkRoundTrip();
+  changedState.networkRoundTrip();
   changedState.api.nextResolve.scanContext = "new-context";
   changedState.api.nextResolve.employee = {"employee-1", "Marina"};
   changedState.api.nextResolve.state = work(WorkKind::Idle);
   changedState.press(Button::C);
+  changedState.press(Button::B);
   changedState.networkRoundTrip();
   TEST_ASSERT_EQUAL_INT(1, changedState.api.actionCalls);
   TEST_ASSERT_EQUAL_UINT32(0, changedState.app.screen().pendingCount);
@@ -796,9 +857,11 @@ void test_close_refresh_network_and_queue_failure_are_safe() {
   offline.accepted(WorkKind::Working);
   offline.press(Button::B);
   offline.networkRoundTrip();
+  offline.networkRoundTrip();
   offline.press(Button::C, false);
-  TEST_ASSERT_EQUAL_UINT32(0, offline.app.screen().pendingCount);
-  TEST_ASSERT_TRUE(offline.app.screen().warning);
+  offline.press(Button::B, false);
+  TEST_ASSERT_EQUAL_UINT32(1, offline.app.screen().pendingCount);
+  TEST_ASSERT_FALSE(offline.app.screen().warning);
   TEST_ASSERT_EQUAL_INT(1, offline.api.actionCalls);
 
   Fixture saturated;
@@ -806,6 +869,7 @@ void test_close_refresh_network_and_queue_failure_are_safe() {
   saturated.press(Button::C);
   saturated.accepted(WorkKind::Working);
   saturated.press(Button::B);
+  saturated.networkRoundTrip();
   saturated.networkRoundTrip();
   for (uint32_t index = 0; index < NetworkWorker::kQueueCapacity; ++index) {
     NetworkJob queued;
@@ -816,6 +880,7 @@ void test_close_refresh_network_and_queue_failure_are_safe() {
     TEST_ASSERT_TRUE(saturated.worker.enqueue(std::move(queued)));
   }
   saturated.press(Button::C);
+  saturated.press(Button::B);
   TEST_ASSERT_EQUAL_UINT32(0, saturated.app.screen().pendingCount);
   TEST_ASSERT_TRUE(saturated.app.screen().warning);
   TEST_ASSERT_EQUAL_INT(1, saturated.api.actionCalls);
@@ -840,6 +905,7 @@ void test_picker_and_close_confirm_expire_and_interaction_resets_picker() {
   confirmation.press(Button::C);
   confirmation.accepted(WorkKind::Working);
   confirmation.press(Button::B);
+  confirmation.networkRoundTrip();
   confirmation.networkRoundTrip();
   TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm,
                     confirmation.app.screen().kind);
@@ -869,6 +935,7 @@ void test_time_picker_crosses_midnight_without_losing_the_date() {
   fixture.press(Button::A);
   fixture.accepted(WorkKind::Idle);
   fixture.press(Button::B);
+  fixture.networkRoundTrip();
   fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL_STRING("2026-08-21T23:57:00Z",
                            fixture.api.lastAction.appliedAt.c_str());
@@ -1015,6 +1082,41 @@ void test_offline_confirmation_rechecks_clock_trust_after_scan() {
                            fixture.app.screen().detail.c_str());
 }
 
+void test_offline_picker_uses_cached_state_start_as_its_lower_bound() {
+  MemoryStorage storage;
+  Outbox outbox{storage};
+  TEST_ASSERT_EQUAL(OutboxError::None, outbox.begin());
+  FakeApi api{outbox};
+  NetworkWorker worker{api};
+  TEST_ASSERT_TRUE(worker.begin());
+  AppControllerConfig config = offlineConfig();
+  config.initialCache.entries[0].state =
+      {WorkKind::OnBreak, 3 * 60 * 60, 30 * 60, false, true};
+  config.initialCache.entries[0].stateSince = "2026-08-21T09:30:00Z";
+  AppController app{worker, outbox, config};
+  app.start(0, 1000);
+
+  AppEvent scan;
+  scan.kind = AppEventKind::TagScanned;
+  scan.nowMs = 1000;
+  scan.nowEpochSeconds = 1787306400;
+  scan.timestamp = isoUtc(scan.nowEpochSeconds);
+  scan.uid = "04AABBCC";
+  scan.ntpTrusted = true;
+  scan.ntpSyncEpochSeconds = scan.nowEpochSeconds;
+  app.tick(scan);
+  AppEvent press = scan;
+  press.kind = AppEventKind::ButtonPressed;
+  press.button = Button::C;
+  app.tick(press);
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, app.screen().kind);
+  const int64_t maximum = app.screen().selectedEpochSeconds;
+  press.button = Button::A;
+  app.tick(press);
+  TEST_ASSERT_EQUAL_INT64(maximum - 5 * 60,
+                          app.screen().selectedEpochSeconds);
+}
+
 void test_new_reboot_starts_a_new_signature_chain_after_replaying_old_records() {
   MemoryStorage storage;
   Outbox outbox{storage};
@@ -1086,6 +1188,9 @@ void test_offline_close_from_break_queues_break_end_then_clock_out() {
   TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm, fixture.app.screen().kind);
   press.button = Button::C;
   fixture.app.tick(press);  // clock_out
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, fixture.app.screen().kind);
+  press.button = Button::B;
+  fixture.app.tick(press);  // confirm clock_out
 
   std::vector<QueuedAction> pending;
   TEST_ASSERT_EQUAL(OutboxError::None, fixture.outbox.list(pending));
@@ -1105,9 +1210,12 @@ void test_ambiguous_break_end_keeps_following_clock_out_queued_in_order() {
   fixture.api.actionCall.failure.retryable = true;
   fixture.press(Button::B);
   fixture.networkRoundTrip();
+  fixture.networkRoundTrip();
   TEST_ASSERT_EQUAL(ScreenKind::CloseConfirm, fixture.app.screen().kind);
 
   fixture.press(Button::C);
+  TEST_ASSERT_EQUAL(ScreenKind::TimePicker, fixture.app.screen().kind);
+  fixture.press(Button::B);
 
   std::vector<QueuedAction> pending;
   TEST_ASSERT_EQUAL(OutboxError::None, fixture.outbox.list(pending));
@@ -1666,6 +1774,7 @@ int main(int, char**) {
   RUN_TEST(test_operational_screens_keep_status_icons_and_button_labels);
   RUN_TEST(test_offline_action_requires_fresh_ntp_and_advances_only_after_append);
   RUN_TEST(test_offline_confirmation_rechecks_clock_trust_after_scan);
+  RUN_TEST(test_offline_picker_uses_cached_state_start_as_its_lower_bound);
   RUN_TEST(test_new_reboot_starts_a_new_signature_chain_after_replaying_old_records);
   RUN_TEST(test_offline_close_from_break_queues_break_end_then_clock_out);
   RUN_TEST(test_ambiguous_break_end_keeps_following_clock_out_queued_in_order);

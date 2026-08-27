@@ -394,10 +394,22 @@ test('RFID terminal creates, assigns and records an idempotent work event', asyn
   await page.getByRole('button', { name: 'A', exact: true }).click();
   await page.getByRole('button', { name: 'Acercar tag' }).click();
   await expect(page.getByText('En pausa')).toBeVisible();
+  await page.getByRole('button', { name: 'A', exact: true }).click();
+  await expect(page.getByText('¿A qué hora terminaste la pausa?')).toBeVisible();
+  await page.getByRole('button', { name: 'B', exact: true }).click();
+  await expect(page.getByText('Pausa terminada')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Acercar tag' }).click();
+  await expect(page.getByText('Trabajando')).toBeVisible();
+  await page.getByRole('button', { name: 'A', exact: true }).click();
+  await page.getByRole('button', { name: 'Acercar tag' }).click();
+  await expect(page.getByText('En pausa')).toBeVisible();
   await page.getByRole('button', { name: 'C', exact: true }).click();
   await page.getByRole('button', { name: 'B', exact: true }).click();
   await expect(page.getByText('¿Deseas cerrar ahora la jornada?')).toBeVisible();
   await page.getByRole('button', { name: 'C', exact: true }).click();
+  await expect(page.getByText('¿A qué hora terminaste?')).toBeVisible();
+  await page.getByRole('button', { name: 'B', exact: true }).click();
   await expect(page.getByText(/Hasta luego, .* · Jornada finalizada/)).toBeVisible();
 
   const policy = await request.patch(

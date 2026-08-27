@@ -90,6 +90,10 @@ administrativa para que nunca los confunda con un fichaje. También permite
 probar el flujo normal de jornada, la corrección de una pausa olvidada en una
 jornada de al menos cuatro horas y la sincronización de acciones offline. La
 clave introducida permanece únicamente en memoria y se pierde al recargar.
+Al terminar una pausa o una jornada, el simulador parte de la hora de lectura
+del tag, limita los ajustes al tramo vigente y renueva el contexto efímero antes
+de enviar una acción online. El cierre de una jornada con pausa abierta usa dos
+selectores consecutivos y conserva el orden de ambos eventos si cambia la red.
 
 ## Control horario
 
