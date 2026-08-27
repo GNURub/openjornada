@@ -3,6 +3,8 @@ import {
   TerminalActionResult,
   TerminalBootstrapResponse,
   TerminalCommand,
+  TerminalConnectionStatus,
+  TerminalPingResult,
 } from './terminal.models';
 
 describe('terminal API contracts', () => {
@@ -24,5 +26,23 @@ describe('terminal API contracts', () => {
 
     expect(commands).toHaveLength(4);
     expect(result.status).toBe('accepted');
+  });
+
+  it('keeps terminal diagnostics and ephemeral ping data explicit', () => {
+    const statuses: TerminalConnectionStatus[] = ['online', 'offline', 'revoked'];
+    const ping = {
+      terminalId: 'terminal-1',
+      localIp: '192.168.1.44',
+      publicIp: '203.0.113.9',
+      wifiRssiDbm: -62,
+      uptimeSeconds: 81,
+      waitForHeartbeatMs: 500,
+      responseMs: 120,
+      totalLatencyMs: 620,
+      checkedAt: '2026-08-27T12:00:00Z',
+    } satisfies TerminalPingResult;
+
+    expect(statuses).toEqual(['online', 'offline', 'revoked']);
+    expect(ping.localIp).toBe('192.168.1.44');
   });
 });

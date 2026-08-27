@@ -1,0 +1,171 @@
+<div class="flex flex-col gap-5">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-52 flex-1">
+      <div class="flex flex-wrap items-center gap-2">
+        <p class="font-semibold">{{ terminal().name }}</p>
+        <span
+          class="rounded-full px-2.5 py-1 text-[11px] font-bold"
+          [class.bg-emerald-50]="terminal().connectionStatus === 'online'"
+          [class.text-emerald-700]="terminal().connectionStatus === 'online'"
+          [class.bg-amber-50]="terminal().connectionStatus === 'offline'"
+          [class.text-amber-800]="terminal().connectionStatus === 'offline'"
+          [class.bg-stone-100]="terminal().connectionStatus === 'revoked'"
+          [class.text-stone-600]="terminal().connectionStatus === 'revoked'"
+        >
+          {{ statusLabel(terminal().connectionStatus) }}
+        </span>
+        @if (terminal().lastPendingCount > 0) {
+          <span class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800">
+            {{ terminal().lastPendingCount }} pendientes
+          </span>
+        }
+      </div>
+      <p class="mt-1 font-mono text-xs text-stone-400">ojterm_{{ terminal().prefix }}_…</p>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      @if (terminal().connectionStatus !== 'revoked') {
+        <button
+          type="button"
+          (click)="checkConnection()"
+          [disabled]="pingPending()"
+          class="btn-secondary !min-h-10 !px-4"
+        >
+          {{ pingPending() ? 'Esperando respuesta…' : 'Comprobar conexión' }}
+        </button>
+      }
+      @if (canManage() && terminal().connectionStatus !== 'revoked') {
+        <button
+          type="button"
+          (click)="renameRequested.emit(terminal())"
+          class="btn-secondary !min-h-10 !px-4"
+        >
+          Renombrar
+        </button>
+        <button
+          type="button"
+          (click)="rotateRequested.emit(terminal())"
+          class="btn-secondary !min-h-10 !px-4"
+        >
+          Rotar key
+        </button>
+        <button
+          type="button"
+          (click)="revokeRequested.emit(terminal())"
+          class="rounded-xl border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50"
+        >
+          Revocar
+        </button>
+      }
+    </div>
+  </div>
+
+  <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Último contacto</dt>
+      <dd
+        data-testid="last-heartbeat"
+        class="mt-1 font-medium text-stone-700"
+        [title]="date(terminal().lastHeartbeatAt).exact"
+      >
+        {{ date(terminal().lastHeartbeatAt).relative }}
+        <span class="sr-only">({{ date(terminal().lastHeartbeatAt).exact }})</span>
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Última sincronización de fichajes</dt>
+      <dd
+        class="mt-1 font-medium text-stone-700"
+        [title]="date(terminal().lastAttendanceSyncAt).exact"
+      >
+        {{ date(terminal().lastAttendanceSyncAt).relative }}
+        <span class="sr-only">({{ date(terminal().lastAttendanceSyncAt).exact }})</span>
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Señal Wi-Fi</dt>
+      <dd class="mt-1 font-medium text-stone-700">{{ wifi(terminal().lastWifiRssiDbm) }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Tiempo encendido</dt>
+      <dd class="mt-1 font-medium text-stone-700">
+        {{ uptime(terminal().lastUptimeSeconds) }}
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Reloj</dt>
+      <dd class="mt-1 font-medium text-stone-700">{{ clock(terminal().lastClockStatus) }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Última sincronización NTP</dt>
+      <dd class="mt-1 font-medium text-stone-700" [title]="date(terminal().lastNtpSyncAt).exact">
+        {{ date(terminal().lastNtpSyncAt).relative }}
+        <span class="sr-only">({{ date(terminal().lastNtpSyncAt).exact }})</span>
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Firmware y protocolo</dt>
+      <dd class="mt-1 font-medium text-stone-700">
+        {{ terminal().clientVersion || 'Sin datos' }} · v{{ terminal().protocolVersion || 1 }}
+      </dd>
+    </div>
+    <div>
+      <dt class="text-xs font-semibold text-stone-400">Revisión de caché</dt>
+      <dd class="mt-1 font-medium text-stone-700">{{ terminal().cacheRevision }}</dd>
+    </div>
+  </dl>
+
+  @if (pingError()) {
+    <p role="alert" class="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+      {{ pingError() }}
+    </p>
+  }
+
+  @if (pingResult(); as result) {
+    <section
+      aria-label="Resultado de la comprobación"
+      aria-live="polite"
+      class="rounded-2xl border border-cyan-100 bg-cyan-50/60 p-4"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="font-semibold text-stone-800">Conexión comprobada</h3>
+        <p class="text-xs text-stone-500" [title]="date(result.checkedAt).exact">
+          {{ date(result.checkedAt).relative }}
+        </p>
+      </div>
+      <dl class="mt-3 grid gap-x-5 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">IP local</dt>
+          <dd class="mt-1 break-all font-mono text-stone-800">{{ result.localIp }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">IP pública</dt>
+          <dd class="mt-1 break-all font-mono text-stone-800">{{ result.publicIp }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">Señal Wi-Fi</dt>
+          <dd class="mt-1 text-stone-800">{{ wifi(result.wifiRssiDbm) }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">Tiempo encendido</dt>
+          <dd class="mt-1 text-stone-800">{{ uptime(result.uptimeSeconds) }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">Espera hasta heartbeat</dt>
+          <dd class="mt-1 text-stone-800">{{ latency(result.waitForHeartbeatMs) }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">Respuesta del terminal</dt>
+          <dd class="mt-1 text-stone-800">{{ latency(result.responseMs) }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs font-semibold text-stone-500">Latencia total</dt>
+          <dd class="mt-1 font-semibold text-stone-800">{{ latency(result.totalLatencyMs) }}</dd>
+        </div>
+      </dl>
+      <p class="mt-3 text-xs text-stone-500">
+        Las direcciones IP se borrarán automáticamente de esta pantalla en 10 minutos.
+      </p>
+    </section>
+  }
+</div>

@@ -134,62 +134,14 @@
         [class.opacity-60]="terminalsLoading()"
       >
         @for (terminal of terminals(); track terminal.id) {
-          <li class="flex flex-wrap items-center gap-4 px-5 py-4">
-            <div class="min-w-52 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <p class="font-semibold">{{ terminal.name }}</p>
-                <span
-                  class="rounded-full px-2.5 py-1 text-[11px] font-bold"
-                  [class.bg-emerald-50]="!terminal.revokedAt"
-                  [class.text-emerald-700]="!terminal.revokedAt"
-                  [class.bg-stone-100]="!!terminal.revokedAt"
-                  [class.text-stone-500]="!!terminal.revokedAt"
-                  >{{ terminal.revokedAt ? 'Revocado' : 'Activo' }}</span
-                >
-                @if (terminal.lastPendingCount > 0) {
-                  <span
-                    class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700"
-                    >{{ terminal.lastPendingCount }} pendientes</span
-                  >
-                }
-              </div>
-              <p class="mt-1 font-mono text-xs text-stone-400">ojterm_{{ terminal.prefix }}_…</p>
-              <p class="mt-1 text-xs text-stone-500">
-                Creado {{ formatTerminalDate(terminal.created) }} · Última conexión
-                {{ formatTerminalDate(terminal.lastSeenAt) }} · Protocolo
-                {{ terminal.protocolVersion || 1 }} ·
-                {{ terminal.clientVersion || 'Sin versión informada' }}
-              </p>
-            </div>
-            @if (auth.user()?.role === 'admin' && !terminal.revokedAt) {
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  (click)="renameTerminal(terminal)"
-                  [disabled]="terminalBusy() || terminalsLoading()"
-                  class="btn-secondary !min-h-10 !px-4"
-                >
-                  Renombrar
-                </button>
-                <button
-                  type="button"
-                  (click)="rotateTerminal(terminal)"
-                  [disabled]="terminalBusy() || terminalsLoading()"
-                  class="btn-secondary !min-h-10 !px-4"
-                >
-                  Rotar key
-                </button>
-                <button
-                  type="button"
-                  (click)="revokeTerminal(terminal)"
-                  [disabled]="terminalBusy() || terminalsLoading()"
-                  class="rounded-xl border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                >
-                  Revocar
-                </button>
-              </div>
-            }
-          </li>
+          <li
+            app-terminal-diagnostics-card
+            [terminal]="terminal"
+            [canManage]="auth.user()?.role === 'admin'"
+            (renameRequested)="renameTerminal($event)"
+            (rotateRequested)="rotateTerminal($event)"
+            (revokeRequested)="revokeTerminal($event)"
+          ></li>
         }
       </ul>
       <div

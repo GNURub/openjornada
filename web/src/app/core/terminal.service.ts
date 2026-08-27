@@ -6,6 +6,7 @@ import {
   TerminalBootstrapResponse,
   TerminalEmployee,
   TerminalIncidentRecord,
+  TerminalPingResult,
   TerminalQueuedAction,
   TerminalRecord,
   TerminalResolveResponse,
@@ -43,6 +44,13 @@ export class TerminalService {
 
   revokeTerminal(id: string): Promise<TerminalRecord> {
     return this.pb.send(`/api/openjornada/terminals/${id}/revoke`, { method: 'POST' });
+  }
+
+  pingTerminal(id: string): Promise<TerminalPingResult> {
+    return this.pb.send(`/api/openjornada/terminals/${id}/ping`, {
+      method: 'POST',
+      requestKey: null,
+    });
   }
 
   updateAdminPin(pin: string): Promise<{ configured: boolean }> {

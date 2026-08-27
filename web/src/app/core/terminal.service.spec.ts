@@ -54,4 +54,13 @@ describe('terminal service public contract', () => {
       ],
     ]);
   });
+
+  it('uses the scoped administrative ping route without request cancellation', async () => {
+    await service.pingTerminal('terminal-1');
+
+    expect(send).toHaveBeenLastCalledWith('/api/openjornada/terminals/terminal-1/ping', {
+      method: 'POST',
+      requestKey: null,
+    });
+  });
 });

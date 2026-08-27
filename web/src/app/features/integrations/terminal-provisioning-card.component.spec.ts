@@ -7,6 +7,7 @@ import { PocketBaseService } from '../../core/pocketbase.service';
 import type { TerminalRecord } from '../../core/terminal.models';
 import { TerminalService } from '../../core/terminal.service';
 import { IntegrationsComponent } from './integrations.component';
+import { TerminalDiagnosticsCardComponent } from './terminal-diagnostics-card.component';
 import { TerminalProvisioningCardComponent } from './terminal-provisioning-card.component';
 
 @Component({
@@ -246,6 +247,7 @@ interface TestableIntegrationsComponent {
   terminalTotalPages(): number;
   terminalSaving(): boolean;
   generatedTerminalToken(): string;
+  ngOnDestroy(): void;
 }
 
 function terminalRecord(id: string, token?: string): TerminalRecord {
@@ -262,6 +264,13 @@ function terminalRecord(id: string, token?: string): TerminalRecord {
     lastSeenAt: '',
     lastPendingCount: 0,
     revokedAt: '',
+    connectionStatus: 'offline',
+    lastHeartbeatAt: '',
+    lastAttendanceSyncAt: '',
+    lastClockStatus: '',
+    lastNtpSyncAt: '',
+    lastWifiRssiDbm: null,
+    lastUptimeSeconds: null,
     createdBy: 'admin-1',
     created: '2026-08-22 18:00:00.000Z',
   } as TerminalRecord;
@@ -272,11 +281,13 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
   let createTerminal: ReturnType<typeof vi.fn>;
   let listTerminals: ReturnType<typeof vi.fn>;
   let rotateTerminalKey: ReturnType<typeof vi.fn>;
+  let pingTerminal: ReturnType<typeof vi.fn>;
   let updateAdminPin: ReturnType<typeof vi.fn>;
   let fixture: ComponentFixture<IntegrationsComponent>;
   let component: TestableIntegrationsComponent;
 
   beforeEach(async () => {
+    vi.useFakeTimers();
     createTerminal = vi.fn();
     listTerminals = vi.fn().mockResolvedValue({
       items: [terminalRecord('terminal-1')],
@@ -287,6 +298,7 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
       totalPages: 1,
     });
     rotateTerminalKey = vi.fn();
+    pingTerminal = vi.fn();
     updateAdminPin = vi.fn();
     await TestBed.configureTestingModule({
       imports: [IntegrationsComponent],
@@ -303,6 +315,7 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
             createTerminal,
             rotateTerminalKey,
             updateAdminPin,
+            pingTerminal,
           },
         },
       ],
@@ -315,7 +328,117 @@ describe('IntegrationsComponent terminal credential lifecycle', () => {
 
   afterEach(() => {
     fixture.destroy();
+    vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('refreshes the current terminal page silently every thirty seconds', async () => {
+    listTerminals.mockResolvedValueOnce({
+      items: [terminalRecord('terminal-11')],
+      adminPinConfigured: true,
+      page: 2,
+      perPage: 10,
+      totalItems: 11,
+      totalPages: 2,
+    });
+    await component.loadTerminals(2);
+    listTerminals.mockClear();
+    listTerminals.mockResolvedValue({
+      items: [terminalRecord('terminal-11')],
+      adminPinConfigured: true,
+      page: 2,
+      perPage: 10,
+      totalItems: 11,
+      totalPages: 2,
+    });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(listTerminals).toHaveBeenCalledOnce();
+    expect(listTerminals).toHaveBeenCalledWith(2);
+    expect(component.terminalPage()).toBe(2);
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('ul')?.getAttribute('aria-busy'),
+    ).not.toBe('true');
+  });
+
+  it('does not overlap background terminal refreshes and stops them on destroy', async () => {
+    let finishRefresh!: (response: {
+      items: TerminalRecord[];
+      adminPinConfigured: boolean;
+      page: number;
+      perPage: number;
+      totalItems: number;
+      totalPages: number;
+    }) => void;
+    listTerminals.mockClear();
+    listTerminals.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishRefresh = resolve;
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('ul')?.getAttribute('aria-busy'),
+    ).toBe('false');
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(listTerminals).toHaveBeenCalledOnce();
+
+    finishRefresh({
+      items: [terminalRecord('terminal-1')],
+      adminPinConfigured: true,
+      page: 1,
+      perPage: 10,
+      totalItems: 1,
+      totalPages: 1,
+    });
+    await Promise.resolve();
+    fixture.destroy();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(listTerminals).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the same terminal card and its ephemeral ping result across refreshes', async () => {
+    pingTerminal.mockResolvedValue({
+      terminalId: 'terminal-1',
+      localIp: '192.168.1.44',
+      publicIp: '203.0.113.9',
+      wifiRssiDbm: -62,
+      uptimeSeconds: 81,
+      waitForHeartbeatMs: 500,
+      responseMs: 120,
+      totalLatencyMs: 620,
+      checkedAt: '2026-08-27T12:00:00Z',
+    });
+    fixture.detectChanges();
+    const childBefore = fixture.debugElement.query(By.css('li[app-terminal-diagnostics-card]'))
+      .componentInstance as TerminalDiagnosticsCardComponent;
+    const checkButton = [
+      ...(fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button'),
+    ].find((button) => button.textContent?.trim() === 'Comprobar conexión')!;
+    checkButton.click();
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('192.168.1.44');
+
+    listTerminals.mockResolvedValueOnce({
+      items: [terminalRecord('terminal-1')],
+      adminPinConfigured: true,
+      page: 1,
+      perPage: 10,
+      totalItems: 1,
+      totalPages: 1,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    fixture.detectChanges();
+
+    const childAfter = fixture.debugElement.query(By.css('li[app-terminal-diagnostics-card]'))
+      .componentInstance as TerminalDiagnosticsCardComponent;
+    expect(childAfter).toBe(childBefore);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('192.168.1.44');
   });
 
   it('stores a newly issued token only in the one-time signal', async () => {

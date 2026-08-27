@@ -5,6 +5,7 @@ import { McpTokenRecord } from '../../core/models';
 import { PocketBaseService } from '../../core/pocketbase.service';
 import { TerminalRecord } from '../../core/terminal.models';
 import { TerminalService } from '../../core/terminal.service';
+import { TerminalDiagnosticsCardComponent } from './terminal-diagnostics-card.component';
 import { TerminalProvisioningCardComponent } from './terminal-provisioning-card.component';
 
 interface TokenListResponse {
@@ -14,7 +15,7 @@ interface TokenListResponse {
 
 @Component({
   selector: 'app-integrations',
-  imports: [FormsModule, TerminalProvisioningCardComponent],
+  imports: [FormsModule, TerminalDiagnosticsCardComponent, TerminalProvisioningCardComponent],
   templateUrl: './integrations.component.html',
 })
 export class IntegrationsComponent implements OnDestroy {
@@ -49,6 +50,8 @@ export class IntegrationsComponent implements OnDestroy {
   );
   private terminalCredentialGeneration = 0;
   private terminalListGeneration = 0;
+  private terminalListPending = false;
+  private readonly terminalRefreshTimer: number;
   protected readonly mcpUrl = signal('https://tu-dominio.example/mcp');
   protected readonly codexConfig = computed(
     () => `[mcp_servers.openjornada]
@@ -73,15 +76,22 @@ default_tools_approval_mode = "writes"`,
   constructor() {
     void this.load();
     void this.loadTerminals();
+    this.terminalRefreshTimer = window.setInterval(() => {
+      if (!this.terminalBusy() && !this.terminalsLoading() && !this.terminalListPending) {
+        void this.loadTerminals(this.terminalPage(), false, true);
+      }
+    }, 30_000);
   }
 
   protected async loadTerminals(
     page = this.terminalPage(),
     allowDuringMutation = false,
+    background = false,
   ): Promise<void> {
-    if (this.terminalBusy() && !allowDuringMutation) return;
+    if (this.terminalListPending || (this.terminalBusy() && !allowDuringMutation)) return;
+    this.terminalListPending = true;
     const listGeneration = ++this.terminalListGeneration;
-    this.terminalsLoading.set(true);
+    if (!background) this.terminalsLoading.set(true);
     try {
       const response = await this.terminalService.listTerminals(page);
       if (listGeneration !== this.terminalListGeneration) return;
@@ -96,7 +106,8 @@ default_tools_approval_mode = "writes"`,
       this.error.set(this.errorMessage(error, 'No se pudieron cargar los terminales RFID.'));
     } finally {
       if (listGeneration === this.terminalListGeneration) {
-        this.terminalsLoading.set(false);
+        this.terminalListPending = false;
+        if (!background) this.terminalsLoading.set(false);
       }
     }
   }
@@ -248,6 +259,9 @@ default_tools_approval_mode = "writes"`,
   }
 
   ngOnDestroy(): void {
+    window.clearInterval(this.terminalRefreshTimer);
+    ++this.terminalListGeneration;
+    this.terminalListPending = false;
     this.invalidateTerminalCredentialOperations();
   }
 

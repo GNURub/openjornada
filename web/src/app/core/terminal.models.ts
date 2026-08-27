@@ -3,6 +3,7 @@ import type { RecordModel } from 'pocketbase';
 export type TerminalStateKind = 'idle' | 'working' | 'on_break';
 export type TerminalCommand = 'clock_in' | 'break_start' | 'break_end' | 'clock_out';
 export type TerminalActionStatus = 'accepted' | 'duplicate' | 'incident' | 'rejected';
+export type TerminalConnectionStatus = 'online' | 'offline' | 'revoked';
 export type TerminalErrorCode =
   | 'authentication_required'
   | 'terminal_revoked'
@@ -27,9 +28,28 @@ export interface TerminalRecord extends RecordModel {
   lastSeenAt: string;
   lastPendingCount: number;
   revokedAt: string;
+  connectionStatus: TerminalConnectionStatus;
+  lastHeartbeatAt: string;
+  lastAttendanceSyncAt: string;
+  lastClockStatus: '' | 'synced' | 'stale' | 'unsynced';
+  lastNtpSyncAt: string;
+  lastWifiRssiDbm: number | null;
+  lastUptimeSeconds: number | null;
   createdBy: string;
   created: string;
   token?: string;
+}
+
+export interface TerminalPingResult {
+  terminalId: string;
+  localIp: string;
+  publicIp: string;
+  wifiRssiDbm: number;
+  uptimeSeconds: number;
+  waitForHeartbeatMs: number;
+  responseMs: number;
+  totalLatencyMs: number;
+  checkedAt: string;
 }
 
 export interface TerminalAction {
