@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/GNURub/openjornada/cli/openjornada-terminal/internal/protocol"
+	"github.com/GNURub/openjornada/cli/openjornada-terminal/internal/release"
 	"github.com/GNURub/openjornada/cli/openjornada-terminal/internal/serialport"
 	"github.com/spf13/cobra"
 	"go.bug.st/serial"
@@ -32,6 +33,7 @@ type Dependencies struct {
 	PortNames    func() ([]string, error)
 	ReadPassword func() ([]byte, error)
 	ResetTimeout time.Duration
+	LatestStable func(context.Context) (release.Bundle, error)
 }
 
 type runtimeDependencies struct {
@@ -39,6 +41,7 @@ type runtimeDependencies struct {
 	portNames    func() ([]string, error)
 	readPassword func() ([]byte, error)
 	resetTimeout time.Duration
+	latestStable func(context.Context) (release.Bundle, error)
 }
 
 // NewRoot creates an isolated Cobra command tree. It does not inspect the
@@ -83,7 +86,11 @@ func NewRoot(dependencies Dependencies) *cobra.Command {
 	if resetTimeout <= 0 {
 		resetTimeout = 35 * time.Second
 	}
-	runtime := runtimeDependencies{connect: connect, portNames: portNames, readPassword: readPassword, resetTimeout: resetTimeout}
+	latestStable := dependencies.LatestStable
+	if latestStable == nil {
+		latestStable = release.LatestStable
+	}
+	runtime := runtimeDependencies{connect: connect, portNames: portNames, readPassword: readPassword, resetTimeout: resetTimeout, latestStable: latestStable}
 
 	command := &cobra.Command{
 		Use:           "openjornada-terminal",
