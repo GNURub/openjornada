@@ -1,8 +1,11 @@
 #include "openjornada/provisioning.hpp"
 
+#include "openjornada/api_models.hpp"
 #include "openjornada/display_power.hpp"
 #include "openjornada/gesture.hpp"
 #include "openjornada/ojp.hpp"
+#include "openjornada/ota.hpp"
+#include "openjornada/version.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -354,6 +357,27 @@ bool decodeProvisioningFormRequest(const CaptiveHttpRequest& request,
   return true;
 }
 
+namespace {
+
+std::string safeBootstrapError(const DeviceConfig& candidate,
+                               const std::string& error) {
+  if (error.empty() || error.size() > 180 ||
+      (!candidate.terminalToken.empty() &&
+       error.find(candidate.terminalToken) != std::string::npos) ||
+      (!candidate.wifiPassword.empty() &&
+       error.find(candidate.wifiPassword) != std::string::npos)) {
+    return "El servidor no aceptó este terminal.";
+  }
+  for (const unsigned char byte : error) {
+    if (byte < 0x20U || byte == 0x7FU) {
+      return "El servidor no aceptó este terminal.";
+    }
+  }
+  return error;
+}
+
+}  // namespace
+
 bool canApplyProvisioningCandidate(
     const std::optional<DeviceConfig>& activeConfig,
     const DeviceConfig& candidate, size_t pendingCount) {
@@ -456,13 +480,50 @@ uint32_t ProvisioningAttemptState::completedAtMs() const {
   return completedAtMs_;
 }
 
+ProvisioningCandidateResult completeProvisioningAttempt(
+    ProvisioningAttemptState& attempt,
+    const CandidateValidator& candidateValidator,
+    const ProvisioningCandidateSaver& candidateSaver,
+    const std::function<bool()>& service,
+    const std::function<uint32_t()>& nowMs) {
+  const std::optional<DeviceConfig>& candidate = attempt.candidate();
+  if (attempt.phase() != ProvisioningCheckPhase::Validating ||
+      !candidate.has_value() || !candidateValidator || !candidateSaver ||
+      !nowMs) {
+    attempt.fail("No se pudo preparar la configuración.");
+    return ProvisioningCandidateResult::Failed;
+  }
+
+  bool cancelled = false;
+  const auto trackedService = [&]() {
+    const bool keepRunning = !service || service();
+    cancelled = cancelled || !keepRunning;
+    return keepRunning;
+  };
+  std::string bootstrapError;
+  if (!candidateValidator(*candidate, bootstrapError, trackedService)) {
+    if (cancelled) return ProvisioningCandidateResult::Cancelled;
+    attempt.fail(safeBootstrapError(*candidate, bootstrapError));
+    return ProvisioningCandidateResult::Failed;
+  }
+  if (!candidateSaver(*candidate)) {
+    attempt.fail("El servidor respondió, pero no se pudo guardar la "
+                 "configuración.");
+    return ProvisioningCandidateResult::Failed;
+  }
+  attempt.succeed(nowMs());
+  return ProvisioningCandidateResult::Saved;
+}
+
 ProvisioningSerialAdapter::ProvisioningSerialAdapter(
     BuildProfile profile, std::optional<DeviceConfig> activeConfig,
-    size_t pendingCount, ProvisioningSerialMode mode)
+    size_t pendingCount, ProvisioningSerialMode mode,
+    ProvisioningSerialPublicContext publicContext)
     : profile_(profile),
       activeConfig_(std::move(activeConfig)),
       pendingCount_(pendingCount),
-      mode_(mode) {}
+      mode_(mode),
+      publicContext_(publicContext) {}
 
 UsbProvisionAcceptance ProvisioningSerialAdapter::accept(
     const UsbControlRequest& request, ProvisioningAttemptState& attempt,
@@ -531,6 +592,66 @@ std::optional<std::string> ProvisioningSerialAdapter::nextEvent(
 
 namespace {
 
+UsbPublicCapabilities provisioningCapabilities() {
+  return {true, true, false, false, false, true, false, false};
+}
+
+bool provisioningConfigured(
+    const std::optional<DeviceConfig>& activeConfig,
+    const ProvisioningAttemptState& attempt) {
+  return activeConfig.has_value() ||
+         attempt.phase() == ProvisioningCheckPhase::Succeeded;
+}
+
+std::string provisioningPublicResponse(
+    const UsbControlRequest& request,
+    const std::optional<DeviceConfig>& activeConfig, size_t pendingCount,
+    const ProvisioningSerialPublicContext& publicContext,
+    const ProvisioningAttemptState& attempt) {
+  const bool configured = provisioningConfigured(activeConfig, attempt);
+  ArduinoJson::JsonDocument data;
+  switch (request.command) {
+    case UsbCommand::Hello:
+      data["protocolVersion"] = kTerminalProtocolVersion;
+      data["board"] = kOtaBoard;
+      data["firmwareVersion"] = kTerminalFirmwareVersion;
+      data["mode"] = "provisioning";
+      encodeUsbCapabilities(data["capabilities"].to<ArduinoJson::JsonObject>(),
+                            provisioningCapabilities());
+      return encodeUsbResponse(request.id, "result", "ok",
+                               "Terminal disponible.",
+                               data.as<ArduinoJson::JsonVariantConst>());
+    case UsbCommand::Status:
+      data["board"] = kOtaBoard;
+      data["firmwareVersion"] = kTerminalFirmwareVersion;
+      data["protocolVersion"] = kTerminalProtocolVersion;
+      data["mode"] = "provisioning";
+      data["configured"] = configured;
+      data["wifiConnected"] =
+          publicContext.wifiConnected && publicContext.wifiConnected();
+      data["pendingCount"] = pendingCount;
+      return encodeUsbResponse(request.id, "result", "ok",
+                               "Estado del terminal.",
+                               data.as<ArduinoJson::JsonVariantConst>());
+    case UsbCommand::Doctor: {
+      data["storageAvailable"] = publicContext.storageAvailable;
+      data["rfidAvailable"] = publicContext.rfidAvailable;
+      data["configured"] = configured;
+      encodeUsbCapabilities(data["capabilities"].to<ArduinoJson::JsonObject>(),
+                            provisioningCapabilities());
+      auto errors = data["errorCodes"].to<ArduinoJson::JsonArray>();
+      if (!configured) errors.add("configuration_missing");
+      if (!publicContext.storageAvailable) errors.add("storage_unavailable");
+      if (!publicContext.rfidAvailable) errors.add("rfid_unavailable");
+      return encodeUsbResponse(request.id, "result", "ok",
+                               "Diagnóstico completado.",
+                               data.as<ArduinoJson::JsonVariantConst>());
+    }
+    default:
+      return {};
+  }
+}
+
 void writeProvisioningSerial(ProvisioningSerialTransport& transport,
                              const std::string& response) {
   size_t offset = 0;
@@ -563,6 +684,17 @@ void ProvisioningSerialAdapter::service(ProvisioningSerialTransport& transport,
     if (status != UsbParseStatus::Complete) continue;
 
     const UsbControlRequest request = parser_.request();
+    if (mode_ == ProvisioningSerialMode::Portal &&
+        (request.command == UsbCommand::Hello ||
+         request.command == UsbCommand::Status ||
+         request.command == UsbCommand::Doctor)) {
+      writeProvisioningSerial(
+          transport,
+          provisioningPublicResponse(request, activeConfig_, pendingCount_,
+                                     publicContext_, attempt));
+      parser_.reset();
+      return;
+    }
     const UsbProvisionAcceptance acceptance = accept(request, attempt, nowMs);
     writeProvisioningSerial(
         transport,
@@ -606,11 +738,13 @@ void ProvisioningSerialAdapter::service(Stream& stream,
 
 ProvisioningPortal::ProvisioningPortal(
     ConfigStore& store, BuildProfile profile,
-    std::optional<DeviceConfig> activeConfig, size_t pendingCount)
+    std::optional<DeviceConfig> activeConfig, size_t pendingCount,
+    ProvisioningSerialPublicContext publicContext)
     : store_(store),
       profile_(profile),
       activeConfig_(std::move(activeConfig)),
-      pendingCount_(pendingCount) {}
+      pendingCount_(pendingCount),
+      publicContext_(publicContext) {}
 
 #ifndef ARDUINO
 
@@ -712,23 +846,6 @@ String validationMessage(ConfigError error) {
       return {};
   }
   return F("La configuración no es válida.");
-}
-
-std::string safeBootstrapError(const DeviceConfig& candidate,
-                               const std::string& error) {
-  if (error.empty() || error.size() > 180 ||
-      (!candidate.terminalToken.empty() &&
-       error.find(candidate.terminalToken) != std::string::npos) ||
-      (!candidate.wifiPassword.empty() &&
-       error.find(candidate.wifiPassword) != std::string::npos)) {
-    return "El servidor no aceptó este terminal.";
-  }
-  for (const unsigned char byte : error) {
-    if (byte < 0x20U || byte == 0x7FU) {
-      return "El servidor no aceptó este terminal.";
-    }
-  }
-  return error;
 }
 
 bool remoteFromPortal(const IPAddress& remote) {
@@ -1111,8 +1228,13 @@ ProvisioningResult ProvisioningPortal::run(
   bool cancelRequested = false;
   bool stationConnectStarted = false;
   ProvisioningAttemptState attempt;
+  ProvisioningSerialPublicContext serialPublicContext = publicContext_;
+  serialPublicContext.wifiConnected = [] {
+    return WiFi.status() == WL_CONNECTED;
+  };
   ProvisioningSerialAdapter serialAdapter(
-      profile_, activeConfig_, pendingCount_, ProvisioningSerialMode::Portal);
+      profile_, activeConfig_, pendingCount_, ProvisioningSerialMode::Portal,
+      std::move(serialPublicContext));
   server.begin();
   drawProvisioningAccess(apSsid, apPassword);
   DisplayPowerPolicy displayPower(millis());
@@ -1327,28 +1449,25 @@ ProvisioningResult ProvisioningPortal::run(
                                "Validando el servidor de OpenJornada...",
                                false);
         serviceProvisioningIo();
-        std::string bootstrapError;
-        if (!candidateValidator(*candidate, bootstrapError, [&]() {
-              serviceProvisioningIo();
-              serviceNextClient();
-              return !cancelRequested;
-            })) {
-          if (!cancelRequested) {
-            attempt.fail(safeBootstrapError(*candidate, bootstrapError));
-            WiFi.disconnect(false, false);
-            stationConnectStarted = false;
-            drawProvisioningAccess(apSsid, apPassword);
-          }
-        } else if (!store_.save(*candidate, profile_)) {
-          attempt.fail("El servidor respondió, pero no se pudo guardar la "
-                       "configuración.");
+        const ProvisioningCandidateResult candidateResult =
+            completeProvisioningAttempt(
+                attempt, candidateValidator,
+                [&](const DeviceConfig& value) {
+                  return store_.save(value, profile_);
+                },
+                [&]() {
+                  serviceProvisioningIo();
+                  serviceNextClient();
+                  return !cancelRequested;
+                },
+                [] { return millis(); });
+        if (candidateResult == ProvisioningCandidateResult::Failed) {
           WiFi.disconnect(false, false);
           stationConnectStarted = false;
           drawProvisioningAccess(apSsid, apPassword);
-        } else {
+        } else if (candidateResult == ProvisioningCandidateResult::Saved) {
           result.saved = true;
           result.config = *candidate;
-          attempt.succeed(millis());
           M5.Display.wakeup();
           drawProvisioningStatus("Configurado", "El terminal está listo.",
                                  false);

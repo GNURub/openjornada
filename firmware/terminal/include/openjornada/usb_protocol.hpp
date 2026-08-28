@@ -50,6 +50,17 @@ struct UsbControlRequest {
   uint32_t baud = 0;
 };
 
+struct UsbPublicCapabilities {
+  bool status = false;
+  bool doctor = false;
+  bool structuredLogs = false;
+  bool reboot = false;
+  bool physicalFactoryReset = false;
+  bool provisioningRecovery = false;
+  bool firmwareInstall = false;
+  bool negotiatedBaud = false;
+};
+
 enum class UsbParseStatus { NeedMore, Complete, Error };
 
 enum class UsbControlError {
@@ -98,6 +109,8 @@ bool encodeUsbResponse(std::string_view id, std::string_view type,
 bool encodeUsbResponse(std::string_view id, std::string_view type,
                        std::string_view code, std::string_view message,
                        std::string& output);
+void encodeUsbCapabilities(ArduinoJson::JsonObject capabilities,
+                           const UsbPublicCapabilities& values);
 
 struct UsbFirmwareFrame {
   uint32_t offset = 0;

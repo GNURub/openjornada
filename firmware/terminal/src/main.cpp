@@ -328,7 +328,8 @@ void drawRecoveryCountdown(uint8_t secondsRemaining) {
 ProvisioningOutcome runProvisioning(
     ConfigStore& store, BuildProfile profile,
     const std::optional<DeviceConfig>& active, size_t pendingCount) {
-  ProvisioningPortal portal(store, profile, active, pendingCount);
+  ProvisioningPortal portal(store, profile, active, pendingCount,
+                            {usbStorageAvailable, usbRfidAvailable});
   Esp32ApiClient provisioningClient(profile);
   NetworkWorker provisioningWorker(provisioningClient);
   const bool workerReady = provisioningWorker.begin();

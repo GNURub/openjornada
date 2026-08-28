@@ -17,16 +17,9 @@ bool modeAllowsRecoveryMutation(UsbTerminalMode mode) {
   return mode == UsbTerminalMode::Ready || mode == UsbTerminalMode::Blocked;
 }
 
-void addCapabilities(ArduinoJson::JsonObject capabilities,
-                     bool firmwareAvailable) {
-  capabilities["status"] = true;
-  capabilities["doctor"] = true;
-  capabilities["structuredLogs"] = true;
-  capabilities["reboot"] = true;
-  capabilities["physicalFactoryReset"] = true;
-  capabilities["provisioningRecovery"] = true;
-  capabilities["firmwareInstall"] = firmwareAvailable;
-  capabilities["negotiatedBaud"] = firmwareAvailable;
+UsbPublicCapabilities runtimeCapabilities(bool firmwareAvailable) {
+  return {true, true, true, true, true, true, firmwareAvailable,
+          firmwareAvailable};
 }
 
 }  // namespace
@@ -157,8 +150,8 @@ void UsbMaintenanceService::handleRequest(
       data["board"] = context.status.board;
       data["firmwareVersion"] = context.status.firmwareVersion;
       data["mode"] = usbTerminalModeValue(effectiveMode);
-      addCapabilities(data["capabilities"].to<ArduinoJson::JsonObject>(),
-                      firmwareReceiver_ != nullptr);
+      encodeUsbCapabilities(data["capabilities"].to<ArduinoJson::JsonObject>(),
+                            runtimeCapabilities(firmwareReceiver_ != nullptr));
       writeResponse(request.id, "result", "ok", "Terminal disponible.",
                     data.as<ArduinoJson::JsonVariantConst>());
       return;
@@ -181,8 +174,8 @@ void UsbMaintenanceService::handleRequest(
       data["storageAvailable"] = context.storageAvailable;
       data["rfidAvailable"] = context.rfidAvailable;
       data["configured"] = context.status.configured;
-      addCapabilities(data["capabilities"].to<ArduinoJson::JsonObject>(),
-                      firmwareReceiver_ != nullptr);
+      encodeUsbCapabilities(data["capabilities"].to<ArduinoJson::JsonObject>(),
+                            runtimeCapabilities(firmwareReceiver_ != nullptr));
       auto errors = data["errorCodes"].to<ArduinoJson::JsonArray>();
       if (!context.status.configured) errors.add("configuration_missing");
       if (!context.storageAvailable) errors.add("storage_unavailable");

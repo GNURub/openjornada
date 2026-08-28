@@ -175,6 +175,24 @@ class ProvisioningAttemptState {
 
 enum class ProvisioningSerialMode { Runtime, Portal };
 
+struct ProvisioningSerialPublicContext {
+  bool storageAvailable = false;
+  bool rfidAvailable = false;
+  std::function<bool()> wifiConnected;
+};
+
+using ProvisioningCandidateSaver =
+    std::function<bool(const DeviceConfig& candidate)>;
+
+enum class ProvisioningCandidateResult { Saved, Failed, Cancelled };
+
+ProvisioningCandidateResult completeProvisioningAttempt(
+    ProvisioningAttemptState& attempt,
+    const CandidateValidator& candidateValidator,
+    const ProvisioningCandidateSaver& candidateSaver,
+    const std::function<bool()>& service,
+    const std::function<uint32_t()>& nowMs);
+
 enum class UsbProvisionDecision {
   Started,
   Busy,
@@ -201,7 +219,8 @@ class ProvisioningSerialAdapter {
  public:
   ProvisioningSerialAdapter(BuildProfile profile,
                             std::optional<DeviceConfig> activeConfig,
-                            size_t pendingCount, ProvisioningSerialMode mode);
+                            size_t pendingCount, ProvisioningSerialMode mode,
+                            ProvisioningSerialPublicContext publicContext = {});
 
   UsbProvisionAcceptance accept(const UsbControlRequest& request,
                                 ProvisioningAttemptState& attempt,
@@ -221,6 +240,7 @@ class ProvisioningSerialAdapter {
   std::optional<DeviceConfig> activeConfig_;
   size_t pendingCount_;
   ProvisioningSerialMode mode_;
+  ProvisioningSerialPublicContext publicContext_;
   UsbControlParser parser_;
   std::string activeRequestId_;
   ProvisioningCheckPhase lastEventPhase_ = ProvisioningCheckPhase::Idle;
@@ -230,7 +250,8 @@ class ProvisioningPortal {
  public:
   ProvisioningPortal(ConfigStore& store, BuildProfile profile,
                      std::optional<DeviceConfig> activeConfig,
-                     size_t pendingCount);
+                     size_t pendingCount,
+                     ProvisioningSerialPublicContext publicContext = {});
 
 #ifdef ARDUINO
   ProvisioningResult run(const CandidateValidator& candidateValidator,
@@ -244,6 +265,7 @@ class ProvisioningPortal {
   BuildProfile profile_;
   std::optional<DeviceConfig> activeConfig_;
   size_t pendingCount_;
+  ProvisioningSerialPublicContext publicContext_;
 };
 
 #ifdef ARDUINO

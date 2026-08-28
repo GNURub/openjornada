@@ -116,8 +116,11 @@ identifica un único terminal compatible. `status` y `doctor` son de lectura y
 no alteran pantalla ni sonido. `logs --follow` sólo recibe códigos estructurados
 saneados. El protocolo define los modos `booting`, `ready`, `blocked`,
 `provisioning`, `updating` y `await_physical_confirmation`. Durante el portal el
-adaptador serie restringido sólo procesa `provision`; el modo se comprueba en la
-pantalla y `status` vuelve a estar disponible después del reinicio al runtime.
+adaptador serie restringido atiende `hello`, `status`, `doctor` y `provision`.
+Así, tanto la autodetección como `--port` verifican el handshake antes de enviar
+el OJP. `status` informa `mode: provisioning`, configuración, conectividad y
+pendientes; `doctor` conserva el contrato público del runtime y ninguna de esas
+respuestas incluye credenciales, IP ni UID.
 
 El valor OJP se pega mediante entrada interactiva sin eco o `--ojp-stdin`.
 Deliberadamente no existe `--ojp VALOR`: los argumentos pueden quedar en el
@@ -126,12 +129,12 @@ modo `provisioning`; para entrar desde una configuración existente, mantén A+B
 cinco segundos. Se reutilizan la validación Wi-Fi, `bootstrap` y persistencia
 del portal, y un cambio de API key se rechaza mientras haya fichajes pendientes.
 
-Limitación conocida: el adaptador del portal todavía no atiende `hello`, pero la
-CLI prevista exige ese handshake incluso con un puerto explícito. Por tanto, el
-aprovisionamiento mediante `openjornada-terminal provision` no supera aún la
-aceptación física. No se debe presentar como operativo hasta corregir el
-firmware. Una placa nueva o un terminal que ya esté en el portal deben usar la
-puesta en servicio web descrita abajo.
+Una placa nueva entra en el portal automáticamente. Desde una configuración
+existente, mantén A+B cinco segundos, ejecuta
+`openjornada-terminal provision --ojp-stdin` y deja que la CLI detecte el puerto
+o indica uno explícito. El terminal responde primero a `hello`, acepta el OJP y
+emite los eventos saneados `connecting`, `validating` y `saved` usando el mismo
+flujo de validación y guardado que el portal web.
 
 Las mutaciones aplican estas barreras:
 
@@ -194,12 +197,11 @@ y una credencial exclusiva. No confirma ningún reset ni escribe un slot OTA:
    SSID, API key, UID, IP ni salida serie sin sanear.
 2. Ejecuta `ports`, `status`, `doctor` y `logs --follow`. Comprueba handshake,
    placa/protocolo, diagnósticos y que los eventos no contienen secretos.
-3. Marca la prueba CLI de `provision --ojp-stdin` como `BLOQUEADA`: dentro del
-   portal USB admite `provision`, pero no `hello`, y la CLI exige primero el
-   handshake. No inventes un bypass ni registres el OJP. Verifica por separado
-   que A+B abre el portal y completa el aprovisionamiento web con credenciales
-   demo; tras el reinicio, `status` debe volver a mostrar `ready` y configuración
-   presente. Repite sólo en un dispositivo cuya configuración pueda cambiar.
+3. Mantén A+B para abrir el portal y ejecuta `provision --ojp-stdin` con
+   credenciales demo. Comprueba que `hello` detecta `mode: provisioning`, que
+   aparecen `connecting`, `validating` y `saved`, y que nunca se imprime el OJP.
+   Tras el reinicio, `status` debe mostrar `ready` y configuración presente.
+   Repite sólo en un dispositivo cuya configuración pueda cambiar.
 4. Ejecuta `factory-reset`, suelta los botones y no mantengas C. Cancela desde
    la CLI o espera 30 segundos; espera `physical_confirmation_cancelled` o
    `physical_confirmation_timeout` y comprueba con `status` que configuración y

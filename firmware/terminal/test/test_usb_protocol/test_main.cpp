@@ -1320,6 +1320,66 @@ void test_usb_provision_service_is_fragmented_and_cooperative() {
                     transport.output().find("clave segura"));
 }
 
+void test_portal_usb_hello_status_and_doctor_are_fragmented_and_public() {
+  bool wifiConnected = false;
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Development, std::nullopt, 2,
+      ProvisioningSerialMode::Portal,
+      {true, true, [&] { return wifiConnected; }});
+  ProvisioningAttemptState attempt;
+  FakeProvisioningSerialTransport transport;
+  const std::string hello = controlLine("hello");
+  const size_t split = hello.size() / 2U;
+
+  transport.append(std::string_view(hello).substr(0, split));
+  serial.service(transport, attempt, 1000);
+  TEST_ASSERT_TRUE(transport.output().empty());
+
+  transport.append(std::string_view(hello).substr(split));
+  serial.service(transport, attempt, 1001);
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"protocolVersion\":1"));
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"board\":\"m5stack-basic-core-v27\""));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"firmwareVersion\":\"1.2.0\""));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"mode\":\"provisioning\""));
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"provisioningRecovery\":true"));
+
+  transport.append(controlLine("status"));
+  serial.service(transport, attempt, 1002);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"wifiConnected\":false"));
+
+  wifiConnected = true;
+  transport.append(controlLine("status") + controlLine("doctor"));
+  serial.service(transport, attempt, 1003);
+  serial.service(transport, attempt, 1004);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"wifiConnected\":true"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"configured\":false"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"pendingCount\":2"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"storageAvailable\":true"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"rfidAvailable\":true"));
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"configuration_missing\""));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("192.168."));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("password"));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    transport.output().find("terminalToken"));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("uid"));
+}
+
 void test_usb_provision_requires_portal_mode_and_respects_pending_policy() {
   ProvisioningAttemptState attempt;
   ProvisioningSerialAdapter runtime(
@@ -1615,6 +1675,7 @@ int main(int, char**) {
   RUN_TEST(test_ojp_accepts_all_supported_wrappers);
   RUN_TEST(test_usb_provision_starts_the_existing_attempt_once);
   RUN_TEST(test_usb_provision_service_is_fragmented_and_cooperative);
+  RUN_TEST(test_portal_usb_hello_status_and_doctor_are_fragmented_and_public);
   RUN_TEST(
       test_usb_provision_requires_portal_mode_and_respects_pending_policy);
   RUN_TEST(test_usb_provision_events_never_serialize_candidate_secrets);

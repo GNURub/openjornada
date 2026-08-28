@@ -70,6 +70,37 @@ UsbControlRequest validUsbProvisionRequest() {
   return request;
 }
 
+std::string usbControlLine(std::string_view command,
+                           std::string_view payload = "{}") {
+  return "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"" +
+         std::string(command) + "\",\"payload\":" + std::string(payload) +
+         "}\n";
+}
+
+class FakeProvisioningSerialTransport final
+    : public ProvisioningSerialTransport {
+ public:
+  void append(std::string_view bytes) { input_.append(bytes); }
+  int available() override {
+    return cursor_ < input_.size() ? static_cast<int>(input_.size() - cursor_)
+                                   : 0;
+  }
+  int read() override {
+    if (cursor_ >= input_.size()) return -1;
+    return static_cast<uint8_t>(input_[cursor_++]);
+  }
+  size_t write(const uint8_t* data, size_t size) override {
+    output_.append(reinterpret_cast<const char*>(data), size);
+    return size;
+  }
+  const std::string& output() const { return output_; }
+
+ private:
+  std::string input_;
+  size_t cursor_ = 0;
+  std::string output_;
+};
+
 }  // namespace
 
 void test_oversized_content_length_is_rejected_before_body_consumption() {
@@ -479,6 +510,91 @@ void test_http_and_usb_submissions_share_one_busy_attempt() {
   TEST_ASSERT_FALSE(usbFirst.begin(browserCandidate, 2001));
 }
 
+void test_portal_usb_handshake_keeps_provision_on_the_shared_attempt() {
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Release, std::nullopt, 0,
+      ProvisioningSerialMode::Portal, {true, false});
+  ProvisioningAttemptState attempt;
+  FakeProvisioningSerialTransport transport;
+  const std::string hello = usbControlLine("hello");
+
+  transport.append(std::string_view(hello).substr(0, hello.size() - 1U));
+  serial.service(transport, attempt, 1000);
+  TEST_ASSERT_TRUE(transport.output().empty());
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+
+  transport.append(std::string_view(hello).substr(hello.size() - 1U));
+  serial.service(transport, attempt, 1001);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"ok\""));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"mode\":\"provisioning\""));
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+
+  const std::string provision = usbControlLine(
+      "provision",
+      "{\"ojp\":\"" +
+          base64Url(
+              R"({"v":1,"s":"office","p":"password","u":"https://jornada.example.com","t":"ojterm_token"})") +
+          "\"}");
+  const size_t split = provision.size() / 2U;
+  transport.append(std::string_view(provision).substr(0, split));
+  serial.service(transport, attempt, 1002);
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+  transport.append(std::string_view(provision).substr(split));
+  serial.service(transport, attempt, 1003);
+
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningCheckPhase::Connecting),
+                        static_cast<int>(attempt.phase()));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"accepted\""));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"connecting\""));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("ojterm_token"));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("password"));
+
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  bool validatorCalled = false;
+  bool saverCalled = false;
+  bool serviceCalled = false;
+  uint32_t completionClock = 2000;
+  const ProvisioningCandidateResult result = completeProvisioningAttempt(
+      attempt,
+      [&](const DeviceConfig& candidate, std::string&,
+          const std::function<bool()>& service) {
+        validatorCalled = true;
+        TEST_ASSERT_EQUAL_STRING("office", candidate.ssid.c_str());
+        TEST_ASSERT_EQUAL_STRING("https://jornada.example.com",
+                                 candidate.baseUrl.c_str());
+        serviceCalled = service();
+        completionClock = 11000;
+        return true;
+      },
+      [&](const DeviceConfig& candidate) {
+        saverCalled = true;
+        TEST_ASSERT_EQUAL_STRING("office", candidate.ssid.c_str());
+        completionClock = 12000;
+        return true;
+      },
+      [] { return true; }, [&] { return completionClock; });
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningCandidateResult::Saved),
+                        static_cast<int>(result));
+  TEST_ASSERT_TRUE(validatorCalled);
+  TEST_ASSERT_TRUE(saverCalled);
+  TEST_ASSERT_TRUE(serviceCalled);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningCheckPhase::Succeeded),
+                        static_cast<int>(attempt.phase()));
+  TEST_ASSERT_EQUAL_UINT32(12000, attempt.completedAtMs());
+  TEST_ASSERT_FALSE(attempt.successWindowElapsed(
+      12000 + kProvisioningSuccessHardStopMs - 1U));
+
+  serial.service(transport, attempt, 2001);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"saved\""));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("ojterm_token"));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("password"));
+}
+
 void test_provisioning_success_grace_starts_after_status_response() {
   ProvisioningAttemptState attempt;
   DeviceConfig candidate;
@@ -568,6 +684,7 @@ int main(int, char**) {
   RUN_TEST(test_provisioning_attempt_rejects_duplicates_and_tracks_result);
   RUN_TEST(test_pending_actions_only_allow_the_existing_terminal_token);
   RUN_TEST(test_http_and_usb_submissions_share_one_busy_attempt);
+  RUN_TEST(test_portal_usb_handshake_keeps_provision_on_the_shared_attempt);
   RUN_TEST(test_provisioning_success_grace_starts_after_status_response);
   RUN_TEST(test_provisioning_csp_allows_only_the_local_script);
   RUN_TEST(test_provisioning_asset_writer_retries_partial_writes_without_gaps);

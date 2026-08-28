@@ -134,12 +134,14 @@ La interfaz `OJUSB/1` permite a la CLI prevista `openjornada-terminal` ejecutar
 cero o más de un terminal. El OJP entra de forma interactiva sin eco o mediante
 `--ojp-stdin`; no debe pasarse como argumento ni guardarse en logs.
 
-El aprovisionamiento CLI tiene una limitación conocida: el adaptador serie del
-portal sólo atiende `provision`, no `hello`, mientras la CLI prevista exige el
-handshake también con puerto explícito. La aceptación de
-`openjornada-terminal provision` queda bloqueada hasta corregir el firmware; no
-documentes un bypass. Una placa nueva o un terminal dentro del portal deben
-completar por ahora la puesta en servicio web.
+El aprovisionamiento CLI funciona dentro del portal: su adaptador serie atiende
+`hello`, `status`, `doctor` y `provision`, por lo que tanto la autodetección como
+un puerto explícito validan primero protocolo, placa, firmware y
+`mode: provisioning`. Las respuestas de estado y diagnóstico sólo exponen el
+contexto público (configuración presente, conectividad, pendientes y
+disponibilidad de almacenamiento/RFID); nunca credenciales, IP ni UID. Después
+de aceptar el OJP, el terminal reutiliza exactamente la validación Wi-Fi,
+`bootstrap`, eventos y persistencia del portal web.
 
 Estado y diagnóstico son operaciones de lectura. Aprovisionar sólo se admite
 en el portal abierto con A+B durante cinco segundos. Reset y firmware
@@ -157,9 +159,10 @@ Para una aceptación física rutinaria, usa sólo una placa y backend demo:
    UID, IP ni salida serie arbitraria.
 2. Ejecuta `ports`, `status`, `doctor` y `logs --follow`; verifica los modos y
    que sólo aparecen eventos saneados.
-3. Marca `provision --ojp-stdin` como `BLOQUEADA` por falta de `hello` en el
-   portal. No fuerces un bypass. Comprueba por separado que A+B abre el portal,
-   aprovisiona por web con credenciales demo y ejecuta `status` tras el reinicio.
+3. Mantén A+B para abrir el portal y ejecuta `provision --ojp-stdin` con
+   credenciales demo. Exige que el handshake muestre `mode: provisioning`, que
+   se reciban `connecting`, `validating` y `saved`, y que el OJP no aparezca en
+   salida. Tras el reinicio, ejecuta `status` y comprueba `mode: ready`.
 4. Solicita `factory-reset` y cancela o deja vencer los 30 segundos sin mantener
    C; comprueba que configuración y pendientes no cambian.
 5. Solicita instalar un build compatible y cancela antes de mantener C; no debe

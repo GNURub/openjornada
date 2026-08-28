@@ -481,6 +481,18 @@ bool encodeUsbResponse(std::string_view id, std::string_view type,
                            data.as<ArduinoJson::JsonVariantConst>(), output);
 }
 
+void encodeUsbCapabilities(ArduinoJson::JsonObject capabilities,
+                           const UsbPublicCapabilities& values) {
+  capabilities["status"] = values.status;
+  capabilities["doctor"] = values.doctor;
+  capabilities["structuredLogs"] = values.structuredLogs;
+  capabilities["reboot"] = values.reboot;
+  capabilities["physicalFactoryReset"] = values.physicalFactoryReset;
+  capabilities["provisioningRecovery"] = values.provisioningRecovery;
+  capabilities["firmwareInstall"] = values.firmwareInstall;
+  capabilities["negotiatedBaud"] = values.negotiatedBaud;
+}
+
 uint32_t usbFirmwareCrc32(const uint8_t* data, size_t size) {
   if (data == nullptr && size != 0U) return 0U;
   uint32_t crc = 0xffffffffU;
