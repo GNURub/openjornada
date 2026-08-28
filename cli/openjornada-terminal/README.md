@@ -138,5 +138,19 @@ go vet ./...
 CGO_ENABLED=0 go build ./cmd/openjornada-terminal
 ```
 
+Para crear un archivo de release reproducible y su inventario SHA-256:
+
+```bash
+python3 scripts/package_release.py --binary dist/openjornada-terminal \
+  --os linux --arch amd64 --license ../../LICENSE --notice ../../NOTICE \
+  --third-party THIRD_PARTY_NOTICES --output dist/release
+python3 scripts/checksums.py dist/release/*.tar.gz dist/release/*.zip \
+  --output dist/release/checksums.txt
+```
+
+El empaquetador sólo acepta las seis combinaciones publicadas, incluye
+exactamente el binario y los tres avisos legales, y no sobrescribe salidas.
+Los scripts requieren únicamente la biblioteca estándar de Python 3.
+
 El CLI no crea archivos de configuración ni telemetría. Las licencias de Go y
 de los módulos enlazados se recogen en `THIRD_PARTY_NOTICES`.
