@@ -623,3 +623,66 @@ test('toggles both secrets once after reinitializing, accessibly and without sub
 
   await expectNoForbiddenEffects(page, observer);
 });
+
+const progressHtml = `<!doctype html><html lang="es"><body>
+  <p id="provisioning_progress_status" role="status" aria-live="polite">Conectando...</p>
+  <a id="provisioning_retry" href="/" hidden>Volver a configurar</a>
+</body></html>`;
+
+test('polls provisioning status through a transient error until success', async ({ page }) => {
+  let statusRequests = 0;
+  await page.route('http://192.168.4.1/**', async (route) => {
+    if (new URL(route.request().url()).pathname !== '/status') {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: progressHtml });
+      return;
+    }
+    statusRequests += 1;
+    if (statusRequests === 1) {
+      await route.fulfill({ status: 503, body: 'temporal' });
+      return;
+    }
+    const payload =
+      statusRequests === 2
+        ? { phase: 'validating', message: 'Comprobando el servidor de OpenJornada...' }
+        : {
+            phase: 'succeeded',
+            message: 'Terminal configurado. Ya puedes cerrar esta página.',
+          };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(payload),
+    });
+  });
+
+  await page.goto('http://192.168.4.1/');
+  await page.addScriptTag({ path: scriptPath });
+
+  const status = page.locator('#provisioning_progress_status');
+  await expect(status).toHaveText('Terminal configurado. Ya puedes cerrar esta página.');
+  await expect(status).toHaveClass('success');
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(page.locator('#provisioning_retry')).toBeHidden();
+  expect(statusRequests).toBeGreaterThanOrEqual(3);
+});
+
+test('shows a safe provisioning failure and lets the user retry', async ({ page }) => {
+  await page.route('http://192.168.4.1/**', (route) =>
+    new URL(route.request().url()).pathname === '/status'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ phase: 'failed', message: 'La red Wi-Fi no responde.' }),
+        })
+      : route.fulfill({ status: 200, contentType: 'text/html', body: progressHtml }),
+  );
+
+  await page.goto('http://192.168.4.1/');
+  await page.addScriptTag({ path: scriptPath });
+
+  const status = page.locator('#provisioning_progress_status');
+  await expect(status).toHaveText('La red Wi-Fi no responde.');
+  await expect(status).toHaveClass('error');
+  await expect(status).toHaveAttribute('role', 'alert');
+  await expect(page.locator('#provisioning_retry')).toBeVisible();
+});

@@ -309,7 +309,9 @@ de mostrarlos y no puede recuperarlos, pero esto no garantiza un borrado
 criptográfico de la RAM ni hace caducar la key: continúa activa hasta rotarla o
 revocarla. Tras la confirmación manual y un `bootstrap` válido, el terminal sí
 guarda localmente la configuración validada. El portal mantiene siempre la
-entrada manual como alternativa.
+entrada manual como alternativa. Al pulsar **Comprobar y guardar**, responde
+con una vista de progreso y comprueba Wi-Fi y servidor en segundo plano, sin
+dejar el POST abierto durante esos tiempos de espera.
 
 Las tarjetas se vinculan a personas desde **Equipo**. OpenJornada no escribe
 datos personales en el tag: normaliza su UID, guarda una huella para resolverlo

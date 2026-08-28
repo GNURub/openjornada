@@ -102,7 +102,10 @@ licencias. USB sigue siendo siempre el mecanismo de recuperación.
       SSID, la contraseña Wi-Fi, la URL base y la API key `ojterm_…`.
 4. Revisa todos los campos y pulsa **Comprobar y guardar**. Escanear el QR sólo
    rellena el formulario: no confirma ni guarda. El firmware vuelve a validar
-   los datos, conecta a la red y comprueba `bootstrap` antes de persistirlos.
+   los datos, responde inmediatamente con una pantalla de progreso, conecta a
+   la red y comprueba `bootstrap` antes de persistirlos. Esa pantalla se
+   actualiza sin reenviar el formulario y permite volver a configurarlo si la
+   red o el servidor fallan.
 5. Espera a que el dispositivo se reinicie.
 
 El QR contiene credenciales recuperables y debe permanecer bajo custodia: no
@@ -119,6 +122,11 @@ configuración válida o cancelar manteniendo C durante tres segundos. Al
 cancelar, el terminal reinicia con la configuración anterior. Si no se pulsa
 ningún botón durante diez minutos, sólo se apaga la pantalla: el portal sigue
 funcionando. Pulsa brevemente A, B o C para despertarla.
+
+El servidor local reconoce las comprobaciones de portal cautivo de Android,
+iOS, Windows y navegadores Chromium. Las solicitudes HTTP parciales tienen un
+plazo corto de inactividad para que una pestaña abandonada no bloquee el resto
+del portal; la conexión Wi-Fi conserva su límite independiente de 20 segundos.
 
 Para pruebas LAN, usa `m5stack_dev`, una IP RFC1918 del ordenador —nunca
 `127.0.0.1`— y activa de forma explícita en el backend tanto

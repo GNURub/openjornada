@@ -23,6 +23,12 @@ cancelar reinicia con la configuración anterior. La pantalla entra en reposo
 tras diez minutos sin pulsaciones, pero el punto de acceso sigue disponible;
 A, B o C la despiertan y reinician el plazo.
 
+Al confirmar el formulario, el navegador recibe inmediatamente una vista de
+progreso y consulta el estado de conexión y `bootstrap` sin mantener abierto el
+POST. Los fallos transitorios se reintentan en la propia vista, un error final
+ofrece volver al formulario y las sondas habituales de portales cautivos no
+generan bucles de redirección.
+
 El gesto A+B mantenido cinco segundos abre ese portal desde cualquier estado
 del terminal, también durante los reintentos de conexión. La cuenta atrás se
 cancela al soltar, no genera acciones de jornada y conserva credenciales,

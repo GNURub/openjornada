@@ -10,6 +10,7 @@
   const encoder = new TextEncoder();
   const installedToggles = new WeakSet();
   const installedPasswordFields = new WeakSet();
+  const installedProgressFields = new WeakSet();
 
   function bytes(value) {
     return encoder.encode(value).byteLength;
@@ -237,6 +238,77 @@
     installedPasswordFields.add(password);
   }
 
+  function validProgressPayload(value) {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).join(",") === "phase,message" &&
+      ["idle", "connecting", "validating", "succeeded", "failed"].includes(
+        value.phase,
+      ) &&
+      typeof value.message === "string" &&
+      value.message.length > 0 &&
+      value.message.length <= 240 &&
+      !forbiddenText(value.message)
+    );
+  }
+
+  function installProgressPolling() {
+    const status = document.getElementById("provisioning_progress_status");
+    if (
+      !(status instanceof HTMLParagraphElement) ||
+      installedProgressFields.has(status)
+    ) {
+      return;
+    }
+    const retry = document.getElementById("provisioning_retry");
+    if (!(retry instanceof HTMLAnchorElement)) return;
+    installedProgressFields.add(status);
+
+    let retryDelay = 250;
+    const poll = async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+      try {
+        const response = await fetch("/status", {
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("status");
+        const payload = await response.json();
+        if (!validProgressPayload(payload)) throw new Error("payload");
+
+        status.textContent = payload.message;
+        status.setAttribute(
+          "role",
+          payload.phase === "failed" ? "alert" : "status",
+        );
+        status.setAttribute(
+          "aria-live",
+          payload.phase === "failed" ? "assertive" : "polite",
+        );
+        status.className =
+          payload.phase === "failed"
+            ? "error"
+            : payload.phase === "succeeded"
+              ? "success"
+              : "";
+        retry.hidden = payload.phase !== "failed";
+        retryDelay = 250;
+        if (payload.phase === "failed" || payload.phase === "succeeded") return;
+      } catch {
+        retryDelay = Math.min(retryDelay * 2, 2000);
+      } finally {
+        clearTimeout(timeout);
+      }
+      setTimeout(poll, retryDelay);
+    };
+    poll();
+  }
+
   function init() {
     installToggle(
       "toggle_wifi_password",
@@ -250,6 +322,7 @@
     );
     installPasswordExplicitReset();
     applyHash();
+    installProgressPolling();
   }
 
   window.OpenJornadaProvisioning = Object.freeze({

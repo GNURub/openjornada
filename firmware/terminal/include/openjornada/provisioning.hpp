@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -18,8 +19,15 @@ inline constexpr size_t kMaxProvisioningFormBodyBytes =
     kMaxSsidBytes * 3U + kMaxWifiPasswordBytes * 3U +
     kMaxBaseUrlBytes * 3U + kMaxTerminalTokenBytes * 3U + 256U;
 inline constexpr char kProvisioningScriptPath[] = "/provisioning.js";
+inline constexpr char kProvisioningStatusPath[] = "/status";
+inline constexpr uint32_t kProvisioningRequestIdleTimeoutMs = 400;
+inline constexpr uint32_t kProvisioningRequestTotalTimeoutMs = 2000;
+inline constexpr uint32_t kProvisioningConnectTimeoutMs = 20000;
+inline constexpr uint32_t kProvisioningSuccessResponseGraceMs = 2000;
+inline constexpr uint32_t kProvisioningSuccessHardStopMs = 10000;
 inline constexpr char kProvisioningContentSecurityPolicy[] =
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "connect-src 'self'; "
     "form-action http://192.168.4.1; base-uri 'none'; "
     "frame-ancestors 'none'";
 enum class CaptiveHttpParseStatus {
@@ -39,7 +47,25 @@ struct CaptiveHttpRequest {
   std::string body;
 };
 
+enum class ProvisioningHttpRoute {
+  Index,
+  Script,
+  Save,
+  Status,
+  CaptiveProbe,
+  NoContent,
+  Redirect,
+};
+
+ProvisioningHttpRoute provisioningHttpRoute(
+    const CaptiveHttpRequest& request);
 bool isProvisioningScriptRequest(const CaptiveHttpRequest& request);
+
+enum class ProvisioningRequestTimeout { None, Idle, Total };
+
+ProvisioningRequestTimeout provisioningRequestTimeout(uint32_t startedAtMs,
+                                                      uint32_t lastProgressMs,
+                                                      uint32_t nowMs);
 
 template <typename WriteChunk>
 bool writeAllProvisioningBytes(const uint8_t* data, size_t length,
@@ -105,6 +131,42 @@ bool canApplyProvisioningCandidate(
 void applyProvisioningSecretFallbacks(const DeviceConfig& activeConfig,
                                       bool wifiPasswordExplicit,
                                       DeviceConfig& candidate);
+
+enum class ProvisioningCheckPhase {
+  Idle,
+  Connecting,
+  Validating,
+  Succeeded,
+  Failed,
+};
+
+class ProvisioningAttemptState {
+ public:
+  bool begin(const DeviceConfig& candidate, uint32_t nowMs);
+  bool markValidating();
+  void fail(std::string error);
+  void succeed(uint32_t nowMs);
+
+  bool canSubmit() const;
+  bool busy() const;
+  bool cancellationAllowed() const;
+  bool connectionTimedOut(uint32_t nowMs) const;
+  bool markSuccessResponseServed(uint32_t nowMs);
+  bool successWindowElapsed(uint32_t nowMs) const;
+  ProvisioningCheckPhase phase() const;
+  const std::optional<DeviceConfig>& candidate() const;
+  const std::string& error() const;
+  uint32_t completedAtMs() const;
+
+ private:
+  ProvisioningCheckPhase phase_ = ProvisioningCheckPhase::Idle;
+  std::optional<DeviceConfig> candidate_;
+  std::string error_;
+  uint32_t startedAtMs_ = 0;
+  uint32_t completedAtMs_ = 0;
+  uint32_t successResponseServedAtMs_ = 0;
+  bool successResponseServed_ = false;
+};
 
 class ProvisioningPortal {
  public:

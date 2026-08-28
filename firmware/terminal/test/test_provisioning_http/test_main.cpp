@@ -322,9 +322,128 @@ void test_provisioning_script_route_only_accepts_exact_get() {
   TEST_ASSERT_FALSE(isProvisioningScriptRequest(request));
 }
 
+void test_portal_routes_brave_probes_without_redirect_loops() {
+  CaptiveHttpRequest request;
+  request.method = "GET";
+
+  request.target = "/";
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningHttpRoute::Index),
+                        static_cast<int>(provisioningHttpRoute(request)));
+  request.target = "/provisioning.js";
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningHttpRoute::Script),
+                        static_cast<int>(provisioningHttpRoute(request)));
+  request.target = "/status";
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningHttpRoute::Status),
+                        static_cast<int>(provisioningHttpRoute(request)));
+  request.target = "/favicon.ico";
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningHttpRoute::NoContent),
+                        static_cast<int>(provisioningHttpRoute(request)));
+
+  for (const char* target : {"/generate_204", "/gen_204", "/connecttest.txt",
+                             "/hotspot-detect.html", "/ncsi.txt"}) {
+    request.target = target;
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(ProvisioningHttpRoute::CaptiveProbe),
+        static_cast<int>(provisioningHttpRoute(request)));
+  }
+
+  request.target = "/unknown";
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningHttpRoute::Redirect),
+                        static_cast<int>(provisioningHttpRoute(request)));
+  request.method = "POST";
+  request.target = "/save";
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningHttpRoute::Save),
+                        static_cast<int>(provisioningHttpRoute(request)));
+}
+
+void test_request_wait_uses_short_idle_and_bounded_total_timeouts() {
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ProvisioningRequestTimeout::None),
+      static_cast<int>(provisioningRequestTimeout(1000, 1100, 1300)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ProvisioningRequestTimeout::Idle),
+      static_cast<int>(provisioningRequestTimeout(
+          1000, 1100, 1100 + kProvisioningRequestIdleTimeoutMs)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ProvisioningRequestTimeout::Total),
+      static_cast<int>(provisioningRequestTimeout(
+          1000, 1000 + kProvisioningRequestTotalTimeoutMs - 1U,
+          1000 + kProvisioningRequestTotalTimeoutMs)));
+
+  const uint32_t nearWrap = UINT32_MAX - 20U;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ProvisioningRequestTimeout::Idle),
+      static_cast<int>(provisioningRequestTimeout(
+          nearWrap, nearWrap, nearWrap + kProvisioningRequestIdleTimeoutMs)));
+}
+
+void test_provisioning_attempt_rejects_duplicates_and_tracks_result() {
+  ProvisioningAttemptState attempt;
+  DeviceConfig candidate;
+  candidate.ssid = "office";
+  candidate.baseUrl = "https://jornada.example.com";
+  candidate.terminalToken = "ojterm_example";
+
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+  TEST_ASSERT_TRUE(attempt.begin(candidate, 1000));
+  TEST_ASSERT_FALSE(attempt.canSubmit());
+  TEST_ASSERT_TRUE(attempt.busy());
+  TEST_ASSERT_FALSE(attempt.begin(candidate, 1001));
+  TEST_ASSERT_FALSE(attempt.connectionTimedOut(
+      1000 + kProvisioningConnectTimeoutMs - 1U));
+  TEST_ASSERT_TRUE(
+      attempt.connectionTimedOut(1000 + kProvisioningConnectTimeoutMs));
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningCheckPhase::Validating),
+                        static_cast<int>(attempt.phase()));
+
+  attempt.fail("No se pudo comprobar OpenJornada.");
+  TEST_ASSERT_FALSE(attempt.busy());
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+  TEST_ASSERT_EQUAL_STRING("No se pudo comprobar OpenJornada.",
+                           attempt.error().c_str());
+
+  TEST_ASSERT_TRUE(attempt.begin(candidate, 2000));
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  TEST_ASSERT_FALSE(attempt.markSuccessResponseServed(2999));
+  attempt.succeed(3000);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ProvisioningCheckPhase::Succeeded),
+                        static_cast<int>(attempt.phase()));
+  TEST_ASSERT_FALSE(attempt.canSubmit());
+  TEST_ASSERT_FALSE(attempt.cancellationAllowed());
+  TEST_ASSERT_EQUAL_UINT32(3000, attempt.completedAtMs());
+}
+
+void test_provisioning_success_grace_starts_after_status_response() {
+  ProvisioningAttemptState attempt;
+  DeviceConfig candidate;
+  TEST_ASSERT_TRUE(attempt.begin(candidate, 100));
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  attempt.succeed(1000);
+
+  TEST_ASSERT_FALSE(attempt.successWindowElapsed(
+      1000 + kProvisioningSuccessResponseGraceMs));
+  TEST_ASSERT_TRUE(attempt.markSuccessResponseServed(5000));
+  TEST_ASSERT_TRUE(attempt.markSuccessResponseServed(6000));
+  TEST_ASSERT_FALSE(attempt.successWindowElapsed(
+      5000 + kProvisioningSuccessResponseGraceMs - 1U));
+  TEST_ASSERT_TRUE(attempt.successWindowElapsed(
+      5000 + kProvisioningSuccessResponseGraceMs));
+
+  ProvisioningAttemptState withoutResponse;
+  TEST_ASSERT_TRUE(withoutResponse.begin(candidate, UINT32_MAX - 500U));
+  TEST_ASSERT_TRUE(withoutResponse.markValidating());
+  withoutResponse.succeed(UINT32_MAX - 100U);
+  TEST_ASSERT_FALSE(withoutResponse.successWindowElapsed(
+      UINT32_MAX - 100U + kProvisioningSuccessHardStopMs - 1U));
+  TEST_ASSERT_TRUE(withoutResponse.successWindowElapsed(
+      UINT32_MAX - 100U + kProvisioningSuccessHardStopMs));
+}
+
 void test_provisioning_csp_allows_only_the_local_script() {
   TEST_ASSERT_EQUAL_STRING(
       "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+      "connect-src 'self'; "
       "form-action http://192.168.4.1; base-uri 'none'; "
       "frame-ancestors 'none'",
       kProvisioningContentSecurityPolicy);
@@ -379,6 +498,10 @@ int main(int, char**) {
   RUN_TEST(test_form_request_policy_checks_host_origin_content_type_and_csrf);
   RUN_TEST(test_form_request_policy_allows_known_host_and_missing_origin);
   RUN_TEST(test_provisioning_script_route_only_accepts_exact_get);
+  RUN_TEST(test_portal_routes_brave_probes_without_redirect_loops);
+  RUN_TEST(test_request_wait_uses_short_idle_and_bounded_total_timeouts);
+  RUN_TEST(test_provisioning_attempt_rejects_duplicates_and_tracks_result);
+  RUN_TEST(test_provisioning_success_grace_starts_after_status_response);
   RUN_TEST(test_provisioning_csp_allows_only_the_local_script);
   RUN_TEST(test_provisioning_asset_writer_retries_partial_writes_without_gaps);
   RUN_TEST(test_provisioning_asset_writer_stops_on_zero_or_invalid_progress);

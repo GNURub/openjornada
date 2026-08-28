@@ -105,6 +105,40 @@ bool isProvisioningScriptRequest(const CaptiveHttpRequest& request) {
   return request.method == "GET" && request.target == kProvisioningScriptPath;
 }
 
+ProvisioningHttpRoute provisioningHttpRoute(
+    const CaptiveHttpRequest& request) {
+  const size_t query = request.target.find('?');
+  const size_t pathLength =
+      query == std::string::npos ? request.target.size() : query;
+  const std::string_view path(request.target.data(), pathLength);
+  if (request.method == "POST" && path == "/save") {
+    return ProvisioningHttpRoute::Save;
+  }
+  if (request.method != "GET") return ProvisioningHttpRoute::Redirect;
+  if (path == "/") return ProvisioningHttpRoute::Index;
+  if (path == kProvisioningScriptPath) return ProvisioningHttpRoute::Script;
+  if (path == kProvisioningStatusPath) return ProvisioningHttpRoute::Status;
+  if (path == "/favicon.ico") return ProvisioningHttpRoute::NoContent;
+  if (path == "/generate_204" || path == "/gen_204" ||
+      path == "/connecttest.txt" || path == "/hotspot-detect.html" ||
+      path == "/ncsi.txt") {
+    return ProvisioningHttpRoute::CaptiveProbe;
+  }
+  return ProvisioningHttpRoute::Redirect;
+}
+
+ProvisioningRequestTimeout provisioningRequestTimeout(uint32_t startedAtMs,
+                                                      uint32_t lastProgressMs,
+                                                      uint32_t nowMs) {
+  if (nowMs - startedAtMs >= kProvisioningRequestTotalTimeoutMs) {
+    return ProvisioningRequestTimeout::Total;
+  }
+  if (nowMs - lastProgressMs >= kProvisioningRequestIdleTimeoutMs) {
+    return ProvisioningRequestTimeout::Idle;
+  }
+  return ProvisioningRequestTimeout::None;
+}
+
 CaptiveHttpParseStatus BoundedCaptiveHttpParser::consume(char byte) {
   if (status_ != CaptiveHttpParseStatus::NeedMore) return status_;
 
@@ -339,6 +373,88 @@ void applyProvisioningSecretFallbacks(const DeviceConfig& activeConfig,
   }
 }
 
+bool ProvisioningAttemptState::begin(const DeviceConfig& candidate,
+                                     uint32_t nowMs) {
+  if (!canSubmit()) return false;
+  candidate_ = candidate;
+  error_.clear();
+  startedAtMs_ = nowMs;
+  completedAtMs_ = 0;
+  successResponseServedAtMs_ = 0;
+  successResponseServed_ = false;
+  phase_ = ProvisioningCheckPhase::Connecting;
+  return true;
+}
+
+bool ProvisioningAttemptState::markValidating() {
+  if (phase_ != ProvisioningCheckPhase::Connecting) return false;
+  phase_ = ProvisioningCheckPhase::Validating;
+  return true;
+}
+
+void ProvisioningAttemptState::fail(std::string error) {
+  error_ = std::move(error);
+  phase_ = ProvisioningCheckPhase::Failed;
+}
+
+void ProvisioningAttemptState::succeed(uint32_t nowMs) {
+  error_.clear();
+  completedAtMs_ = nowMs;
+  successResponseServedAtMs_ = 0;
+  successResponseServed_ = false;
+  phase_ = ProvisioningCheckPhase::Succeeded;
+}
+
+bool ProvisioningAttemptState::canSubmit() const {
+  return phase_ == ProvisioningCheckPhase::Idle ||
+         phase_ == ProvisioningCheckPhase::Failed;
+}
+
+bool ProvisioningAttemptState::busy() const {
+  return phase_ == ProvisioningCheckPhase::Connecting ||
+         phase_ == ProvisioningCheckPhase::Validating;
+}
+
+bool ProvisioningAttemptState::cancellationAllowed() const {
+  return phase_ != ProvisioningCheckPhase::Succeeded;
+}
+
+bool ProvisioningAttemptState::connectionTimedOut(uint32_t nowMs) const {
+  return phase_ == ProvisioningCheckPhase::Connecting &&
+         nowMs - startedAtMs_ >= kProvisioningConnectTimeoutMs;
+}
+
+bool ProvisioningAttemptState::markSuccessResponseServed(uint32_t nowMs) {
+  if (phase_ != ProvisioningCheckPhase::Succeeded) return false;
+  if (!successResponseServed_) {
+    successResponseServedAtMs_ = nowMs;
+    successResponseServed_ = true;
+  }
+  return true;
+}
+
+bool ProvisioningAttemptState::successWindowElapsed(uint32_t nowMs) const {
+  if (phase_ != ProvisioningCheckPhase::Succeeded) return false;
+  if (nowMs - completedAtMs_ >= kProvisioningSuccessHardStopMs) return true;
+  return successResponseServed_ &&
+         nowMs - successResponseServedAtMs_ >=
+             kProvisioningSuccessResponseGraceMs;
+}
+
+ProvisioningCheckPhase ProvisioningAttemptState::phase() const {
+  return phase_;
+}
+
+const std::optional<DeviceConfig>& ProvisioningAttemptState::candidate() const {
+  return candidate_;
+}
+
+const std::string& ProvisioningAttemptState::error() const { return error_; }
+
+uint32_t ProvisioningAttemptState::completedAtMs() const {
+  return completedAtMs_;
+}
+
 ProvisioningPortal::ProvisioningPortal(
     ConfigStore& store, BuildProfile profile,
     std::optional<DeviceConfig> activeConfig, size_t pendingCount)
@@ -362,8 +478,6 @@ namespace {
 const IPAddress kPortalIp{192, 168, 4, 1};
 const IPAddress kPortalMask{255, 255, 255, 0};
 constexpr uint16_t kDnsPort = 53;
-constexpr uint32_t kConnectTimeoutMs = 20000;
-constexpr uint32_t kRequestTimeoutMs = 2000;
 constexpr char kRandomAlphabet[] =
     "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
@@ -480,6 +594,10 @@ const char* reasonPhrase(int status) {
   switch (status) {
     case 200:
       return "OK";
+    case 202:
+      return "Accepted";
+    case 204:
+      return "No Content";
     case 302:
       return "Found";
     case 400:
@@ -499,6 +617,104 @@ const char* reasonPhrase(int status) {
     default:
       return "Error";
   }
+}
+
+String jsonEscape(const std::string& value) {
+  String output;
+  output.reserve(value.size() + 16);
+  for (const unsigned char byte : value) {
+    switch (byte) {
+      case '\\':
+        output += F("\\\\");
+        break;
+      case '"':
+        output += F("\\\"");
+        break;
+      case '\b':
+        output += F("\\b");
+        break;
+      case '\f':
+        output += F("\\f");
+        break;
+      case '\n':
+        output += F("\\n");
+        break;
+      case '\r':
+        output += F("\\r");
+        break;
+      case '\t':
+        output += F("\\t");
+        break;
+      default:
+        if (byte >= 0x20U) output += static_cast<char>(byte);
+        break;
+    }
+  }
+  return output;
+}
+
+const char* provisioningPhaseName(ProvisioningCheckPhase phase) {
+  switch (phase) {
+    case ProvisioningCheckPhase::Idle:
+      return "idle";
+    case ProvisioningCheckPhase::Connecting:
+      return "connecting";
+    case ProvisioningCheckPhase::Validating:
+      return "validating";
+    case ProvisioningCheckPhase::Succeeded:
+      return "succeeded";
+    case ProvisioningCheckPhase::Failed:
+      return "failed";
+  }
+  return "failed";
+}
+
+String provisioningStatusJson(const ProvisioningAttemptState& attempt) {
+  const char* message = "Esperando la configuración.";
+  switch (attempt.phase()) {
+    case ProvisioningCheckPhase::Idle:
+      break;
+    case ProvisioningCheckPhase::Connecting:
+      message = "Conectando a la red Wi-Fi...";
+      break;
+    case ProvisioningCheckPhase::Validating:
+      message = "Comprobando el servidor de OpenJornada...";
+      break;
+    case ProvisioningCheckPhase::Succeeded:
+      message = "Terminal configurado. Ya puedes cerrar esta página.";
+      break;
+    case ProvisioningCheckPhase::Failed:
+      message = nullptr;
+      break;
+  }
+  String body;
+  body.reserve(280);
+  body += F("{\"phase\":\"");
+  body += provisioningPhaseName(attempt.phase());
+  body += F("\",\"message\":\"");
+  body += message == nullptr ? jsonEscape(attempt.error()) : jsonEscape(message);
+  body += F("\"}");
+  return body;
+}
+
+String provisioningProgressPage() {
+  return F(
+      "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">"
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<title>Comprobando OpenJornada</title><style>"
+      ":root{font-family:system-ui,sans-serif;color:#1c1917;background:#fafaf9}"
+      "body{margin:0;padding:24px 16px}main{max-width:520px;margin:auto;"
+      "background:white;border:1px solid #e7e5e4;border-radius:18px;padding:20px;"
+      "box-shadow:0 8px 28px #1c191712}h1{font-size:1.7rem;margin:.2rem 0}"
+      "p{line-height:1.45;color:#57534e}.error{padding:12px;border-radius:10px;"
+      "background:#fef2f2;color:#b91c1c}.success{padding:12px;border-radius:10px;"
+      "background:#f0fdf4;color:#166534}a{display:inline-block;margin-top:12px;"
+      "color:#c2410c;font-weight:650}</style></head><body><main>"
+      "<p>TERMINAL RFID</p><h1>Comprobando configuración</h1>"
+      "<p id=\"provisioning_progress_status\" role=\"status\" "
+      "aria-live=\"polite\">Conectando a la red Wi-Fi...</p>"
+      "<a id=\"provisioning_retry\" href=\"/\" hidden>Volver a configurar</a>"
+      "</main><script src=\"/provisioning.js\" defer></script></body></html>");
 }
 
 String portalPage(const std::string& csrf,
@@ -744,6 +960,8 @@ ProvisioningResult ProvisioningPortal::run(
 
   bool completed = false;
   bool cancelRequested = false;
+  bool stationConnectStarted = false;
+  ProvisioningAttemptState attempt;
   server.begin();
   drawProvisioningAccess(apSsid, apPassword);
   DisplayPowerPolicy displayPower(millis());
@@ -755,9 +973,12 @@ ProvisioningResult ProvisioningPortal::run(
                                M5.BtnC.wasPressed();
     const bool buttonDown = M5.BtnA.isPressed() || M5.BtnB.isPressed() ||
                             M5.BtnC.isPressed();
-    const ProvisioningCancelDecision cancelDecision = cancelGesture.update(
-        {M5.BtnA.isPressed(), M5.BtnB.isPressed(), M5.BtnC.isPressed()},
-        millis());
+    ProvisioningCancelDecision cancelDecision;
+    if (attempt.cancellationAllowed()) {
+      cancelDecision = cancelGesture.update(
+          {M5.BtnA.isPressed(), M5.BtnB.isPressed(), M5.BtnC.isPressed()},
+          millis());
+    }
     if (cancelDecision.cancelRequested) {
       cancelRequested = true;
       drawProvisioningStatus(
@@ -790,20 +1011,25 @@ ProvisioningResult ProvisioningPortal::run(
     serviceProvisioningDisplay();
   };
 
-  while (!completed && !cancelRequested) {
+  std::function<void()> serviceNextClient;
+  serviceNextClient = [&]() {
     dns.processNextRequest();
     WiFiClient client = server.available();
     if (client) {
       BoundedCaptiveHttpParser parser;
       const uint32_t requestStartedMs = millis();
+      uint32_t lastProgressMs = requestStartedMs;
       while (parser.status() == CaptiveHttpParseStatus::NeedMore &&
              client.connected() &&
-             millis() - requestStartedMs < kRequestTimeoutMs) {
+             provisioningRequestTimeout(requestStartedMs, lastProgressMs,
+                                        millis()) ==
+                 ProvisioningRequestTimeout::None) {
         while (client.available() > 0 &&
                parser.status() == CaptiveHttpParseStatus::NeedMore) {
           const int byte = client.read();
           if (byte < 0) break;
           parser.consume(static_cast<char>(byte));
+          lastProgressMs = millis();
         }
         dns.processNextRequest();
         serviceProvisioningDisplay();
@@ -830,14 +1056,43 @@ ProvisioningResult ProvisioningPortal::run(
                                     serviceProvisioningIo);
       } else {
         const CaptiveHttpRequest& request = parser.request();
-        if (request.method == "GET" && request.target == "/") {
-          responseSent = sendResponse(
-              client, 200, "text/html; charset=utf-8",
-              portalPage(csrf, activeConfig_, {}), serviceProvisioningIo);
-        } else if (isProvisioningScriptRequest(request)) {
+        const ProvisioningHttpRoute route = provisioningHttpRoute(request);
+        if (route == ProvisioningHttpRoute::Index) {
+          if (attempt.busy() ||
+              attempt.phase() == ProvisioningCheckPhase::Succeeded) {
+            responseSent = sendResponse(
+                client, 200, "text/html; charset=utf-8",
+                provisioningProgressPage(), serviceProvisioningIo);
+          } else {
+            const String error =
+                attempt.phase() == ProvisioningCheckPhase::Failed
+                    ? String(attempt.error().c_str())
+                    : String{};
+            responseSent = sendResponse(
+                client, 200, "text/html; charset=utf-8",
+                portalPage(csrf, activeConfig_, error), serviceProvisioningIo);
+          }
+        } else if (route == ProvisioningHttpRoute::Script) {
           responseSent =
               sendProvisioningScript(client, serviceProvisioningIo);
-        } else if (request.method == "POST" && request.target == "/save") {
+        } else if (route == ProvisioningHttpRoute::Status) {
+          const String body = provisioningStatusJson(attempt);
+          responseSent = sendResponse(
+              client, 200, "application/json; charset=utf-8", body,
+              serviceProvisioningIo);
+          if (responseSent &&
+              attempt.phase() == ProvisioningCheckPhase::Succeeded) {
+            attempt.markSuccessResponseServed(millis());
+          }
+        } else if (route == ProvisioningHttpRoute::NoContent) {
+          responseSent = sendHeaders(client, 204, "text/plain", 0,
+                                     serviceProvisioningIo);
+        } else if (route == ProvisioningHttpRoute::CaptiveProbe) {
+          responseSent = sendResponse(
+              client, 302, "text/plain; charset=utf-8",
+              "Abriendo configuración...", serviceProvisioningIo,
+              "http://192.168.4.1/");
+        } else if (route == ProvisioningHttpRoute::Save) {
           ProvisioningFormFields form;
           if (!remoteFromPortal(client.remoteIP()) ||
               !decodeProvisioningFormRequest(request, csrf, form)) {
@@ -876,79 +1131,17 @@ ProvisioningResult ProvisioningPortal::run(
                              "Hay fichajes pendientes. Sincronízalos antes de "
                              "cambiar la API key."),
                   serviceProvisioningIo);
+            } else if (!attempt.begin(candidate, millis())) {
+              responseSent = sendResponse(
+                  client, 409, "text/html; charset=utf-8",
+                  provisioningProgressPage(), serviceProvisioningIo);
             } else {
+              stationConnectStarted = false;
               drawProvisioningStatus("Comprobando",
-                                     "Conectando con el negocio...", false);
-              WiFi.disconnect(false, false);
-              WiFi.begin(candidate.ssid.c_str(),
-                         candidate.wifiPassword.c_str());
-              const uint32_t connectStartedMs = millis();
-              while (WiFi.status() != WL_CONNECTED &&
-                     millis() - connectStartedMs < kConnectTimeoutMs &&
-                     !cancelRequested) {
-                dns.processNextRequest();
-                serviceProvisioningDisplay();
-                delay(25);
-              }
-              if (cancelRequested) {
-                responseSent = true;
-                client.stop();
-              } else if (WiFi.status() != WL_CONNECTED) {
-                WiFi.disconnect(false, false);
-                drawProvisioningAccess(apSsid, apPassword);
-                responseSent = sendResponse(
-                    client, 400, "text/html; charset=utf-8",
-                    portalPage(csrf, activeConfig_,
-                               "No se pudo conectar a esa red Wi-Fi en 20 "
-                               "segundos."),
-                    serviceProvisioningIo);
-              } else {
-                std::string bootstrapError;
-                if (!candidateValidator(candidate, bootstrapError, [&]() {
-                      dns.processNextRequest();
-                      serviceProvisioningDisplay();
-                      return !cancelRequested;
-                    })) {
-                  if (cancelRequested) {
-                    responseSent = true;
-                    client.stop();
-                  } else {
-                    WiFi.disconnect(false, false);
-                    drawProvisioningAccess(apSsid, apPassword);
-                    const std::string displayError =
-                        safeBootstrapError(candidate, bootstrapError);
-                    responseSent = sendResponse(
-                        client, 400, "text/html; charset=utf-8",
-                        portalPage(csrf, activeConfig_,
-                                   String(displayError.c_str())),
-                        serviceProvisioningIo);
-                  }
-                } else if (!store_.save(candidate, profile_)) {
-                  WiFi.disconnect(false, false);
-                  drawProvisioningAccess(apSsid, apPassword);
-                  responseSent = sendResponse(
-                      client, 500, "text/html; charset=utf-8",
-                      portalPage(csrf, activeConfig_,
-                                 "El servidor respondió, pero no se pudo "
-                                 "guardar la configuración."),
-                      serviceProvisioningIo);
-                } else {
-                  responseSent = sendResponse(
-                      client, 200, "text/html; charset=utf-8",
-                      "<!doctype html><html lang=\"es\"><meta charset=\"utf-8\">"
-                      "<meta name=\"viewport\" content=\"width=device-width\">"
-                      "<title>Terminal configurado</title><body><main>"
-                      "<h1>Terminal configurado</h1><p>Ya puedes cerrar esta "
-                      "página.</p></main></body></html>",
-                      serviceProvisioningIo);
-                  result.saved = true;
-                  result.config = candidate;
-                  completed = true;
-                  M5.Display.wakeup();
-                  drawProvisioningStatus("Configurado",
-                                         "El terminal está listo.", false);
-                }
-              }
+                                     "Conectando con la red Wi-Fi...", false);
+              responseSent = sendResponse(
+                  client, 202, "text/html; charset=utf-8",
+                  provisioningProgressPage(), serviceProvisioningIo);
             }
           }
         } else {
@@ -961,7 +1154,61 @@ ProvisioningResult ProvisioningPortal::run(
       if (!responseSent) client.stop();
       drainAndCloseClient(client);
     }
-    serviceProvisioningDisplay();
+  };
+
+  while (!completed && !cancelRequested) {
+    serviceProvisioningIo();
+    serviceNextClient();
+
+    if (attempt.phase() == ProvisioningCheckPhase::Connecting) {
+      const std::optional<DeviceConfig>& candidate = attempt.candidate();
+      if (!candidate.has_value()) {
+        attempt.fail("No se pudo preparar la configuración.");
+      } else if (!stationConnectStarted) {
+        WiFi.disconnect(false, false);
+        WiFi.begin(candidate->ssid.c_str(), candidate->wifiPassword.c_str());
+        stationConnectStarted = true;
+      } else if (WiFi.status() == WL_CONNECTED) {
+        attempt.markValidating();
+        drawProvisioningStatus("Comprobando",
+                               "Validando el servidor de OpenJornada...",
+                               false);
+        std::string bootstrapError;
+        if (!candidateValidator(*candidate, bootstrapError, [&]() {
+              serviceProvisioningIo();
+              serviceNextClient();
+              return !cancelRequested;
+            })) {
+          if (!cancelRequested) {
+            attempt.fail(safeBootstrapError(*candidate, bootstrapError));
+            WiFi.disconnect(false, false);
+            stationConnectStarted = false;
+            drawProvisioningAccess(apSsid, apPassword);
+          }
+        } else if (!store_.save(*candidate, profile_)) {
+          attempt.fail("El servidor respondió, pero no se pudo guardar la "
+                       "configuración.");
+          WiFi.disconnect(false, false);
+          stationConnectStarted = false;
+          drawProvisioningAccess(apSsid, apPassword);
+        } else {
+          result.saved = true;
+          result.config = *candidate;
+          attempt.succeed(millis());
+          M5.Display.wakeup();
+          drawProvisioningStatus("Configurado", "El terminal está listo.",
+                                 false);
+        }
+      } else if (attempt.connectionTimedOut(millis())) {
+        attempt.fail(
+            "No se pudo conectar a esa red Wi-Fi en 20 segundos.");
+        WiFi.disconnect(false, false);
+        stationConnectStarted = false;
+        drawProvisioningAccess(apSsid, apPassword);
+      }
+    }
+
+    completed = attempt.successWindowElapsed(millis());
     delay(10);
   }
 
