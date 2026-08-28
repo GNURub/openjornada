@@ -8,6 +8,7 @@
 
 #include "openjornada/firmware_metadata.hpp"
 #include "openjornada/ojp.hpp"
+#include "openjornada/usb_protocol.hpp"
 
 using namespace openjornada;
 
@@ -62,7 +63,315 @@ std::optional<FirmwareBuildMetadata> parseMetadata(const std::string& image) {
       reinterpret_cast<const uint8_t*>(image.data()), image.size());
 }
 
+constexpr std::string_view kRequestId = "AZaztV6Dql5aZQHCF4yzEA";
+
+void feed(UsbControlParser& parser, std::string_view bytes) {
+  for (const char byte : bytes) parser.consume(byte);
+}
+
+std::string controlLine(std::string_view command,
+                        std::string_view payload = "{}") {
+  return "OJUSB/1 {\"v\":1,\"id\":\"" + std::string(kRequestId) +
+         "\",\"command\":\"" + std::string(command) +
+         "\",\"payload\":" + std::string(payload) + "}\n";
+}
+
+uint32_t testCrc32(const uint8_t* data, size_t size) {
+  uint32_t crc = 0xffffffffU;
+  for (size_t index = 0; index < size; ++index) {
+    crc ^= data[index];
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      crc = (crc >> 1U) ^ (0xedb88320U &
+                           (0U - static_cast<uint32_t>(crc & 1U)));
+    }
+  }
+  return crc ^ 0xffffffffU;
+}
+
+void appendLittleEndian(std::vector<uint8_t>& output, uint32_t value,
+                        size_t bytes) {
+  for (size_t index = 0; index < bytes; ++index) {
+    output.push_back(static_cast<uint8_t>(value >> (index * 8U)));
+  }
+}
+
+std::vector<uint8_t> firmwareFrame(uint32_t offset,
+                                   std::vector<uint8_t> payload) {
+  std::vector<uint8_t> output{'O', 'J', 'F', 'W'};
+  appendLittleEndian(output, offset, 4);
+  appendLittleEndian(output, static_cast<uint32_t>(payload.size()), 2);
+  appendLittleEndian(output, testCrc32(payload.data(), payload.size()), 4);
+  output.insert(output.end(), payload.begin(), payload.end());
+  return output;
+}
+
 }  // namespace
+
+void test_control_parser_accepts_fragmented_exact_request() {
+  UsbControlParser parser;
+  feed(parser,
+       "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":");
+  TEST_ASSERT_EQUAL(UsbParseStatus::NeedMore, parser.status());
+  feed(parser, "\"status\",\"payload\":{}}\r\n");
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, parser.status());
+  TEST_ASSERT_EQUAL(UsbCommand::Status, parser.request().command);
+  TEST_ASSERT_EQUAL_STRING(kRequestId.data(), parser.request().id.c_str());
+
+  UsbControlParser reordered;
+  feed(reordered,
+       "OJUSB/1 { \"payload\" : {}, \"command\" : \"status\","
+       "\"id\" : \"AZaztV6Dql5aZQHCF4yzEA\", \"v\" : 1 }\n");
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, reordered.status());
+  TEST_ASSERT_EQUAL(UsbCommand::Status, reordered.request().command);
+}
+
+void test_control_parser_accepts_exact_command_payload_shapes() {
+  const std::vector<std::pair<std::string_view, UsbCommand>> emptyPayload = {
+      {"hello", UsbCommand::Hello},
+      {"status", UsbCommand::Status},
+      {"doctor", UsbCommand::Doctor},
+      {"logs_subscribe", UsbCommand::LogsSubscribe},
+      {"reboot", UsbCommand::Reboot},
+      {"factory_reset", UsbCommand::FactoryReset},
+      {"firmware_commit", UsbCommand::FirmwareCommit},
+      {"cancel", UsbCommand::Cancel},
+  };
+  for (const auto& entry : emptyPayload) {
+    UsbControlParser parser;
+    feed(parser, controlLine(entry.first));
+    TEST_ASSERT_EQUAL(UsbParseStatus::Complete, parser.status());
+    TEST_ASSERT_EQUAL(entry.second, parser.request().command);
+  }
+
+  UsbControlParser provision;
+  feed(provision, controlLine("provision", R"({"ojp":"ojp=YWJj"})"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, provision.status());
+  TEST_ASSERT_EQUAL(UsbCommand::Provision, provision.request().command);
+  TEST_ASSERT_EQUAL_STRING("ojp=YWJj", provision.request().ojp.c_str());
+
+  UsbControlParser firmware;
+  feed(firmware,
+       controlLine("firmware_begin",
+                   R"({"size":4096,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","version":"1.2.3","board":"m5stack-basic-core-v27","protocolVersion":1,"official":false})"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, firmware.status());
+  TEST_ASSERT_EQUAL(UsbCommand::FirmwareBegin, firmware.request().command);
+  TEST_ASSERT_EQUAL_UINT32(4096, firmware.request().firmware.size);
+  TEST_ASSERT_EQUAL_STRING("1.2.3",
+                           firmware.request().firmware.metadata.firmwareVersion.c_str());
+  TEST_ASSERT_FALSE(firmware.request().firmware.official);
+}
+
+void test_control_parser_rejects_nul_malformed_utf8_and_invalid_ids() {
+  UsbControlParser nul;
+  feed(nul, "OJUSB/1 {");
+  nul.consume('\0');
+  TEST_ASSERT_EQUAL(UsbParseStatus::Error, nul.status());
+  TEST_ASSERT_EQUAL(UsbControlError::NulByte, nul.error());
+  feed(nul, "ignored\n");
+  TEST_ASSERT_EQUAL(UsbControlError::NulByte, nul.error());
+
+  UsbControlParser utf8;
+  std::string malformed = controlLine("status");
+  malformed.insert(malformed.find("status"), 1, static_cast<char>(0xc3));
+  feed(utf8, malformed);
+  TEST_ASSERT_EQUAL(UsbParseStatus::Error, utf8.status());
+  TEST_ASSERT_EQUAL(UsbControlError::InvalidUtf8, utf8.error());
+
+  const std::vector<std::string> invalidIds = {
+      "short", "AZaztV6Dql5aZQHCF4yzE=", "AZaztV6Dql5aZQHCF4yzE!",
+      "AZaztV6Dql5aZQHCF4yzEB"};
+  for (const auto& id : invalidIds) {
+    UsbControlParser parser;
+    std::string line = controlLine("status");
+    line.replace(line.find(kRequestId), kRequestId.size(), id);
+    feed(parser, line);
+    TEST_ASSERT_EQUAL(UsbParseStatus::Error, parser.status());
+    TEST_ASSERT_EQUAL(UsbControlError::InvalidId, parser.error());
+  }
+}
+
+void test_control_parser_rejects_unknown_duplicate_and_wrong_payload_fields() {
+  const std::vector<std::string> invalid = {
+      "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"status\",\"payload\":{},\"extra\":true}\n",
+      "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"status\",\"payload\":{}}\n",
+      "OJUSB/1 {\"v\":1,\"\\u0076\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"status\",\"payload\":{}}\n",
+      "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"status\",\"payload\":{\"x\":1}}\n",
+      "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"provision\",\"payload\":{\"ojp\":\"a\",\"ojp\":\"b\"}}\n",
+      "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"command\":\"unknown\",\"payload\":{}}\n"};
+  for (const auto& line : invalid) {
+    UsbControlParser parser;
+    feed(parser, line);
+    TEST_ASSERT_EQUAL(UsbParseStatus::Error, parser.status());
+    TEST_ASSERT_EQUAL(UsbControlError::InvalidContract, parser.error());
+  }
+}
+
+void test_control_parser_is_bounded_and_requires_explicit_reset() {
+  UsbControlParser oversized;
+  feed(oversized, std::string(kUsbControlMaxBytes, 'x'));
+  TEST_ASSERT_EQUAL(UsbParseStatus::NeedMore, oversized.status());
+  oversized.consume('x');
+  TEST_ASSERT_EQUAL(UsbParseStatus::Error, oversized.status());
+  TEST_ASSERT_EQUAL(UsbControlError::TooLarge, oversized.error());
+
+  UsbControlParser parser;
+  feed(parser, controlLine("hello"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, parser.status());
+  feed(parser, controlLine("status"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Error, parser.status());
+  TEST_ASSERT_EQUAL(UsbControlError::ResetRequired, parser.error());
+  parser.reset();
+  feed(parser, controlLine("status"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, parser.status());
+  TEST_ASSERT_EQUAL(UsbCommand::Status, parser.request().command);
+}
+
+void test_control_response_has_stable_order_and_json_escaping() {
+  ArduinoJson::JsonDocument data;
+  data["pendingCount"] = 3;
+  const std::string encoded = encodeUsbResponse(
+      kRequestId, "result", "ok", "Línea \"lista\"\n", data.as<ArduinoJson::JsonVariantConst>());
+  TEST_ASSERT_EQUAL_STRING(
+      "OJUSB/1 {\"v\":1,\"id\":\"AZaztV6Dql5aZQHCF4yzEA\",\"type\":\"result\",\"code\":\"ok\",\"message\":\"Línea \\\"lista\\\"\\n\",\"data\":{\"pendingCount\":3}}\n",
+      encoded.c_str());
+
+  std::string emptyMessage;
+  TEST_ASSERT_TRUE(
+      encodeUsbResponse(kRequestId, "result", "ok", "", emptyMessage));
+  const std::string boundaryMessage(kUsbControlMaxBytes - emptyMessage.size(),
+                                    'a');
+  std::string boundary;
+  TEST_ASSERT_TRUE(encodeUsbResponse(kRequestId, "result", "ok",
+                                     boundaryMessage, boundary));
+  TEST_ASSERT_EQUAL_UINT32(kUsbControlMaxBytes, boundary.size());
+  TEST_ASSERT_FALSE(encodeUsbResponse(
+      kRequestId, "result", "ok", boundaryMessage + "a", boundary));
+  TEST_ASSERT_TRUE(boundary.empty());
+}
+
+void test_firmware_frame_accepts_one_byte_fragmentation_and_partial_payload() {
+  const auto bytes = firmwareFrame(0, {1, 2, 3, 4, 5});
+  UsbFirmwareFrameParser parser;
+  for (size_t index = 0; index < bytes.size() - 1U; ++index) {
+    parser.consume(&bytes[index], 1);
+    TEST_ASSERT_EQUAL(UsbFrameParseStatus::NeedMore, parser.status());
+    const size_t expected = index + 1U < kUsbFirmwareHeaderBytes
+                                ? kUsbFirmwareHeaderBytes - index - 1U
+                                : bytes.size() - index - 1U;
+    TEST_ASSERT_EQUAL_UINT32(expected, parser.expectedBytes());
+  }
+  parser.consume(&bytes.back(), 1);
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, parser.status());
+  TEST_ASSERT_EQUAL_UINT32(0, parser.frame().offset);
+  TEST_ASSERT_EQUAL_UINT32(5, parser.frame().payload.size());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY((std::vector<uint8_t>{1, 2, 3, 4, 5}).data(),
+                                parser.frame().payload.data(), 5);
+}
+
+void test_firmware_frame_accepts_two_frames_in_one_buffer() {
+  auto bytes = firmwareFrame(0, {1, 2, 3});
+  const auto second = firmwareFrame(3, {4, 5});
+  bytes.insert(bytes.end(), second.begin(), second.end());
+  UsbFirmwareFrameParser parser;
+  const auto firstResult = parser.consume(bytes.data(), bytes.size());
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, parser.status());
+  TEST_ASSERT_EQUAL_UINT32(firmwareFrame(0, {1, 2, 3}).size(),
+                           firstResult.consumed);
+  TEST_ASSERT_EQUAL_UINT32(1, parser.frameCount());
+  TEST_ASSERT_EQUAL_UINT32(0, parser.frame().offset);
+  const auto blocked = parser.consume(bytes.data() + firstResult.consumed,
+                                      bytes.size() - firstResult.consumed);
+  TEST_ASSERT_EQUAL_UINT32(0, blocked.consumed);
+  TEST_ASSERT_EQUAL_UINT32(0, parser.expectedBytes());
+  parser.popFrame();
+  const auto secondResult = parser.consume(
+      bytes.data() + firstResult.consumed, bytes.size() - firstResult.consumed);
+  TEST_ASSERT_EQUAL_UINT32(second.size(), secondResult.consumed);
+  TEST_ASSERT_EQUAL_UINT32(3, parser.frame().offset);
+  TEST_ASSERT_EQUAL_UINT32(2, parser.frame().payload.size());
+  parser.popFrame();
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::NeedMore, parser.status());
+  TEST_ASSERT_EQUAL_UINT32(kUsbFirmwareHeaderBytes, parser.expectedBytes());
+}
+
+void test_firmware_frame_backpressure_preserves_many_concatenated_frames() {
+  constexpr size_t kFrameCount = 32;
+  std::vector<uint8_t> bytes;
+  for (size_t index = 0; index < kFrameCount; ++index) {
+    const auto next = firmwareFrame(static_cast<uint32_t>(index),
+                                    {static_cast<uint8_t>(index)});
+    bytes.insert(bytes.end(), next.begin(), next.end());
+  }
+
+  UsbFirmwareFrameParser parser;
+  size_t cursor = 0;
+  for (size_t index = 0; index < kFrameCount; ++index) {
+    const auto result = parser.consume(bytes.data() + cursor,
+                                       bytes.size() - cursor);
+    TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, result.status);
+    TEST_ASSERT_EQUAL_UINT32(kUsbFirmwareHeaderBytes + 1U, result.consumed);
+    TEST_ASSERT_EQUAL_UINT32(1, parser.frameCount());
+    TEST_ASSERT_EQUAL_UINT32(index, parser.frame().offset);
+    TEST_ASSERT_EQUAL_UINT8(index, parser.frame().payload.front());
+    cursor += result.consumed;
+    parser.popFrame();
+  }
+  TEST_ASSERT_EQUAL_UINT32(bytes.size(), cursor);
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::NeedMore, parser.status());
+}
+
+void test_firmware_frame_rejects_header_crc_and_repeated_offset() {
+  const auto assertRejected = [](std::vector<uint8_t> bytes,
+                                 UsbFrameError expected) {
+    UsbFirmwareFrameParser parser;
+    parser.consume(bytes.data(), bytes.size());
+    TEST_ASSERT_EQUAL(UsbFrameParseStatus::Error, parser.status());
+    TEST_ASSERT_EQUAL(expected, parser.error());
+  };
+
+  auto badMagic = firmwareFrame(0, {1});
+  badMagic[0] = 'X';
+  assertRejected(badMagic, UsbFrameError::InvalidMagic);
+  auto zeroLength = firmwareFrame(0, {});
+  assertRejected(zeroLength, UsbFrameError::InvalidLength);
+  std::vector<uint8_t> longPayload(kUsbFirmwareChunkBytes + 1U, 7);
+  assertRejected(firmwareFrame(0, longPayload), UsbFrameError::InvalidLength);
+  auto badCrc = firmwareFrame(0, {1, 2});
+  badCrc.back() ^= 0xffU;
+  assertRejected(badCrc, UsbFrameError::CrcMismatch);
+  assertRejected(firmwareFrame(9, {1}), UsbFrameError::UnexpectedOffset);
+
+  UsbFirmwareFrameParser maximum;
+  const auto maximumFrame =
+      firmwareFrame(0, std::vector<uint8_t>(kUsbFirmwareChunkBytes, 0xa5));
+  maximum.consume(maximumFrame.data(), maximumFrame.size());
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, maximum.status());
+  TEST_ASSERT_EQUAL_UINT32(kUsbFirmwareChunkBytes,
+                           maximum.frame().payload.size());
+  TEST_ASSERT_EQUAL_UINT32(kUsbFirmwareChunkBytes, maximum.expectedOffset());
+
+  UsbFirmwareFrameParser repeated;
+  const auto first = firmwareFrame(0, {1, 2});
+  const auto second = firmwareFrame(0, {3});
+  repeated.consume(first.data(), first.size());
+  repeated.popFrame();
+  repeated.consume(second.data(), second.size());
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::Error, repeated.status());
+  TEST_ASSERT_EQUAL(UsbFrameError::UnexpectedOffset, repeated.error());
+}
+
+void test_firmware_frame_reset_recovers_with_explicit_offset() {
+  UsbFirmwareFrameParser parser;
+  auto invalid = firmwareFrame(0, {1});
+  invalid[3] = 'X';
+  parser.consume(invalid.data(), invalid.size());
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::Error, parser.status());
+  parser.reset(7);
+  const auto valid = firmwareFrame(7, {8, 9});
+  parser.consume(valid.data(), valid.size());
+  TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, parser.status());
+  TEST_ASSERT_EQUAL_UINT32(7, parser.frame().offset);
+}
 
 void test_ojp_accepts_all_supported_wrappers() {
   for (const auto& input : validOjpForms()) {
@@ -218,6 +527,20 @@ void test_firmware_metadata_rejects_noncanonical_or_incompatible_values() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_control_parser_accepts_fragmented_exact_request);
+  RUN_TEST(test_control_parser_accepts_exact_command_payload_shapes);
+  RUN_TEST(test_control_parser_rejects_nul_malformed_utf8_and_invalid_ids);
+  RUN_TEST(
+      test_control_parser_rejects_unknown_duplicate_and_wrong_payload_fields);
+  RUN_TEST(test_control_parser_is_bounded_and_requires_explicit_reset);
+  RUN_TEST(test_control_response_has_stable_order_and_json_escaping);
+  RUN_TEST(
+      test_firmware_frame_accepts_one_byte_fragmentation_and_partial_payload);
+  RUN_TEST(test_firmware_frame_accepts_two_frames_in_one_buffer);
+  RUN_TEST(
+      test_firmware_frame_backpressure_preserves_many_concatenated_frames);
+  RUN_TEST(test_firmware_frame_rejects_header_crc_and_repeated_offset);
+  RUN_TEST(test_firmware_frame_reset_recovers_with_explicit_offset);
   RUN_TEST(test_ojp_accepts_all_supported_wrappers);
   RUN_TEST(test_ojp_rejects_missing_oversized_or_invalid_encoding);
   RUN_TEST(test_ojp_rejects_invalid_utf8);
