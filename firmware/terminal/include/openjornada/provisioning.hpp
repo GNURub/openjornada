@@ -7,6 +7,11 @@
 #include <string>
 
 #include "openjornada/config.hpp"
+#include "openjornada/usb_protocol.hpp"
+
+#ifdef ARDUINO
+class Stream;
+#endif
 
 namespace openjornada {
 
@@ -168,13 +173,71 @@ class ProvisioningAttemptState {
   bool successResponseServed_ = false;
 };
 
+enum class ProvisioningSerialMode { Runtime, Portal };
+
+enum class UsbProvisionDecision {
+  Started,
+  Busy,
+  PortalRequired,
+  PendingActions,
+  InvalidPayload,
+  UnsupportedCommand,
+};
+
+struct UsbProvisionAcceptance {
+  UsbProvisionDecision decision = UsbProvisionDecision::UnsupportedCommand;
+  std::string code;
+};
+
+class ProvisioningSerialTransport {
+ public:
+  virtual ~ProvisioningSerialTransport() = default;
+  virtual int available() = 0;
+  virtual int read() = 0;
+  virtual size_t write(const uint8_t* data, size_t size) = 0;
+};
+
+class ProvisioningSerialAdapter {
+ public:
+  ProvisioningSerialAdapter(BuildProfile profile,
+                            std::optional<DeviceConfig> activeConfig,
+                            size_t pendingCount, ProvisioningSerialMode mode);
+
+  UsbProvisionAcceptance accept(const UsbControlRequest& request,
+                                ProvisioningAttemptState& attempt,
+                                uint32_t nowMs);
+  std::optional<std::string> nextEvent(
+      const ProvisioningAttemptState& attempt);
+  void service(ProvisioningSerialTransport& transport,
+               ProvisioningAttemptState& attempt, uint32_t nowMs);
+
+#ifdef ARDUINO
+  void service(Stream& stream, ProvisioningAttemptState& attempt,
+               uint32_t nowMs);
+#endif
+
+ private:
+  BuildProfile profile_;
+  std::optional<DeviceConfig> activeConfig_;
+  size_t pendingCount_;
+  ProvisioningSerialMode mode_;
+  UsbControlParser parser_;
+  std::string activeRequestId_;
+  ProvisioningCheckPhase lastEventPhase_ = ProvisioningCheckPhase::Idle;
+};
+
 class ProvisioningPortal {
  public:
   ProvisioningPortal(ConfigStore& store, BuildProfile profile,
                      std::optional<DeviceConfig> activeConfig,
                      size_t pendingCount);
 
+#ifdef ARDUINO
+  ProvisioningResult run(const CandidateValidator& candidateValidator,
+                         Stream& serial);
+#else
   ProvisioningResult run(const CandidateValidator& candidateValidator);
+#endif
 
  private:
   ConfigStore& store_;

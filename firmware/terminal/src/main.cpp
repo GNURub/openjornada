@@ -311,7 +311,8 @@ ProvisioningOutcome runProvisioning(
                       static_cast<unsigned>(response.protocol.current),
                       static_cast<unsigned long>(response.cacheRevision));
         return true;
-      });
+      },
+      Serial);
   if (result.saved) return ProvisioningOutcome::Saved;
   if (result.cancelled) return ProvisioningOutcome::Cancelled;
   return ProvisioningOutcome::Failed;

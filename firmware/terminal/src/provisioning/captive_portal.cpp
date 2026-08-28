@@ -2,6 +2,7 @@
 
 #include "openjornada/display_power.hpp"
 #include "openjornada/gesture.hpp"
+#include "openjornada/ojp.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -454,6 +455,154 @@ const std::string& ProvisioningAttemptState::error() const { return error_; }
 uint32_t ProvisioningAttemptState::completedAtMs() const {
   return completedAtMs_;
 }
+
+ProvisioningSerialAdapter::ProvisioningSerialAdapter(
+    BuildProfile profile, std::optional<DeviceConfig> activeConfig,
+    size_t pendingCount, ProvisioningSerialMode mode)
+    : profile_(profile),
+      activeConfig_(std::move(activeConfig)),
+      pendingCount_(pendingCount),
+      mode_(mode) {}
+
+UsbProvisionAcceptance ProvisioningSerialAdapter::accept(
+    const UsbControlRequest& request, ProvisioningAttemptState& attempt,
+    uint32_t nowMs) {
+  if (request.command != UsbCommand::Provision) {
+    return {UsbProvisionDecision::UnsupportedCommand, "unsupported_command"};
+  }
+  if (mode_ != ProvisioningSerialMode::Portal) {
+    return {UsbProvisionDecision::PortalRequired, "portal_required"};
+  }
+
+  const OjpDecodeResult decoded = decodeOjpPayload(request.ojp, profile_);
+  if (decoded.error != OjpError::None || !decoded.config.has_value()) {
+    return {UsbProvisionDecision::InvalidPayload, "invalid_ojp"};
+  }
+  if (!canApplyProvisioningCandidate(activeConfig_, *decoded.config,
+                                     pendingCount_)) {
+    return {UsbProvisionDecision::PendingActions, "pending_actions"};
+  }
+  if (!attempt.begin(*decoded.config, nowMs)) {
+    return {UsbProvisionDecision::Busy, "busy"};
+  }
+
+  activeRequestId_ = request.id;
+  lastEventPhase_ = ProvisioningCheckPhase::Idle;
+  return {UsbProvisionDecision::Started, "accepted"};
+}
+
+std::optional<std::string> ProvisioningSerialAdapter::nextEvent(
+    const ProvisioningAttemptState& attempt) {
+  const ProvisioningCheckPhase phase = attempt.phase();
+  if (activeRequestId_.empty() || phase == lastEventPhase_) return std::nullopt;
+
+  const char* code = nullptr;
+  const char* message = nullptr;
+  switch (phase) {
+    case ProvisioningCheckPhase::Idle:
+      return std::nullopt;
+    case ProvisioningCheckPhase::Connecting:
+      code = "connecting";
+      message = "Conectando con la red Wi-Fi.";
+      break;
+    case ProvisioningCheckPhase::Validating:
+      code = "validating";
+      message = "Validando el servidor de OpenJornada.";
+      break;
+    case ProvisioningCheckPhase::Succeeded:
+      code = "saved";
+      message = "Configuración guardada.";
+      break;
+    case ProvisioningCheckPhase::Failed:
+      code = "provision_failed";
+      message = "No se pudo completar el aprovisionamiento.";
+      break;
+  }
+
+  lastEventPhase_ = phase;
+  std::string event =
+      encodeUsbResponse(activeRequestId_, "event", code, message);
+  if (phase == ProvisioningCheckPhase::Succeeded ||
+      phase == ProvisioningCheckPhase::Failed) {
+    activeRequestId_.clear();
+  }
+  return event;
+}
+
+namespace {
+
+void writeProvisioningSerial(ProvisioningSerialTransport& transport,
+                             const std::string& response) {
+  size_t offset = 0;
+  while (offset < response.size()) {
+    const size_t written = transport.write(
+        reinterpret_cast<const uint8_t*>(response.data() + offset),
+        response.size() - offset);
+    if (written == 0 || written > response.size() - offset) return;
+    offset += written;
+  }
+}
+
+}  // namespace
+
+void ProvisioningSerialAdapter::service(ProvisioningSerialTransport& transport,
+                                        ProvisioningAttemptState& attempt,
+                                        uint32_t nowMs) {
+  if (const auto event = nextEvent(attempt); event.has_value()) {
+    writeProvisioningSerial(transport, *event);
+  }
+
+  while (transport.available() > 0) {
+    const int byte = transport.read();
+    if (byte < 0) break;
+    const UsbParseStatus status = parser_.consume(static_cast<char>(byte));
+    if (status == UsbParseStatus::Error) {
+      parser_.reset();
+      return;
+    }
+    if (status != UsbParseStatus::Complete) continue;
+
+    const UsbControlRequest request = parser_.request();
+    const UsbProvisionAcceptance acceptance = accept(request, attempt, nowMs);
+    writeProvisioningSerial(
+        transport,
+        encodeUsbResponse(request.id, "result", acceptance.code, ""));
+    parser_.reset();
+    if (const auto event = nextEvent(attempt); event.has_value()) {
+      writeProvisioningSerial(transport, *event);
+    }
+    return;
+  }
+}
+
+#ifdef ARDUINO
+namespace {
+
+class ArduinoProvisioningSerialTransport final
+    : public ProvisioningSerialTransport {
+ public:
+  explicit ArduinoProvisioningSerialTransport(Stream& stream)
+      : stream_(stream) {}
+
+  int available() override { return stream_.available(); }
+  int read() override { return stream_.read(); }
+  size_t write(const uint8_t* data, size_t size) override {
+    return stream_.write(data, size);
+  }
+
+ private:
+  Stream& stream_;
+};
+
+}  // namespace
+
+void ProvisioningSerialAdapter::service(Stream& stream,
+                                        ProvisioningAttemptState& attempt,
+                                        uint32_t nowMs) {
+  ArduinoProvisioningSerialTransport transport(stream);
+  service(transport, attempt, nowMs);
+}
+#endif
 
 ProvisioningPortal::ProvisioningPortal(
     ConfigStore& store, BuildProfile profile,
@@ -930,7 +1079,7 @@ void stopPortal(DNSServer& dns, WiFiServer& server, bool keepStation) {
 }  // namespace
 
 ProvisioningResult ProvisioningPortal::run(
-    const CandidateValidator& candidateValidator) {
+    const CandidateValidator& candidateValidator, Stream& serial) {
   ProvisioningResult result;
   if (!candidateValidator) {
     result.displayError = "No se puede comprobar el servidor.";
@@ -962,6 +1111,8 @@ ProvisioningResult ProvisioningPortal::run(
   bool cancelRequested = false;
   bool stationConnectStarted = false;
   ProvisioningAttemptState attempt;
+  ProvisioningSerialAdapter serialAdapter(
+      profile_, activeConfig_, pendingCount_, ProvisioningSerialMode::Portal);
   server.begin();
   drawProvisioningAccess(apSsid, apPassword);
   DisplayPowerPolicy displayPower(millis());
@@ -1009,6 +1160,7 @@ ProvisioningResult ProvisioningPortal::run(
   const auto serviceProvisioningIo = [&]() {
     dns.processNextRequest();
     serviceProvisioningDisplay();
+    serialAdapter.service(serial, attempt, millis());
   };
 
   std::function<void()> serviceNextClient;
@@ -1021,6 +1173,7 @@ ProvisioningResult ProvisioningPortal::run(
       uint32_t lastProgressMs = requestStartedMs;
       while (parser.status() == CaptiveHttpParseStatus::NeedMore &&
              client.connected() &&
+             !cancelRequested &&
              provisioningRequestTimeout(requestStartedMs, lastProgressMs,
                                         millis()) ==
                  ProvisioningRequestTimeout::None) {
@@ -1031,8 +1184,7 @@ ProvisioningResult ProvisioningPortal::run(
           parser.consume(static_cast<char>(byte));
           lastProgressMs = millis();
         }
-        dns.processNextRequest();
-        serviceProvisioningDisplay();
+        serviceProvisioningIo();
         delay(2);
       }
 
@@ -1159,6 +1311,7 @@ ProvisioningResult ProvisioningPortal::run(
   while (!completed && !cancelRequested) {
     serviceProvisioningIo();
     serviceNextClient();
+    if (cancelRequested) break;
 
     if (attempt.phase() == ProvisioningCheckPhase::Connecting) {
       const std::optional<DeviceConfig>& candidate = attempt.candidate();
@@ -1173,6 +1326,7 @@ ProvisioningResult ProvisioningPortal::run(
         drawProvisioningStatus("Comprobando",
                                "Validando el servidor de OpenJornada...",
                                false);
+        serviceProvisioningIo();
         std::string bootstrapError;
         if (!candidateValidator(*candidate, bootstrapError, [&]() {
               serviceProvisioningIo();
@@ -1208,11 +1362,16 @@ ProvisioningResult ProvisioningPortal::run(
       }
     }
 
+    serialAdapter.service(serial, attempt, millis());
     completed = attempt.successWindowElapsed(millis());
     delay(10);
   }
 
   if (cancelRequested) {
+    if (attempt.busy()) {
+      attempt.fail("Configuración cancelada.");
+      serialAdapter.service(serial, attempt, millis());
+    }
     result.cancelled = true;
     result.displayError = "Configuración cancelada.";
   }

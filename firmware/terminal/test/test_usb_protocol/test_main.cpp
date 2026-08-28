@@ -8,6 +8,7 @@
 
 #include "openjornada/firmware_metadata.hpp"
 #include "openjornada/ojp.hpp"
+#include "openjornada/provisioning.hpp"
 #include "openjornada/usb_protocol.hpp"
 
 using namespace openjornada;
@@ -69,11 +70,43 @@ void feed(UsbControlParser& parser, std::string_view bytes) {
   for (const char byte : bytes) parser.consume(byte);
 }
 
+class FakeProvisioningSerialTransport final
+    : public ProvisioningSerialTransport {
+ public:
+  void append(std::string_view bytes) { input_.append(bytes); }
+  int available() override {
+    return cursor_ < input_.size() ? static_cast<int>(input_.size() - cursor_)
+                                   : 0;
+  }
+  int read() override {
+    if (cursor_ >= input_.size()) return -1;
+    return static_cast<uint8_t>(input_[cursor_++]);
+  }
+  size_t write(const uint8_t* data, size_t size) override {
+    output_.append(reinterpret_cast<const char*>(data), size);
+    return size;
+  }
+  const std::string& output() const { return output_; }
+
+ private:
+  std::string input_;
+  size_t cursor_ = 0;
+  std::string output_;
+};
+
 std::string controlLine(std::string_view command,
                         std::string_view payload = "{}") {
   return "OJUSB/1 {\"v\":1,\"id\":\"" + std::string(kRequestId) +
          "\",\"command\":\"" + std::string(command) +
          "\",\"payload\":" + std::string(payload) + "}\n";
+}
+
+UsbControlRequest validProvisionRequest() {
+  UsbControlRequest request;
+  request.id = kRequestId;
+  request.command = UsbCommand::Provision;
+  request.ojp = encoded(kCanonicalOjp);
+  return request;
 }
 
 uint32_t testCrc32(const uint8_t* data, size_t size) {
@@ -388,6 +421,155 @@ void test_ojp_accepts_all_supported_wrappers() {
   }
 }
 
+void test_usb_provision_starts_the_existing_attempt_once() {
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Development, std::nullopt, 0,
+      ProvisioningSerialMode::Portal);
+  ProvisioningAttemptState attempt;
+
+  const auto first = serial.accept(validProvisionRequest(), attempt, 1000);
+  const auto second = serial.accept(validProvisionRequest(), attempt, 1001);
+
+  TEST_ASSERT_EQUAL(UsbProvisionDecision::Started, first.decision);
+  TEST_ASSERT_EQUAL(UsbProvisionDecision::Busy, second.decision);
+  TEST_ASSERT_EQUAL(ProvisioningCheckPhase::Connecting, attempt.phase());
+}
+
+void test_usb_provision_service_is_fragmented_and_cooperative() {
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Development, std::nullopt, 0,
+      ProvisioningSerialMode::Portal);
+  ProvisioningAttemptState attempt;
+  FakeProvisioningSerialTransport transport;
+  const std::string request = controlLine(
+      "provision", "{\"ojp\":\"" + encoded(kCanonicalOjp) + "\"}");
+  const size_t split = request.size() / 2U;
+
+  transport.append(std::string_view(request).substr(0, split));
+  serial.service(transport, attempt, 1000);
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+  TEST_ASSERT_TRUE(transport.output().empty());
+
+  transport.append(std::string_view(request).substr(split));
+  serial.service(transport, attempt, 1001);
+  TEST_ASSERT_EQUAL(ProvisioningCheckPhase::Connecting, attempt.phase());
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos, transport.output().find("\"code\":\"accepted\""));
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos, transport.output().find("\"code\":\"connecting\""));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    transport.output().find("ojterm_demo_1234567890"));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    transport.output().find("clave segura"));
+}
+
+void test_usb_provision_requires_portal_mode_and_respects_pending_policy() {
+  ProvisioningAttemptState attempt;
+  ProvisioningSerialAdapter runtime(
+      BuildProfile::Development, std::nullopt, 0,
+      ProvisioningSerialMode::Runtime);
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::PortalRequired,
+      runtime.accept(validProvisionRequest(), attempt, 1000).decision);
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+
+  DeviceConfig active;
+  active.ssid = "Red Demo";
+  active.wifiPassword = "clave segura";
+  active.baseUrl = "http://192.168.1.20:8090";
+  active.terminalToken = "ojterm_different_1234567890";
+  ProvisioningSerialAdapter pending(
+      BuildProfile::Development, active, 1,
+      ProvisioningSerialMode::Portal);
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::PendingActions,
+      pending.accept(validProvisionRequest(), attempt, 1001).decision);
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+}
+
+void test_usb_provision_events_never_serialize_candidate_secrets() {
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Development, std::nullopt, 0,
+      ProvisioningSerialMode::Portal);
+  ProvisioningAttemptState attempt;
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::Started,
+      serial.accept(validProvisionRequest(), attempt, 1000).decision);
+
+  const auto connecting = serial.nextEvent(attempt);
+  TEST_ASSERT_TRUE(connecting.has_value());
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos, connecting->find("\"code\":\"connecting\""));
+  TEST_ASSERT_EQUAL(std::string::npos, connecting->find("clave segura"));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    connecting->find("ojterm_demo_1234567890"));
+
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  const auto validating = serial.nextEvent(attempt);
+  TEST_ASSERT_TRUE(validating.has_value());
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos, validating->find("\"code\":\"validating\""));
+
+  attempt.fail("Error con clave segura y ojterm_demo_1234567890");
+  const auto failed = serial.nextEvent(attempt);
+  TEST_ASSERT_TRUE(failed.has_value());
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos, failed->find("\"code\":\"provision_failed\""));
+  TEST_ASSERT_EQUAL(std::string::npos, failed->find("clave segura"));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    failed->find("ojterm_demo_1234567890"));
+
+  DeviceConfig browserCandidate;
+  browserCandidate.ssid = "browser-network";
+  browserCandidate.baseUrl = "https://jornada.example.com";
+  browserCandidate.terminalToken = "ojterm_browser";
+  TEST_ASSERT_TRUE(attempt.begin(browserCandidate, 1500));
+  TEST_ASSERT_FALSE(serial.nextEvent(attempt).has_value());
+  attempt.fail("Preparando otro intento USB.");
+
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::Started,
+      serial.accept(validProvisionRequest(), attempt, 2000).decision);
+  TEST_ASSERT_TRUE(serial.nextEvent(attempt).has_value());
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  TEST_ASSERT_TRUE(serial.nextEvent(attempt).has_value());
+  attempt.succeed(3000);
+  const auto saved = serial.nextEvent(attempt);
+  TEST_ASSERT_TRUE(saved.has_value());
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        saved->find("\"code\":\"saved\""));
+  TEST_ASSERT_EQUAL(std::string::npos, saved->find("clave segura"));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    saved->find("ojterm_demo_1234567890"));
+}
+
+void test_usb_provision_cancel_emits_terminal_event_and_closes_ownership() {
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Development, std::nullopt, 0,
+      ProvisioningSerialMode::Portal);
+  ProvisioningAttemptState attempt;
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::Started,
+      serial.accept(validProvisionRequest(), attempt, 1000).decision);
+  TEST_ASSERT_TRUE(serial.nextEvent(attempt).has_value());
+  TEST_ASSERT_TRUE(attempt.markValidating());
+  TEST_ASSERT_TRUE(serial.nextEvent(attempt).has_value());
+
+  attempt.fail("Configuración cancelada.");
+  const auto cancelled = serial.nextEvent(attempt);
+  TEST_ASSERT_TRUE(cancelled.has_value());
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos, cancelled->find("\"code\":\"provision_failed\""));
+  TEST_ASSERT_FALSE(attempt.busy());
+  TEST_ASSERT_TRUE(attempt.canSubmit());
+  TEST_ASSERT_FALSE(serial.nextEvent(attempt).has_value());
+
+  DeviceConfig browserCandidate;
+  browserCandidate.ssid = "browser-network";
+  TEST_ASSERT_TRUE(attempt.begin(browserCandidate, 2000));
+  TEST_ASSERT_FALSE(serial.nextEvent(attempt).has_value());
+}
+
 void test_ojp_rejects_missing_oversized_or_invalid_encoding() {
   TEST_ASSERT_EQUAL(OjpError::MissingPayload,
                     decodeOjpPayload("", BuildProfile::Development).error);
@@ -542,6 +724,13 @@ int main(int, char**) {
   RUN_TEST(test_firmware_frame_rejects_header_crc_and_repeated_offset);
   RUN_TEST(test_firmware_frame_reset_recovers_with_explicit_offset);
   RUN_TEST(test_ojp_accepts_all_supported_wrappers);
+  RUN_TEST(test_usb_provision_starts_the_existing_attempt_once);
+  RUN_TEST(test_usb_provision_service_is_fragmented_and_cooperative);
+  RUN_TEST(
+      test_usb_provision_requires_portal_mode_and_respects_pending_policy);
+  RUN_TEST(test_usb_provision_events_never_serialize_candidate_secrets);
+  RUN_TEST(
+      test_usb_provision_cancel_emits_terminal_event_and_closes_ownership);
   RUN_TEST(test_ojp_rejects_missing_oversized_or_invalid_encoding);
   RUN_TEST(test_ojp_rejects_invalid_utf8);
   RUN_TEST(test_ojp_rejects_noncanonical_contracts);

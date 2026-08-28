@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include "openjornada/provisioning.hpp"
 
@@ -38,6 +39,34 @@ CaptiveHttpRequest validFormRequest() {
                  "wifi_password_explicit=0&"
                  "base_url=https%3A%2F%2Fjornada.example.com&"
                  "terminal_token=ojterm_token";
+  return request;
+}
+
+std::string base64Url(std::string_view input) {
+  static constexpr char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  std::string output;
+  for (size_t cursor = 0; cursor < input.size();) {
+    const uint32_t first = static_cast<uint8_t>(input[cursor++]);
+    const bool hasSecond = cursor < input.size();
+    const uint32_t second = hasSecond ? static_cast<uint8_t>(input[cursor++]) : 0;
+    const bool hasThird = cursor < input.size();
+    const uint32_t third = hasThird ? static_cast<uint8_t>(input[cursor++]) : 0;
+    const uint32_t bits = (first << 16U) | (second << 8U) | third;
+    output.push_back(alphabet[(bits >> 18U) & 0x3fU]);
+    output.push_back(alphabet[(bits >> 12U) & 0x3fU]);
+    if (hasSecond) output.push_back(alphabet[(bits >> 6U) & 0x3fU]);
+    if (hasThird) output.push_back(alphabet[bits & 0x3fU]);
+  }
+  return output;
+}
+
+UsbControlRequest validUsbProvisionRequest() {
+  UsbControlRequest request;
+  request.id = "AZaztV6Dql5aZQHCF4yzEA";
+  request.command = UsbCommand::Provision;
+  request.ojp = base64Url(
+      R"({"v":1,"s":"office","p":"password","u":"https://jornada.example.com","t":"ojterm_token"})");
   return request;
 }
 
@@ -414,6 +443,42 @@ void test_provisioning_attempt_rejects_duplicates_and_tracks_result() {
   TEST_ASSERT_EQUAL_UINT32(3000, attempt.completedAtMs());
 }
 
+void test_pending_actions_only_allow_the_existing_terminal_token() {
+  DeviceConfig active;
+  active.terminalToken = "ojterm_existing";
+  DeviceConfig unchanged = active;
+  DeviceConfig changed = active;
+  changed.terminalToken = "ojterm_changed";
+
+  TEST_ASSERT_TRUE(canApplyProvisioningCandidate(active, unchanged, 1));
+  TEST_ASSERT_FALSE(canApplyProvisioningCandidate(active, changed, 1));
+  TEST_ASSERT_FALSE(
+      canApplyProvisioningCandidate(std::nullopt, changed, 1));
+  TEST_ASSERT_TRUE(canApplyProvisioningCandidate(active, changed, 0));
+}
+
+void test_http_and_usb_submissions_share_one_busy_attempt() {
+  DeviceConfig browserCandidate;
+  browserCandidate.ssid = "browser-network";
+  browserCandidate.baseUrl = "https://jornada.example.com";
+  browserCandidate.terminalToken = "ojterm_token";
+
+  ProvisioningAttemptState httpFirst;
+  TEST_ASSERT_TRUE(httpFirst.begin(browserCandidate, 1000));
+  ProvisioningSerialAdapter serial(
+      BuildProfile::Release, std::nullopt, 0,
+      ProvisioningSerialMode::Portal);
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::Busy,
+      serial.accept(validUsbProvisionRequest(), httpFirst, 1001).decision);
+
+  ProvisioningAttemptState usbFirst;
+  TEST_ASSERT_EQUAL(
+      UsbProvisionDecision::Started,
+      serial.accept(validUsbProvisionRequest(), usbFirst, 2000).decision);
+  TEST_ASSERT_FALSE(usbFirst.begin(browserCandidate, 2001));
+}
+
 void test_provisioning_success_grace_starts_after_status_response() {
   ProvisioningAttemptState attempt;
   DeviceConfig candidate;
@@ -501,6 +566,8 @@ int main(int, char**) {
   RUN_TEST(test_portal_routes_brave_probes_without_redirect_loops);
   RUN_TEST(test_request_wait_uses_short_idle_and_bounded_total_timeouts);
   RUN_TEST(test_provisioning_attempt_rejects_duplicates_and_tracks_result);
+  RUN_TEST(test_pending_actions_only_allow_the_existing_terminal_token);
+  RUN_TEST(test_http_and_usb_submissions_share_one_busy_attempt);
   RUN_TEST(test_provisioning_success_grace_starts_after_status_response);
   RUN_TEST(test_provisioning_csp_allows_only_the_local_script);
   RUN_TEST(test_provisioning_asset_writer_retries_partial_writes_without_gaps);
