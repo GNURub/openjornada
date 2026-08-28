@@ -105,9 +105,35 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  windows-installer:
+    name: Probar instalador de Windows
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar código de la etiqueta publicada
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Comprobar sintaxis y comportamiento del instalador
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            'cli/openjornada-terminal/install.ps1', [ref]$null, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) { throw $errors }
+          pwsh -File cli/openjornada-terminal/scripts/test_install_ps1.ps1
+
   publish:
     name: Atestar y publicar CLI
-    needs: build
+    needs:
+      - build
+      - windows-installer
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

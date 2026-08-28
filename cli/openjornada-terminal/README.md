@@ -29,6 +29,24 @@ Añade el directorio elegido a `PATH` si aún no está incluido. Un checksum
 incorrecto o un archivo con entradas inesperadas cancela la instalación antes
 de sustituir un binario existente.
 
+## Instalación en Windows
+
+Desde PowerShell 7, el instalador oficial detecta `amd64` o `arm64` mediante el
+runtime, descarga la última release estable y verifica el inventario SHA-256 y
+el contenido exacto del ZIP antes de sustituir el ejecutable:
+
+```powershell
+irm https://github.com/GNURub/openjornada/releases/latest/download/install.ps1 | iex
+```
+
+Se instala únicamente para la persona actual en
+`$env:LOCALAPPDATA\Programs\OpenJornada\bin` y añade esa ruta al `PATH` de
+usuario de forma idempotente. No solicita elevación ni modifica el `PATH` de
+máquina. Abre una nueva consola después de la primera instalación para usar el
+comando sin indicar su ruta completa. Un checksum incorrecto, un inventario no
+canónico o un ZIP con rutas, enlaces, duplicados, ficheros inesperados, vacíos o
+sobredimensionados deja intacto cualquier ejecutable anterior.
+
 ## Comandos
 
 ```text
