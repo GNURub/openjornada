@@ -10,6 +10,7 @@ import (
 	"github.com/GNURub/openjornada/cli/openjornada-terminal/internal/protocol"
 	"github.com/GNURub/openjornada/cli/openjornada-terminal/internal/release"
 	"github.com/GNURub/openjornada/cli/openjornada-terminal/internal/serialport"
+	firmwareupdate "github.com/GNURub/openjornada/cli/openjornada-terminal/internal/update"
 	"github.com/spf13/cobra"
 	"go.bug.st/serial"
 	"golang.org/x/term"
@@ -26,22 +27,28 @@ type DeviceClient interface {
 // Dependencies contains process streams so callers and tests can run commands
 // without replacing global state.
 type Dependencies struct {
-	Stdin        io.Reader
-	Stdout       io.Writer
-	Stderr       io.Writer
-	Connect      func(context.Context, string) (DeviceClient, error)
-	PortNames    func() ([]string, error)
-	ReadPassword func() ([]byte, error)
-	ResetTimeout time.Duration
-	LatestStable func(context.Context) (release.Bundle, error)
+	Stdin            io.Reader
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Connect          func(context.Context, string) (DeviceClient, error)
+	PortNames        func() ([]string, error)
+	ReadPassword     func() ([]byte, error)
+	ResetTimeout     time.Duration
+	LatestStable     func(context.Context) (release.Bundle, error)
+	VerifyFirmware   func(release.Bundle, release.DeviceInfo) (release.VerifiedFirmware, error)
+	InspectCustom    func(string) (release.VerifiedFirmware, error)
+	TransferFirmware func(context.Context, firmwareupdate.Client, release.VerifiedFirmware, firmwareupdate.ProgressFunc) error
 }
 
 type runtimeDependencies struct {
-	connect      func(context.Context, string) (DeviceClient, error)
-	portNames    func() ([]string, error)
-	readPassword func() ([]byte, error)
-	resetTimeout time.Duration
-	latestStable func(context.Context) (release.Bundle, error)
+	connect          func(context.Context, string) (DeviceClient, error)
+	portNames        func() ([]string, error)
+	readPassword     func() ([]byte, error)
+	resetTimeout     time.Duration
+	latestStable     func(context.Context) (release.Bundle, error)
+	verifyFirmware   func(release.Bundle, release.DeviceInfo) (release.VerifiedFirmware, error)
+	inspectCustom    func(string) (release.VerifiedFirmware, error)
+	transferFirmware func(context.Context, firmwareupdate.Client, release.VerifiedFirmware, firmwareupdate.ProgressFunc) error
 }
 
 // NewRoot creates an isolated Cobra command tree. It does not inspect the
@@ -90,7 +97,24 @@ func NewRoot(dependencies Dependencies) *cobra.Command {
 	if latestStable == nil {
 		latestStable = release.LatestStable
 	}
-	runtime := runtimeDependencies{connect: connect, portNames: portNames, readPassword: readPassword, resetTimeout: resetTimeout, latestStable: latestStable}
+	verifyFirmware := dependencies.VerifyFirmware
+	if verifyFirmware == nil {
+		verifyFirmware = release.VerifyBundle
+	}
+	inspectCustom := dependencies.InspectCustom
+	if inspectCustom == nil {
+		inspectCustom = firmwareupdate.InspectCustom
+	}
+	transferFirmware := dependencies.TransferFirmware
+	if transferFirmware == nil {
+		transferFirmware = firmwareupdate.Transfer
+	}
+	runtime := runtimeDependencies{
+		connect: connect, portNames: portNames, readPassword: readPassword,
+		resetTimeout: resetTimeout, latestStable: latestStable,
+		verifyFirmware: verifyFirmware, inspectCustom: inspectCustom,
+		transferFirmware: transferFirmware,
+	}
 
 	command := &cobra.Command{
 		Use:           "openjornada-terminal",
@@ -110,6 +134,7 @@ func NewRoot(dependencies Dependencies) *cobra.Command {
 		newProvisionCommand(runtime),
 		newRebootCommand(runtime),
 		newFactoryResetCommand(runtime),
+		newFirmwareCommand(runtime),
 	)
 	return command
 }

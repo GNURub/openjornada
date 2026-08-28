@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"go.bug.st/serial"
 )
 
 const readPollInterval = 25 * time.Millisecond
@@ -19,6 +21,10 @@ const readPollInterval = 25 * time.Millisecond
 type Transport interface {
 	io.ReadWriteCloser
 	SetReadTimeout(time.Duration) error
+}
+
+type modeTransport interface {
+	SetMode(*serial.Mode) error
 }
 
 type callResult struct {
@@ -61,6 +67,65 @@ func NewClient(port Transport) (*Client, error) {
 }
 
 func (client *Client) Events() <-chan Event { return client.events }
+
+// WriteBinary writes one complete OJFW frame without allowing control writes
+// to interleave with it.
+func (client *Client) WriteBinary(ctx context.Context, frame []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client.writeMu.Lock()
+	defer client.writeMu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	client.mu.Lock()
+	closed := client.closed
+	client.mu.Unlock()
+	if closed {
+		return ErrClosed
+	}
+	completed := make(chan error, 1)
+	go func() {
+		_, err := writeAll(client.port, frame)
+		completed <- err
+	}()
+	select {
+	case err := <-completed:
+		if err == nil {
+			return nil
+		}
+		client.stop(ErrTransport)
+		_ = client.closePort()
+		return ErrTransport
+	case <-ctx.Done():
+		client.stop(ErrTransport)
+		_ = client.closePort()
+		// Closing a serial transport releases its pending write. Waiting here
+		// prevents a frame goroutine from surviving the owning Client.
+		<-completed
+		return ctx.Err()
+	}
+}
+
+// SetBaud updates the local serial endpoint while retaining 8-N-1 framing.
+func (client *Client) SetBaud(baud int) error {
+	if baud != 115200 && baud != 460800 {
+		return ErrTransport
+	}
+	setter, ok := client.port.(modeTransport)
+	if !ok {
+		return ErrTransport
+	}
+	client.writeMu.Lock()
+	defer client.writeMu.Unlock()
+	if err := setter.SetMode(&serial.Mode{BaudRate: baud, DataBits: 8, Parity: serial.NoParity, StopBits: serial.OneStopBit}); err != nil {
+		return ErrTransport
+	}
+	return nil
+}
 
 func (client *Client) Call(ctx context.Context, command string, payload any, result any) error {
 	_, err := client.CallReceipt(ctx, command, payload, result)

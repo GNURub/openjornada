@@ -10,14 +10,60 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.bug.st/serial"
 )
 
 type testTransport struct {
 	net.Conn
 	mu      sync.Mutex
 	timeout time.Duration
+}
+
+type firmwareTestTransport struct {
+	*testTransport
+	muMode sync.Mutex
+	modes  []int
+}
+
+type blockingFirmwareTransport struct {
+	closed    chan struct{}
+	closeOnce sync.Once
+	closes    atomic.Int32
+}
+
+func newBlockingFirmwareTransport() *blockingFirmwareTransport {
+	return &blockingFirmwareTransport{closed: make(chan struct{})}
+}
+
+func (transport *blockingFirmwareTransport) Read([]byte) (int, error) {
+	<-transport.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (transport *blockingFirmwareTransport) Write([]byte) (int, error) {
+	<-transport.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (transport *blockingFirmwareTransport) Close() error {
+	transport.closeOnce.Do(func() {
+		transport.closes.Add(1)
+		close(transport.closed)
+	})
+	return nil
+}
+
+func (*blockingFirmwareTransport) SetReadTimeout(time.Duration) error { return nil }
+
+func (transport *firmwareTestTransport) SetMode(mode *serial.Mode) error {
+	transport.muMode.Lock()
+	defer transport.muMode.Unlock()
+	transport.modes = append(transport.modes, mode.BaudRate)
+	return nil
 }
 
 func (transport *testTransport) SetReadTimeout(timeout time.Duration) error {
@@ -51,6 +97,72 @@ func newTestClient(t *testing.T) (*Client, net.Conn) {
 		_ = deviceSide.Close()
 	})
 	return client, deviceSide
+}
+
+func TestFirmwareWritesAreAtomicAndBaudIsRestricted(t *testing.T) {
+	clientSide, deviceSide := net.Pipe()
+	transport := &firmwareTestTransport{testTransport: &testTransport{Conn: clientSide}}
+	client, err := NewClient(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close(); _ = deviceSide.Close() })
+	received := make(chan []byte, 1)
+	go func() {
+		frame := make([]byte, 6)
+		_, _ = io.ReadFull(deviceSide, frame)
+		received <- frame
+	}()
+	if err := client.WriteBinary(context.Background(), []byte("OJFWxx")); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(<-received); got != "OJFWxx" {
+		t.Fatalf("frame = %q", got)
+	}
+	if err := client.SetBaud(460800); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetBaud(9600); !errors.Is(err, ErrTransport) {
+		t.Fatalf("SetBaud(9600) error = %v", err)
+	}
+	transport.muMode.Lock()
+	defer transport.muMode.Unlock()
+	if len(transport.modes) != 1 || transport.modes[0] != 460800 {
+		t.Fatalf("modes = %v", transport.modes)
+	}
+}
+
+func TestFirmwareWriteDeadlineClosesPortAndDoesNotLeak(t *testing.T) {
+	transport := newBlockingFirmwareTransport()
+	client, err := NewClient(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- client.WriteBinary(ctx, []byte("OJFW-blocked")) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("WriteBinary() error = %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		_ = transport.Close()
+		<-done
+		t.Fatal("WriteBinary() ignored its deadline")
+	}
+	select {
+	case <-client.done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("client read loop leaked after forced close")
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := transport.closes.Load(); got != 1 {
+		t.Fatalf("Close() calls = %d", got)
+	}
 }
 
 func readRequest(t *testing.T, reader *bufio.Reader) Request {
