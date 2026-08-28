@@ -123,6 +123,57 @@ func TestLatestStableRequiresHTTPSEvenWhenHostIsAllowed(t *testing.T) {
 	}
 }
 
+func TestLatestStableAssetsSelectsExactNames(t *testing.T) {
+	server := newReleaseServer(t, releaseFixture{})
+	client := testReleaseClient(t, server, time.Second)
+	tag, assets, err := client.LatestStableAssets(context.Background(), []string{manifestAssetName, signatureAssetName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != "v1.2.3" || len(assets) != 2 || !strings.HasSuffix(assets[manifestAssetName], "/manifest") || !strings.HasSuffix(assets[signatureAssetName], "/signature") {
+		t.Fatalf("LatestStableAssets() = %q, %v", tag, assets)
+	}
+}
+
+func TestSelectAssetsRejectsMissingDuplicateAndRepeatedRequest(t *testing.T) {
+	assets := []githubAsset{{Name: "one", BrowserDownloadURL: "https://github.com/one"}, {Name: "one", BrowserDownloadURL: "https://github.com/two"}}
+	if _, err := selectAssets(assets, []string{"one"}); !errors.Is(err, ErrAsset) {
+		t.Fatalf("duplicate asset error = %v", err)
+	}
+	if _, err := selectAssets(assets[:1], []string{"missing"}); !errors.Is(err, ErrAsset) {
+		t.Fatalf("missing asset error = %v", err)
+	}
+	if _, err := selectAssets(assets[:1], []string{"one", "one"}); !errors.Is(err, ErrAsset) {
+		t.Fatalf("repeated request error = %v", err)
+	}
+}
+
+func TestDownloadAssetEnforcesCapAndRedirectPolicy(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/small":
+			_, _ = response.Write([]byte("bounded"))
+		case "/hostile":
+			http.Redirect(response, request, "https://hostile.invalid/file", http.StatusFound)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	client := testReleaseClient(t, server, time.Second)
+	value, err := client.DownloadAsset(context.Background(), server.URL+"/small", 7)
+	if err != nil || string(value) != "bounded" {
+		t.Fatalf("DownloadAsset() = (%q, %v)", value, err)
+	}
+	if _, err := client.DownloadAsset(context.Background(), server.URL+"/small", 6); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("cap error = %v", err)
+	}
+	if _, err := client.DownloadAsset(context.Background(), server.URL+"/hostile", 100); !errors.Is(err, ErrURLPolicy) {
+		t.Fatalf("redirect error = %v", err)
+	}
+}
+
 type releaseFixture struct {
 	status          int
 	body            string

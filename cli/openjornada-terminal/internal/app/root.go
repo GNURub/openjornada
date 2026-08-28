@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -38,6 +40,7 @@ type Dependencies struct {
 	VerifyFirmware   func(release.Bundle, release.DeviceInfo) (release.VerifiedFirmware, error)
 	InspectCustom    func(string) (release.VerifiedFirmware, error)
 	TransferFirmware func(context.Context, firmwareupdate.Client, release.VerifiedFirmware, firmwareupdate.ProgressFunc) error
+	SelfUpdate       func(context.Context) (string, error)
 }
 
 type runtimeDependencies struct {
@@ -49,6 +52,7 @@ type runtimeDependencies struct {
 	verifyFirmware   func(release.Bundle, release.DeviceInfo) (release.VerifiedFirmware, error)
 	inspectCustom    func(string) (release.VerifiedFirmware, error)
 	transferFirmware func(context.Context, firmwareupdate.Client, release.VerifiedFirmware, firmwareupdate.ProgressFunc) error
+	selfUpdate       func(context.Context) (string, error)
 }
 
 // NewRoot creates an isolated Cobra command tree. It does not inspect the
@@ -109,11 +113,15 @@ func NewRoot(dependencies Dependencies) *cobra.Command {
 	if transferFirmware == nil {
 		transferFirmware = firmwareupdate.Transfer
 	}
+	selfUpdate := dependencies.SelfUpdate
+	if selfUpdate == nil {
+		selfUpdate = firmwareupdate.UpdateSelf
+	}
 	runtime := runtimeDependencies{
 		connect: connect, portNames: portNames, readPassword: readPassword,
 		resetTimeout: resetTimeout, latestStable: latestStable,
 		verifyFirmware: verifyFirmware, inspectCustom: inspectCustom,
-		transferFirmware: transferFirmware,
+		transferFirmware: transferFirmware, selfUpdate: selfUpdate,
 	}
 
 	command := &cobra.Command{
@@ -135,6 +143,55 @@ func NewRoot(dependencies Dependencies) *cobra.Command {
 		newRebootCommand(runtime),
 		newFactoryResetCommand(runtime),
 		newFirmwareCommand(runtime),
+		newSelfUpdateCommand(runtime),
+		newCompletionCommand(),
 	)
+	return command
+}
+
+func newSelfUpdateCommand(runtime runtimeDependencies) *cobra.Command {
+	return &cobra.Command{
+		Use:   "self-update",
+		Short: "Actualiza este CLI desde la última release estable",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			tag, err := runtime.selfUpdate(command.Context())
+			if err != nil {
+				if errors.Is(err, firmwareupdate.ErrSelfReplacedNotSynced) {
+					return errors.New("el CLI fue sustituido, pero no se pudo confirmar la persistencia del directorio; no repitas la actualización y verifica la versión")
+				}
+				return errors.New("no se pudo verificar e instalar la actualización del CLI")
+			}
+			_, err = fmt.Fprintf(command.OutOrStdout(), "Actualización preparada para %s.\n", tag)
+			return err
+		},
+	}
+}
+
+func newCompletionCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:       "completion bash|zsh|fish|powershell",
+		Short:     "Genera completado reproducible para el shell indicado",
+		Args:      cobra.ExactArgs(1),
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		RunE: func(command *cobra.Command, args []string) error {
+			root := command.Root()
+			root.DisableAutoGenTag = true
+			output := command.OutOrStdout()
+			switch args[0] {
+			case "bash":
+				return root.GenBashCompletionV2(output, true)
+			case "zsh":
+				return root.GenZshCompletion(output)
+			case "fish":
+				return root.GenFishCompletion(output, true)
+			case "powershell":
+				return root.GenPowerShellCompletion(output)
+			default:
+				return errors.New("shell no compatible; usa bash, zsh, fish o powershell")
+			}
+		},
+	}
+	command.ValidArgsFunction = cobra.NoFileCompletions
 	return command
 }

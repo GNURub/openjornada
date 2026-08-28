@@ -344,6 +344,14 @@ Cada acción se escribe primero en LittleFS; tras un reinicio se reproduce la
 cola sobre la caché y no se admiten nuevas acciones offline hasta recibir una
 sincronización NTP del arranque actual.
 
+El mantenimiento ordinario por USB se realiza con el binario Go
+`openjornada-terminal`, disponible para Linux, macOS y Windows en `amd64` y
+`arm64`. Permite descubrir terminales, consultar estado y diagnóstico,
+aprovisionar mediante OJP, seguir logs saneados, reiniciar, solicitar un reset,
+instalar firmware y actualizar el propio CLI. Los comandos exactos, permisos
+USB, advertencias de binarios sin firma y límites de seguridad están en
+[`cli/openjornada-terminal/README.md`](cli/openjornada-terminal/README.md).
+
 ## Integración MCP
 
 Administración y responsables gestionan sus credenciales en

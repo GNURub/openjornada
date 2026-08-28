@@ -57,6 +57,14 @@ conserva el slot vigente ante cancelación, desconexión o cinco segundos sin
 progreso. Una placa que no arranque queda fuera del protocolo y se recupera con
 PlatformIO/esptool bajo un procedimiento técnico controlado.
 
+El CLI Go `openjornada-terminal` expone esas operaciones en Linux, macOS y
+Windows (`amd64` y `arm64`) sin Python ni PlatformIO. Acepta OJP sólo mediante
+entrada interactiva sin eco o `--ojp-stdin`, verifica las releases oficiales y
+los checksums de su propia actualización, y genera completado reproducible para
+bash, zsh, fish y PowerShell sin consultar dispositivos ni red. No crea
+configuración ni telemetría. Las referencias del OJP se descartan al terminar,
+pero la memoria de Go no ofrece garantía de borrado criptográfico.
+
 La asignación local de tags conserva la lista para enlazar varias tarjetas
 seguidas y muestra `A+C durante 3 s` como salida explícita en todas sus
 pantallas. Si pasan cinco minutos sin botones ni lecturas RFID, la sesión

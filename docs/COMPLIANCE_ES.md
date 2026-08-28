@@ -36,6 +36,17 @@ El artículo 34.9 del Estatuto de los Trabajadores exige un registro diario con 
 | Avisos de documentos y tareas          | El correo sólo informa de que hay un elemento disponible; no incluye título, categoría, descripción, adjunto ni enlace de descarga. El acceso exige autenticación.                                                                                                                                                  |
 | Información y ejercicio de derechos    | El aviso muestra responsable/NIF, finalidad, base jurídica, destinatarios, conservación, derechos y contacto. Sólo administración puede cambiar la razón social o el NIF; cuando el cambio afecte al aviso, debe actualizar también su versión para solicitar una nueva confirmación. La versión y fecha de recepción quedan registradas. Es confirmación de recepción, no consentimiento ni firma.                                                       |
 
+El CLI USB sólo acepta el OJP mediante entrada interactiva sin eco o por la
+entrada estándar con `--ojp-stdin`; no lo admite como argumento, no crea
+configuración ni telemetría y no debe usarse para copiar salida serie sin
+sanear. El proceso descarta las referencias al OJP al finalizar, pero Go no
+garantiza un borrado criptográfico de la memoria. Las operaciones con firmware
+personalizado y el restablecimiento requieren mantener físicamente sólo `C`
+durante cinco segundos y caducan a los 30 segundos. Esa presencia no identifica
+a la persona operadora ni constituye una firma electrónica. Las instalaciones
+se rechazan mientras existan fichajes pendientes; una placa que no exponga
+`OJUSB/1` requiere recuperación técnica con PlatformIO/esptool.
+
 Referencias oficiales:
 
 - [Artículo 34.9 del Estatuto de los Trabajadores (BOE)](https://www.boe.es/buscar/act.php?id=BOE-A-2015-11430)

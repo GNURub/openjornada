@@ -98,6 +98,48 @@ func newClient(base *http.Client, releaseURL string, allowedHosts map[string]str
 
 func LatestStable(ctx context.Context) (Bundle, error) { return defaultClient.LatestStable(ctx) }
 
+// LatestStableAssets resolves an exact set of assets from the latest stable
+// GitHub release using the same HTTPS and host policy as firmware downloads.
+func LatestStableAssets(ctx context.Context, names []string) (string, map[string]string, error) {
+	return defaultClient.LatestStableAssets(ctx, names)
+}
+
+// DownloadAsset downloads a small bounded release asset using the shared
+// HTTPS-only, allowlisted GitHub client.
+func DownloadAsset(ctx context.Context, source string, maximum int64) ([]byte, error) {
+	return defaultClient.DownloadAsset(ctx, source, maximum)
+}
+
+func (client *Client) DownloadAsset(ctx context.Context, source string, maximum int64) ([]byte, error) {
+	if ctx == nil || maximum <= 0 {
+		return nil, ErrNetwork
+	}
+	requestContext, cancel := context.WithTimeout(ctx, client.timeout)
+	defer cancel()
+	return client.downloadSmall(requestContext, source, maximum)
+}
+
+func (client *Client) LatestStableAssets(ctx context.Context, names []string) (string, map[string]string, error) {
+	if ctx == nil || len(names) == 0 {
+		return "", nil, ErrRelease
+	}
+	requestContext, cancel := context.WithTimeout(ctx, client.timeout)
+	defer cancel()
+	metadata, err := client.downloadSmall(requestContext, client.releaseURL.String(), releaseMetadataMaxBytes)
+	if err != nil {
+		return "", nil, err
+	}
+	var discovered githubRelease
+	if err := json.Unmarshal(metadata, &discovered); err != nil || discovered.Draft || discovered.Prerelease || !validReleaseTag(discovered.TagName) {
+		return "", nil, ErrRelease
+	}
+	assets, err := selectAssets(discovered.Assets, names)
+	if err != nil {
+		return "", nil, err
+	}
+	return discovered.TagName, assets, nil
+}
+
 func (client *Client) LatestStable(ctx context.Context) (Bundle, error) {
 	if ctx == nil {
 		return Bundle{}, ErrNetwork
@@ -136,7 +178,20 @@ func (client *Client) LatestStable(ctx context.Context) (Bundle, error) {
 }
 
 func requiredAssets(input []githubAsset) (map[string]string, error) {
-	required := map[string]string{manifestAssetName: "", signatureAssetName: "", firmwareAssetName: ""}
+	return selectAssets(input, []string{manifestAssetName, signatureAssetName, firmwareAssetName})
+}
+
+func selectAssets(input []githubAsset, names []string) (map[string]string, error) {
+	required := make(map[string]string, len(names))
+	for _, name := range names {
+		if name == "" {
+			return nil, ErrAsset
+		}
+		if _, exists := required[name]; exists {
+			return nil, ErrAsset
+		}
+		required[name] = ""
+	}
 	for _, asset := range input {
 		if _, ok := required[asset.Name]; !ok {
 			continue
