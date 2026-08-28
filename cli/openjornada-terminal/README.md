@@ -138,6 +138,11 @@ go vet ./...
 CGO_ENABLED=0 go build ./cmd/openjornada-terminal
 ```
 
+El CI principal ejecuta las pruebas con detección de carreras, `go vet` y el
+contrato del empaquetador. También compila con `CGO_ENABLED=0` los destinos
+Linux, macOS y Windows en `amd64` y `arm64`, e inicia el binario Linux `amd64`
+para comprobar la versión inyectada durante la compilación.
+
 Para crear un archivo de release reproducible y su inventario SHA-256:
 
 ```bash

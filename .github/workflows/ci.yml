@@ -14,6 +14,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  terminal-cli:
+    name: CLI del terminal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: cli/openjornada-terminal/go.mod
+          cache: true
+          cache-dependency-path: cli/openjornada-terminal/go.sum
+
+      - name: Probar CLI del terminal
+        working-directory: cli/openjornada-terminal
+        run: go test -race ./...
+
+      - name: Analizar CLI del terminal
+        working-directory: cli/openjornada-terminal
+        run: go vet ./...
+
+      - name: Probar empaquetado
+        working-directory: cli/openjornada-terminal
+        run: python3 -m unittest scripts/test_package_release.py scripts/test_checksums.py
+
+      - name: Compilar CLI para todos los destinos
+        working-directory: cli/openjornada-terminal
+        run: |
+          mkdir dist-ci
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=ci" -o dist-ci/openjornada-terminal-linux-amd64 ./cmd/openjornada-terminal
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=ci" -o dist-ci/openjornada-terminal-linux-arm64 ./cmd/openjornada-terminal
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=ci" -o dist-ci/openjornada-terminal-darwin-amd64 ./cmd/openjornada-terminal
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=ci" -o dist-ci/openjornada-terminal-darwin-arm64 ./cmd/openjornada-terminal
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=ci" -o dist-ci/openjornada-terminal-windows-amd64.exe ./cmd/openjornada-terminal
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=ci" -o dist-ci/openjornada-terminal-windows-arm64.exe ./cmd/openjornada-terminal
+          test -s dist-ci/openjornada-terminal-linux-amd64
+          test -s dist-ci/openjornada-terminal-linux-arm64
+          test -s dist-ci/openjornada-terminal-darwin-amd64
+          test -s dist-ci/openjornada-terminal-darwin-arm64
+          test -s dist-ci/openjornada-terminal-windows-amd64.exe
+          test -s dist-ci/openjornada-terminal-windows-arm64.exe
+          ./dist-ci/openjornada-terminal-linux-amd64 version | grep -Fx 'version=ci'
+
   test:
     name: Pruebas y firmware
     runs-on: ubuntu-latest
