@@ -130,7 +130,9 @@ try {
     Assert-True ((Get-FileHash $installed -Algorithm SHA256).Hash -ceq $oldHash) 'el fallo alteró el ejecutable anterior'
     Assert-True (-not [IO.Directory]::Exists($failedRun.WorkDirectory)) 'un fallo dejó el directorio temporal'
 
-    $symlinkAttributes = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]0xA1FF0000), 0)
+    # ZIP stores Unix mode 0120777 in the high 16 bits. Build the signed
+    # Int32 from its bytes so PowerShell never performs a checked UInt32 cast.
+    $symlinkAttributes = [BitConverter]::ToInt32([byte[]]@(0x00, 0x00, 0xFF, 0xA1), 0)
     $cases = @(
         @{ Name = 'traversal'; Entries = @(
             @{ Name = 'LICENSE'; Bytes = [Text.Encoding]::UTF8.GetBytes('license'); Attributes = $null },
