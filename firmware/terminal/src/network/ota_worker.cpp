@@ -346,7 +346,20 @@ bool OtaStateStore::clearPending() {
 bool OtaStateStore::loadSnapshot(OtaResult& snapshot) const {
   snapshot = {};
   Preferences preferences;
-  if (!preferences.begin(kPreferencesNamespace, true)) return false;
+  const bool readOnlyOpened = preferences.begin(kPreferencesNamespace, true);
+  if (!readOnlyOpened) {
+    // A completely erased device has no namespace yet. Creating the empty
+    // namespace is a valid first-boot recovery; a real NVS failure still makes
+    // the writable open fail and keeps the terminal blocked.
+    Preferences initializer;
+    const bool writableOpened =
+        initializer.begin(kPreferencesNamespace, false);
+    if (writableOpened) initializer.end();
+    if (!otaStateNamespaceAvailable(readOnlyOpened, writableOpened) ||
+        !preferences.begin(kPreferencesNamespace, true)) {
+      return false;
+    }
+  }
   snapshot.targetVersion =
       preferences.getString(kTargetVersionKey, "").c_str();
   snapshot.targetHash = preferences.getString(kTargetHashKey, "").c_str();

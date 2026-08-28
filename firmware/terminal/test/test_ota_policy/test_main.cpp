@@ -141,6 +141,12 @@ void test_boot_reconciliation_distinguishes_staging_from_attempted_boot() {
           OtaPersistedPhase::None, false, false, true, true)));
 }
 
+void test_clean_first_boot_initializes_missing_ota_namespace() {
+  TEST_ASSERT_TRUE(otaStateNamespaceAvailable(false, true));
+  TEST_ASSERT_TRUE(otaStateNamespaceAvailable(true, false));
+  TEST_ASSERT_FALSE(otaStateNamespaceAvailable(false, false));
+}
+
 void test_boot_intent_is_persisted_before_commit_and_nvs_failure_is_cleared() {
   FakeCommitStore success;
   TEST_ASSERT_EQUAL(
@@ -197,6 +203,7 @@ int main(int, char**) {
   RUN_TEST(test_safety_policy_requires_every_gate);
   RUN_TEST(test_scheduler_handles_wraparound);
   RUN_TEST(test_boot_reconciliation_distinguishes_staging_from_attempted_boot);
+  RUN_TEST(test_clean_first_boot_initializes_missing_ota_namespace);
   RUN_TEST(
       test_boot_intent_is_persisted_before_commit_and_nvs_failure_is_cleared);
   RUN_TEST(test_download_urls_are_limited_to_github_or_private_test_hosts);

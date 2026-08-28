@@ -161,6 +161,10 @@ bool otaSafetyAllowsInstall(const OtaSafetyContext& context) {
          context.inactiveForMs >= kOtaInteractionIdleMs;
 }
 
+bool otaStateNamespaceAvailable(bool readOnlyOpened, bool writableOpened) {
+  return readOnlyOpened || writableOpened;
+}
+
 FirmwareUpdateError prepareOtaBootCommit(
   OtaCommitStore& store, const std::string& version, const std::string& hash,
   int64_t checkedAtEpochSeconds) {

@@ -109,6 +109,7 @@ bool manifestIsInstallable(const FirmwareManifest& manifest,
                            std::string_view currentVersion,
                            uint8_t protocolVersion);
 bool otaSafetyAllowsInstall(const OtaSafetyContext& context);
+bool otaStateNamespaceAvailable(bool readOnlyOpened, bool writableOpened);
 FirmwareUpdateError prepareOtaBootCommit(
     OtaCommitStore& store, const std::string& version, const std::string& hash,
     int64_t checkedAtEpochSeconds);
