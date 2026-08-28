@@ -164,6 +164,33 @@ func TestCallDeliversEvents(t *testing.T) {
 	}
 }
 
+func TestCallReceiptReturnsRoutingMetadataAndDeliversLaterResult(t *testing.T) {
+	client, device := newTestClient(t)
+	go func() {
+		request := readRequest(t, bufio.NewReader(device))
+		_, _ = device.Write([]byte(responseLine(request.ID, "result", "physical_confirmation_required", `{"pendingCount":2}`)))
+		_, _ = device.Write([]byte(responseLine(request.ID, "result", "factory_reset_complete", `{}`)))
+	}()
+	var result struct {
+		PendingCount int `json:"pendingCount"`
+	}
+	receipt, err := client.CallReceipt(context.Background(), "factory_reset", struct{}{}, &result)
+	if err != nil {
+		t.Fatalf("CallReceipt() error = %v", err)
+	}
+	if receipt.ID == "" || receipt.Code != "physical_confirmation_required" || result.PendingCount != 2 {
+		t.Fatalf("receipt = %#v, result = %#v", receipt, result)
+	}
+	select {
+	case event := <-client.Events():
+		if event.ID != receipt.ID || event.Type != "result" || event.Code != "factory_reset_complete" {
+			t.Fatalf("later response = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("later result was not delivered")
+	}
+}
+
 func TestCallRejectsMalformedOrUnknownResponseWithoutReflectingLine(t *testing.T) {
 	for _, suffix := range []string{
 		`{"v":1,"id":`,

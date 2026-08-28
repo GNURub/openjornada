@@ -63,24 +63,31 @@ func NewClient(port Transport) (*Client, error) {
 func (client *Client) Events() <-chan Event { return client.events }
 
 func (client *Client) Call(ctx context.Context, command string, payload any, result any) error {
+	_, err := client.CallReceipt(ctx, command, payload, result)
+	return err
+}
+
+// CallReceipt performs a call and retains its safe response ID and code so a
+// caller can correlate later responses from a multi-stage operation.
+func (client *Client) CallReceipt(ctx context.Context, command string, payload any, result any) (Receipt, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return Receipt{}, ctx.Err()
 	default:
 	}
 	if !safeToken(command) {
-		return ErrInvalidMessage
+		return Receipt{}, ErrInvalidMessage
 	}
 	id, err := randomID()
 	if err != nil {
-		return ErrTransport
+		return Receipt{}, ErrTransport
 	}
 	wire, err := encodeRequest(Request{Version: 1, ID: id, Command: command, Payload: payload})
 	if err != nil {
-		return err
+		return Receipt{}, err
 	}
 	waiter := make(chan callResult, 1)
 	client.mu.Lock()
@@ -90,7 +97,7 @@ func (client *Client) Call(ctx context.Context, command string, payload any, res
 			err = ErrClosed
 		}
 		client.mu.Unlock()
-		return err
+		return Receipt{}, err
 	}
 	client.pending[id] = waiter
 	client.mu.Unlock()
@@ -100,7 +107,7 @@ func (client *Client) Call(ctx context.Context, command string, payload any, res
 	case <-ctx.Done():
 		client.writeMu.Unlock()
 		client.removePending(id)
-		return ctx.Err()
+		return Receipt{}, ctx.Err()
 	default:
 	}
 	client.mu.Lock()
@@ -113,37 +120,38 @@ func (client *Client) Call(ctx context.Context, command string, payload any, res
 		if terminal == nil {
 			terminal = ErrClosed
 		}
-		return terminal
+		return Receipt{}, terminal
 	}
 	_, writeErr := writeAll(client.port, wire)
 	client.writeMu.Unlock()
 	if writeErr != nil {
 		client.stop(ErrTransport)
 		_ = client.closePort()
-		return ErrTransport
+		return Receipt{}, ErrTransport
 	}
 
 	select {
 	case received := <-waiter:
 		if received.err != nil {
-			return received.err
+			return Receipt{}, received.err
 		}
 		if received.response.Type == "error" {
-			return &DeviceError{Code: received.response.Code}
+			return Receipt{}, &DeviceError{Code: received.response.Code}
 		}
 		if received.response.Type != "result" {
-			return ErrInvalidMessage
+			return Receipt{}, ErrInvalidMessage
 		}
+		receipt := Receipt{ID: received.response.ID, Code: received.response.Code}
 		if result == nil {
-			return nil
+			return receipt, nil
 		}
 		if err := decodeStrict(received.response.Data, result); err != nil {
-			return ErrInvalidMessage
+			return Receipt{}, ErrInvalidMessage
 		}
-		return nil
+		return receipt, nil
 	case <-ctx.Done():
 		client.removePending(id)
-		return ctx.Err()
+		return Receipt{}, ctx.Err()
 	case <-client.ctx.Done():
 		client.removePending(id)
 		client.mu.Lock()
@@ -152,7 +160,7 @@ func (client *Client) Call(ctx context.Context, command string, payload any, res
 		if err == nil {
 			err = ErrClosed
 		}
-		return err
+		return Receipt{}, err
 	}
 }
 
@@ -236,7 +244,7 @@ func (client *Client) processLine(line []byte) {
 		return
 	}
 	if parsed.Type == "event" {
-		event := Event{ID: parsed.ID, Code: parsed.Code, Message: parsed.Message, Data: bytes.Clone(parsed.Data)}
+		event := Event{ID: parsed.ID, Type: parsed.Type, Code: parsed.Code, Message: parsed.Message, Data: bytes.Clone(parsed.Data)}
 		select {
 		case client.events <- event:
 		default:
@@ -249,6 +257,12 @@ func (client *Client) processLine(line []byte) {
 	client.mu.Unlock()
 	if waiter != nil {
 		waiter <- callResult{response: parsed}
+		return
+	}
+	event := Event{ID: parsed.ID, Type: parsed.Type, Code: parsed.Code, Message: parsed.Message, Data: bytes.Clone(parsed.Data)}
+	select {
+	case client.events <- event:
+	default:
 	}
 }
 

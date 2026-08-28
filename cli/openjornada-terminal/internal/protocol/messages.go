@@ -29,9 +29,16 @@ type Request struct {
 
 type Event struct {
 	ID      string
+	Type    string
 	Code    string
 	Message string
 	Data    json.RawMessage
+}
+
+// Receipt exposes only safe routing metadata for multi-stage operations.
+type Receipt struct {
+	ID   string
+	Code string
 }
 
 type Capabilities struct {
