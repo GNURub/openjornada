@@ -124,6 +124,10 @@ bool decodeBase64Signature(std::string_view encoded,
 bool verifyEd25519Manifest(std::string_view manifest,
                            const std::array<uint8_t, 64>& signature,
                            const std::array<uint8_t, 32>& publicKey);
+bool verifyFirmwareManifestSignature(
+    std::string_view manifest, std::string_view encodedSignature,
+    const std::array<uint8_t, 32>& publicKey, FirmwareManifest& output,
+    FirmwareUpdateError* error = nullptr);
 const char* firmwareUpdateStatusValue(FirmwareUpdateStatus status);
 const char* firmwareUpdateErrorValue(FirmwareUpdateError error);
 

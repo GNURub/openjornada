@@ -61,6 +61,10 @@ class ArduinoUsbMaintenanceTransport final : public UsbMaintenanceTransport {
   bool flush(uint32_t maxWaitMs) override {
     return uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(maxWaitMs)) == ESP_OK;
   }
+  bool setBaud(uint32_t baud) override {
+    Serial.updateBaudRate(baud);
+    return Serial.baudRate() == baud;
+  }
 };
 
 Hardware hardware;
@@ -73,13 +77,16 @@ ScreenRenderer renderer;
 DisplayPowerPolicy displayPower{0};
 RuntimeProvisioningGesture runtimeProvisioningGesture;
 ArduinoUsbMaintenanceTransport usbMaintenanceTransport;
-UsbMaintenanceService usbMaintenance{usbMaintenanceTransport};
+OtaStateStore otaStateStore;
+UpdateFirmwareSlotWriter usbFirmwareWriter;
+UsbFirmwareReceiver usbFirmwareReceiver{usbFirmwareWriter, otaStateStore};
+UsbMaintenanceService usbMaintenance{usbMaintenanceTransport,
+                                     &usbFirmwareReceiver};
 std::unique_ptr<Esp32ApiClient> apiClient;
 std::unique_ptr<NetworkWorker> networkWorker;
 std::unique_ptr<Esp32ApiClient> telemetryApiClient;
 std::unique_ptr<TelemetryWorker> telemetryWorker;
 TelemetryScheduler telemetryScheduler;
-OtaStateStore otaStateStore;
 std::unique_ptr<OtaWorker> otaWorker;
 OtaScheduler otaScheduler;
 OtaResult otaSnapshot;
@@ -170,6 +177,47 @@ void drawFactoryConfirmation(size_t pendingCount) {
   display.drawString("Después mantén SOLO C durante 5 s", 10, 132);
   display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   display.drawString("Cualquier otro botón cancela el progreso", 10, 157);
+}
+
+void drawFirmwareConfirmation() {
+  auto& display = M5.Display;
+  display.fillScreen(TFT_BLACK);
+  display.setTextDatum(top_left);
+  display.setTextColor(TFT_ORANGE, TFT_BLACK);
+  display.setTextSize(2);
+  display.drawString("Firmware personalizado", 10, 16);
+  display.setTextSize(1);
+  display.setTextColor(TFT_WHITE, TFT_BLACK);
+  display.drawString("Suelta todos los botones.", 10, 58);
+  display.drawString("Mantén SOLO C durante 5 s", 10, 86);
+  display.setTextColor(TFT_YELLOW, TFT_BLACK);
+  display.drawString("El arranque será validado con rollback.", 10, 118);
+  display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  display.drawString("Otro botón cancela la confirmación", 10, 148);
+}
+
+void drawFirmwareProgress(uint32_t received, uint32_t total) {
+  static unsigned lastPercentage = 101U;
+  const unsigned percentage =
+      total == 0U ? 0U : static_cast<unsigned>((uint64_t{received} * 100U) / total);
+  if (received == 0U) lastPercentage = 101U;
+  if (received != total && percentage == lastPercentage) return;
+  lastPercentage = percentage;
+  auto& display = M5.Display;
+  display.fillScreen(TFT_BLACK);
+  display.setTextDatum(top_left);
+  display.setTextColor(TFT_ORANGE, TFT_BLACK);
+  display.setTextSize(2);
+  display.drawString("Actualizando firmware", 10, 18);
+  display.setTextSize(1);
+  display.setTextColor(TFT_WHITE, TFT_BLACK);
+  char progress[80]{};
+  snprintf(progress, sizeof(progress), "%u / %u bytes (%u%%)",
+           static_cast<unsigned>(received), static_cast<unsigned>(total),
+           percentage);
+  display.drawString(progress, 10, 70);
+  display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  display.drawString("No desconectes el terminal", 10, 104);
 }
 
 BootButtons currentBootButtons() {
@@ -459,11 +507,13 @@ UsbTerminalMode currentUsbMode() {
   if (usbMaintenance.awaitingPhysicalConfirmation()) {
     return UsbTerminalMode::AwaitPhysicalConfirmation;
   }
+  if (usbMaintenance.firmwareActive()) return UsbTerminalMode::Updating;
   if (terminalBlocked) return UsbTerminalMode::Blocked;
   const bool otaBusy = otaWorker != nullptr && otaWorker->busy();
   const FirmwareUpdateStatus otaStatus =
       otaBusy ? otaWorker->status() : FirmwareUpdateStatus::Idle;
-  if (otaInstallQueued ||
+  if (otaInstallQueued || otaRebootAtMs != 0U ||
+      otaSnapshot.status == FirmwareUpdateStatus::PendingReboot ||
       (otaBusy &&
        (otaStatus == FirmwareUpdateStatus::Downloading ||
         otaStatus == FirmwareUpdateStatus::Verifying ||
@@ -533,10 +583,19 @@ UsbMaintenanceContext currentUsbMaintenanceContext(BootButtons buttons) {
   context.storageAvailable = usbStorageAvailable;
   context.rfidAvailable = usbRfidAvailable;
   context.runtimeIdle =
+      !otaInstallQueued && otaRebootAtMs == 0U &&
+      otaSnapshot.status != FirmwareUpdateStatus::PendingReboot &&
       (networkWorker == nullptr || !networkWorker->busy()) &&
       (telemetryWorker == nullptr || !telemetryWorker->busy()) &&
       (otaWorker == nullptr || !otaWorker->busy());
+  context.applicationIdle =
+      app == nullptr ||
+      (app->screen().kind == ScreenKind::Idle && !app->screen().busy);
+  context.nowEpochSeconds = std::time(nullptr);
+  context.firmwarePublicKey = kProductionOtaPublicKey;
   context.showFactoryResetWarning = drawFactoryConfirmation;
+  context.showFirmwareWarning = drawFirmwareConfirmation;
+  context.showFirmwareProgress = drawFirmwareProgress;
   context.restoreScreen = restoreScreenAfterUsbMaintenance;
   context.reboot = [] { ESP.restart(); };
   return context;
@@ -863,7 +922,7 @@ void loop() {
   const UsbMaintenanceContext usbContext =
       currentUsbMaintenanceContext(currentBootButtons());
   const UsbMaintenanceDecision maintenance = usbMaintenance.tick(usbContext);
-  if (usbMaintenance.factoryResetConfirmed() &&
+  if (maintenance.suppressAttendanceInput &&
       !maintenance.performFactoryReset) {
     // Worker busy flags are released by poll(). Once physical confirmation is
     // irreversible, discard completed results so active bounded jobs can drain

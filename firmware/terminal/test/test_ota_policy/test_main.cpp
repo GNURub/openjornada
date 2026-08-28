@@ -1,10 +1,14 @@
 #include <unity.h>
+#include <optional/monocypher-ed25519.h>
 
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <string>
 
 #include "openjornada/ota.hpp"
+#include "openjornada/ota_configuration.hpp"
+#include "openjornada/usb_firmware_receiver.hpp"
 
 using namespace openjornada;
 
@@ -67,6 +71,26 @@ FirmwareManifest validManifest() {
   return value;
 }
 
+std::string base64Signature(const std::array<uint8_t, 64>& input) {
+  static constexpr char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string output;
+  output.reserve(88);
+  for (size_t cursor = 0; cursor < input.size(); cursor += 3U) {
+    const uint32_t first = input[cursor];
+    const bool hasSecond = cursor + 1U < input.size();
+    const bool hasThird = cursor + 2U < input.size();
+    const uint32_t second = hasSecond ? input[cursor + 1U] : 0U;
+    const uint32_t third = hasThird ? input[cursor + 2U] : 0U;
+    const uint32_t bits = (first << 16U) | (second << 8U) | third;
+    output.push_back(alphabet[(bits >> 18U) & 0x3fU]);
+    output.push_back(alphabet[(bits >> 12U) & 0x3fU]);
+    output.push_back(hasSecond ? alphabet[(bits >> 6U) & 0x3fU] : '=');
+    output.push_back(hasThird ? alphabet[bits & 0x3fU] : '=');
+  }
+  return output;
+}
+
 }  // namespace
 
 void test_manifest_parses_exact_contract() {
@@ -127,6 +151,18 @@ void test_boot_reconciliation_distinguishes_staging_from_attempted_boot() {
       static_cast<int>(OtaBootAction::RecordRollback),
       static_cast<int>(decideOtaBootAction(
           OtaPersistedPhase::BootPending, true, false, false, true)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(OtaBootAction::ClearInterruptedStage),
+      static_cast<int>(decideOtaBootAction(
+          OtaPersistedPhase::Staged, true, true, false, true)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(OtaBootAction::ClearInterruptedStage),
+      static_cast<int>(decideOtaBootAction(
+          OtaPersistedPhase::None, true, true, false, true)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(OtaBootAction::ClearInterruptedStage),
+      static_cast<int>(decideOtaBootAction(
+          OtaPersistedPhase::None, true, false, false, true)));
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(OtaBootAction::ConfirmCandidate),
       static_cast<int>(decideOtaBootAction(
@@ -193,6 +229,109 @@ void test_ed25519_rfc8032_vector() {
       "5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc+bRr0lv18FlbviRlUUFDjnoQCw==",
       decoded));
   TEST_ASSERT_EQUAL_UINT8_ARRAY(signature.data(), decoded.data(), signature.size());
+  FirmwareManifest parsed;
+  TEST_ASSERT_FALSE(verifyFirmwareManifestSignature(
+      "{}",
+      "5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc+bRr0lv18FlbviRlUUFDjnoQCw==",
+      publicKey, parsed));
+}
+
+void test_usb_firmware_install_policy_fails_closed() {
+  UsbFirmwareContext context;
+  context.imageSize = 1024;
+  context.slotSize = 2048;
+  context.boardCompatible = true;
+  context.protocolCompatible = true;
+  context.runtimeIdle = true;
+
+  context.official = true;
+  context.signatureValid = true;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    decideUsbFirmwareInstall(context));
+
+  context.pendingCount = 1;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectPendingActions,
+                    decideUsbFirmwareInstall(context));
+  context.pendingCount = 0;
+  context.runtimeIdle = false;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectBusy,
+                    decideUsbFirmwareInstall(context));
+  context.runtimeIdle = true;
+  context.boardCompatible = false;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectBoard,
+                    decideUsbFirmwareInstall(context));
+  context.boardCompatible = true;
+  context.protocolCompatible = false;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectProtocol,
+                    decideUsbFirmwareInstall(context));
+  context.protocolCompatible = true;
+  context.imageSize = 2049;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectSize,
+                    decideUsbFirmwareInstall(context));
+  context.imageSize = 1024;
+  context.signatureValid = false;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectSignature,
+                    decideUsbFirmwareInstall(context));
+
+  context.official = false;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RequirePhysicalConfirmation,
+                    decideUsbFirmwareInstall(context));
+  context.physicallyConfirmed = true;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    decideUsbFirmwareInstall(context));
+  context.transferActive = true;
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::RejectDuplicate,
+                    decideUsbFirmwareInstall(context));
+}
+
+void test_production_public_key_matches_repository_pem() {
+  std::ifstream source("keys/production-ed25519-public.pem",
+                       std::ios::binary);
+  TEST_ASSERT_TRUE(source.good());
+  const std::string pem((std::istreambuf_iterator<char>(source)),
+                        std::istreambuf_iterator<char>());
+  TEST_ASSERT_EQUAL_STRING(
+      "-----BEGIN PUBLIC KEY-----\n"
+      "MCowBQYDK2VwAyEAniydx6DntO/wet8WBhSBSQXaiq8Fow33lKaeCUWUjMk=\n"
+      "-----END PUBLIC KEY-----\n",
+      pem.c_str());
+  const auto expected = bytes32(
+      "9e2c9dc7a0e7b4eff07adf160614814905da8aaf05a30df794a69e0945948cc9");
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected.data(), kProductionOtaPublicKey.data(),
+                                expected.size());
+}
+
+void test_official_usb_intent_requires_signed_manifest_exact_match() {
+  const std::string manifest =
+      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.3","releaseTag":"v1.2.3","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","keyId":"production-2026","publishedAt":"2026-08-28T12:00:00Z"})";
+  std::array<uint8_t, 32> seed{};
+  for (size_t index = 0; index < seed.size(); ++index) {
+    seed[index] = static_cast<uint8_t>(index);
+  }
+  std::array<uint8_t, 64> secretKey{};
+  std::array<uint8_t, 32> publicKey{};
+  crypto_ed25519_key_pair(secretKey.data(), publicKey.data(), seed.data());
+  std::array<uint8_t, 64> signature{};
+  crypto_ed25519_sign(signature.data(), secretKey.data(),
+                      reinterpret_cast<const uint8_t*>(manifest.data()),
+                      manifest.size());
+
+  FirmwareTransferIntent intent;
+  intent.size = 3;
+  intent.sha256 =
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+  intent.metadata = {"m5stack-basic-core-v27", 1, "1.2.3"};
+  intent.official = true;
+  intent.manifest = manifest;
+  intent.signature = base64Signature(signature);
+  TEST_ASSERT_TRUE(
+      officialUsbFirmwareIntentValid(intent, "1.2.0", publicKey));
+  ++intent.size;
+  TEST_ASSERT_FALSE(
+      officialUsbFirmwareIntentValid(intent, "1.2.0", publicKey));
+  --intent.size;
+  TEST_ASSERT_FALSE(
+      officialUsbFirmwareIntentValid(intent, "1.2.3", publicKey));
 }
 
 int main(int, char**) {
@@ -208,5 +347,8 @@ int main(int, char**) {
       test_boot_intent_is_persisted_before_commit_and_nvs_failure_is_cleared);
   RUN_TEST(test_download_urls_are_limited_to_github_or_private_test_hosts);
   RUN_TEST(test_ed25519_rfc8032_vector);
+  RUN_TEST(test_usb_firmware_install_policy_fails_closed);
+  RUN_TEST(test_production_public_key_matches_repository_pem);
+  RUN_TEST(test_official_usb_intent_requires_signed_manifest_exact_match);
   return UNITY_END();
 }

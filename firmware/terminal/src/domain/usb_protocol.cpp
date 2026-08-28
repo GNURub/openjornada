@@ -226,6 +226,8 @@ std::optional<UsbCommand> parseCommand(std::string_view command) {
   if (command == "factory_reset") return UsbCommand::FactoryReset;
   if (command == "firmware_begin") return UsbCommand::FirmwareBegin;
   if (command == "firmware_commit") return UsbCommand::FirmwareCommit;
+  if (command == "set_baud") return UsbCommand::SetBaud;
+  if (command == "baud_ready") return UsbCommand::BaudReady;
   if (command == "cancel") return UsbCommand::Cancel;
   return std::nullopt;
 }
@@ -239,9 +241,11 @@ bool emptyPayloadCommand(UsbCommand command) {
     case UsbCommand::Reboot:
     case UsbCommand::FactoryReset:
     case UsbCommand::FirmwareCommit:
+    case UsbCommand::BaudReady:
     case UsbCommand::Cancel: return true;
     case UsbCommand::Provision:
-    case UsbCommand::FirmwareBegin: return false;
+    case UsbCommand::FirmwareBegin:
+    case UsbCommand::SetBaud: return false;
   }
   return false;
 }
@@ -264,7 +268,16 @@ bool parsePayload(UsbCommand command, ArduinoJson::JsonObjectConst payload,
     request.ojp.assign(ojp);
     return true;
   }
-  if (payload.size() != 6U || !payload["size"].is<uint32_t>() ||
+  if (command == UsbCommand::SetBaud) {
+    if (payload.size() != 1U || !payload["baud"].is<uint32_t>() ||
+        payload["baud"].as<uint32_t>() != 460800U) {
+      return false;
+    }
+    request.baud = 460800U;
+    return true;
+  }
+  if ((payload.size() != 6U && payload.size() != 8U) ||
+      !payload["size"].is<uint32_t>() ||
       !payload["sha256"].is<const char*>() ||
       !payload["version"].is<const char*>() ||
       !payload["board"].is<const char*>() ||
@@ -279,6 +292,21 @@ bool parsePayload(UsbCommand command, ArduinoJson::JsonObjectConst payload,
   firmware.metadata.board = payload["board"].as<const char*>();
   firmware.metadata.protocolVersion = payload["protocolVersion"].as<uint8_t>();
   firmware.official = payload["official"].as<bool>();
+  if (firmware.official) {
+    if (payload.size() != 8U || !payload["manifest"].is<const char*>() ||
+        !payload["signature"].is<const char*>()) {
+      return false;
+    }
+    firmware.manifest = payload["manifest"].as<const char*>();
+    firmware.signature = payload["signature"].as<const char*>();
+    if (firmware.manifest.empty() ||
+        firmware.manifest.size() > kOtaManifestMaxBytes ||
+        firmware.signature.size() != 88U) {
+      return false;
+    }
+  } else if (payload.size() != 6U) {
+    return false;
+  }
   if (firmware.size == 0U || !validLowerHexSha256(firmware.sha256) ||
       firmware.metadata.board.empty() ||
       firmware.metadata.protocolVersion != 1U ||

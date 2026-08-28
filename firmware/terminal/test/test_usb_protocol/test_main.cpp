@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <optional/monocypher-ed25519.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include "openjornada/provisioning.hpp"
 #include "openjornada/usb_protocol.hpp"
 #include "openjornada/usb_maintenance.hpp"
+#include "openjornada/usb_firmware_receiver.hpp"
 
 using namespace openjornada;
 
@@ -66,6 +68,71 @@ std::optional<FirmwareBuildMetadata> parseMetadata(const std::string& image) {
 }
 
 constexpr std::string_view kRequestId = "AZaztV6Dql5aZQHCF4yzEA";
+constexpr std::string_view kUsbTestFirmwareJson =
+    R"({"board":"m5stack-basic-core-v27","protocolVersion":1,"firmwareVersion":"1.2.3"})";
+constexpr std::string_view kUsbTestFirmwareHash =
+    "592dcda156e140523fb3469192db6f2f6e90009b35fc0852d846bc160186064e";
+
+std::string validUsbFirmwareImage() {
+  return std::string(kFirmwareMetadataPrefix) +
+         std::string(kUsbTestFirmwareJson);
+}
+
+std::string base64Signature(const std::array<uint8_t, 64>& input) {
+  static constexpr char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string output;
+  output.reserve(88);
+  for (size_t cursor = 0; cursor < input.size(); cursor += 3U) {
+    const uint32_t first = input[cursor];
+    const bool hasSecond = cursor + 1U < input.size();
+    const bool hasThird = cursor + 2U < input.size();
+    const uint32_t second = hasSecond ? input[cursor + 1U] : 0U;
+    const uint32_t third = hasThird ? input[cursor + 2U] : 0U;
+    const uint32_t bits = (first << 16U) | (second << 8U) | third;
+    output.push_back(alphabet[(bits >> 18U) & 0x3fU]);
+    output.push_back(alphabet[(bits >> 12U) & 0x3fU]);
+    output.push_back(hasSecond ? alphabet[(bits >> 6U) & 0x3fU] : '=');
+    output.push_back(hasThird ? alphabet[bits & 0x3fU] : '=');
+  }
+  return output;
+}
+
+std::string jsonString(std::string_view value) {
+  std::string output;
+  output.push_back('"');
+  for (const char byte : value) {
+    if (byte == '"' || byte == '\\') output.push_back('\\');
+    output.push_back(byte);
+  }
+  output.push_back('"');
+  return output;
+}
+
+std::string signedOfficialFirmwarePayload(
+    size_t imageSize, std::array<uint8_t, 32>& publicKey) {
+  const std::string manifest =
+      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.3","releaseTag":"v1.2.3","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":)" +
+      std::to_string(imageSize) + R"(,"sha256":")" +
+      std::string(kUsbTestFirmwareHash) +
+      R"(","keyId":"production-2026","publishedAt":"2026-08-28T12:00:00Z"})";
+  std::array<uint8_t, 32> seed{};
+  for (size_t index = 0; index < seed.size(); ++index) {
+    seed[index] = static_cast<uint8_t>(index);
+  }
+  std::array<uint8_t, 64> secretKey{};
+  crypto_ed25519_key_pair(secretKey.data(), publicKey.data(), seed.data());
+  std::array<uint8_t, 64> signature{};
+  crypto_ed25519_sign(signature.data(), secretKey.data(),
+                      reinterpret_cast<const uint8_t*>(manifest.data()),
+                      manifest.size());
+  return "{\"size\":" + std::to_string(imageSize) +
+         ",\"sha256\":\"" + std::string(kUsbTestFirmwareHash) +
+         "\",\"version\":\"1.2.3\",\"board\":\"m5stack-basic-core-v27\","
+         "\"protocolVersion\":1,\"official\":true,\"manifest\":" +
+         jsonString(manifest) + ",\"signature\":\"" +
+         base64Signature(signature) + "\"}";
+}
 
 void feed(UsbControlParser& parser, std::string_view bytes) {
   for (const char byte : bytes) parser.consume(byte);
@@ -98,6 +165,9 @@ class FakeProvisioningSerialTransport final
 class FakeMaintenanceTransport final : public UsbMaintenanceTransport {
  public:
   void append(std::string_view bytes) { input_.append(bytes); }
+  void appendBytes(const std::vector<uint8_t>& bytes) {
+    input_.append(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  }
   int available() override {
     return cursor_ < input_.size() ? static_cast<int>(input_.size() - cursor_)
                                    : 0;
@@ -120,18 +190,113 @@ class FakeMaintenanceTransport final : public UsbMaintenanceTransport {
     flushBudgetMs = maxWaitMs;
     return true;
   }
+  bool setBaud(uint32_t baud) override {
+    baudChanges.push_back(baud);
+    return baudChangeSucceeds;
+  }
   const std::string& output() const { return output_; }
 
   uint32_t flushBudgetMs = 0;
   size_t writeAvailable = 4096;
   size_t maxWriteSize = 4096;
   unsigned zeroWrites = 0;
+  bool baudChangeSucceeds = true;
+  std::vector<uint32_t> baudChanges;
 
  private:
   std::string input_;
   size_t cursor_ = 0;
   std::string output_;
 };
+
+class FakeFirmwareWriter final : public FirmwareSlotWriter {
+ public:
+  uint32_t capacity() const override { return slotCapacity; }
+  bool begin(uint32_t size) override {
+    calls.push_back('b');
+    if (trace != nullptr) trace->push_back('b');
+    begunSize = size;
+    return beginSucceeds;
+  }
+  size_t write(const uint8_t* data, size_t size) override {
+    calls.push_back('w');
+    if (trace != nullptr) trace->push_back('w');
+    const size_t written = shortWrite ? size - 1U : size;
+    bytes.insert(bytes.end(), data, data + written);
+    return written;
+  }
+  bool finish() override {
+    calls.push_back('f');
+    if (trace != nullptr) trace->push_back('f');
+    selectedCandidate = finishSucceeds;
+    return finishSucceeds;
+  }
+  void abort() override {
+    calls.push_back('a');
+    if (trace != nullptr) trace->push_back('a');
+    ++aborts;
+    if (selectedCandidate) ++restores;
+    selectedCandidate = false;
+  }
+
+  uint32_t slotCapacity = 4096;
+  uint32_t begunSize = 0;
+  bool beginSucceeds = true;
+  bool finishSucceeds = true;
+  bool shortWrite = false;
+  unsigned aborts = 0;
+  unsigned restores = 0;
+  bool selectedCandidate = false;
+  std::string calls;
+  std::string* trace = nullptr;
+  std::vector<uint8_t> bytes;
+};
+
+class FakeUsbCommitStore final : public OtaCommitStore {
+ public:
+  bool stageCandidate(const std::string&, const std::string&,
+                      int64_t) override {
+    calls.push_back('s');
+    if (trace != nullptr) trace->push_back('s');
+    return stageSucceeds;
+  }
+  bool markBootPending() override {
+    calls.push_back('m');
+    if (trace != nullptr) trace->push_back('m');
+    return markSucceeds;
+  }
+  bool clearPending() override {
+    calls.push_back('c');
+    if (trace != nullptr) trace->push_back('c');
+    return true;
+  }
+
+  bool stageSucceeds = true;
+  bool markSucceeds = true;
+  std::string calls;
+  std::string* trace = nullptr;
+};
+
+FirmwareTransferIntent testFirmwareIntent(std::string hash,
+                                          uint32_t size = 3,
+                                          std::string version = "1.2.3") {
+  FirmwareTransferIntent intent;
+  intent.size = size;
+  intent.sha256 = std::move(hash);
+  intent.metadata = {"m5stack-basic-core-v27", 1, std::move(version)};
+  return intent;
+}
+
+UsbFirmwareContext acceptedCustomContext() {
+  UsbFirmwareContext context;
+  context.imageSize = 3;
+  context.slotSize = 4096;
+  context.boardCompatible = true;
+  context.protocolCompatible = true;
+  context.runtimeIdle = true;
+  context.physicallyConfirmed = true;
+  return context;
+}
 
 UsbMaintenanceContext maintenanceContext(uint32_t nowMs = 1000) {
   UsbMaintenanceContext context;
@@ -241,6 +406,17 @@ void test_control_parser_accepts_exact_command_payload_shapes() {
   TEST_ASSERT_EQUAL_STRING("1.2.3",
                            firmware.request().firmware.metadata.firmwareVersion.c_str());
   TEST_ASSERT_FALSE(firmware.request().firmware.official);
+
+  UsbControlParser baud;
+  feed(baud, controlLine("set_baud", R"({"baud":460800})"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, baud.status());
+  TEST_ASSERT_EQUAL(UsbCommand::SetBaud, baud.request().command);
+  TEST_ASSERT_EQUAL_UINT32(460800, baud.request().baud);
+
+  UsbControlParser ready;
+  feed(ready, controlLine("baud_ready"));
+  TEST_ASSERT_EQUAL(UsbParseStatus::Complete, ready.status());
+  TEST_ASSERT_EQUAL(UsbCommand::BaudReady, ready.request().command);
 }
 
 void test_control_parser_rejects_nul_malformed_utf8_and_invalid_ids() {
@@ -453,6 +629,422 @@ void test_firmware_frame_reset_recovers_with_explicit_offset() {
   parser.consume(valid.data(), valid.size());
   TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, parser.status());
   TEST_ASSERT_EQUAL_UINT32(7, parser.frame().offset);
+
+  UsbFirmwareFrameParser boundary;
+  const auto twentyBytes = firmwareFrame(0, std::vector<uint8_t>(20, 'x'));
+  TEST_ASSERT_TRUE(boundary.atFrameBoundary());
+  boundary.consume(twentyBytes.data(), kUsbFirmwareHeaderBytes + 6U);
+  TEST_ASSERT_EQUAL_UINT32(kUsbFirmwareHeaderBytes, boundary.expectedBytes());
+  TEST_ASSERT_FALSE(boundary.atFrameBoundary());
+}
+
+void test_usb_firmware_receiver_writes_exact_offsets_and_commits_after_hash() {
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  std::string trace;
+  writer.trace = &trace;
+  store.trace = &trace;
+  UsbFirmwareReceiver receiver(writer, store);
+  const std::string image = validUsbFirmwareImage();
+  const auto intent = testFirmwareIntent(std::string(kUsbTestFirmwareHash),
+                                         image.size());
+
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    receiver.begin(intent, acceptedCustomContext(), 100));
+  const size_t split = 17;
+  TEST_ASSERT_TRUE(receiver.writeFrame(
+      {0, std::vector<uint8_t>(image.begin(), image.begin() + split)}, 200));
+  TEST_ASSERT_TRUE(receiver.writeFrame(
+      {static_cast<uint32_t>(split),
+       std::vector<uint8_t>(image.begin() + split, image.end())},
+      300));
+  TEST_ASSERT_EQUAL_UINT32(image.size(), receiver.expectedOffset());
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::None, receiver.commit(1234));
+  TEST_ASSERT_EQUAL_STRING("bwwsfm", trace.c_str());
+  TEST_ASSERT_FALSE(receiver.active());
+}
+
+void test_usb_firmware_receiver_retries_crc_and_aborts_bad_offset() {
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  std::string trace;
+  writer.trace = &trace;
+  store.trace = &trace;
+  UsbFirmwareReceiver receiver(writer, store);
+  auto intent = testFirmwareIntent(std::string(64, '0'));
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    receiver.begin(intent, acceptedCustomContext(), 100));
+  TEST_ASSERT_TRUE(receiver.rejectFrame(UsbFrameError::CrcMismatch, 200));
+  TEST_ASSERT_TRUE(receiver.rejectFrame(UsbFrameError::CrcMismatch, 300));
+  TEST_ASSERT_TRUE(receiver.rejectFrame(UsbFrameError::CrcMismatch, 400));
+  TEST_ASSERT_FALSE(receiver.rejectFrame(UsbFrameError::CrcMismatch, 500));
+  TEST_ASSERT_FALSE(receiver.active());
+  TEST_ASSERT_EQUAL_UINT32(1, writer.aborts);
+
+  FakeFirmwareWriter offsetWriter;
+  FakeUsbCommitStore offsetStore;
+  UsbFirmwareReceiver offsetReceiver(offsetWriter, offsetStore);
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    offsetReceiver.begin(intent, acceptedCustomContext(), 600));
+  TEST_ASSERT_FALSE(offsetReceiver.writeFrame({1, {'x'}}, 700));
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::Download, offsetReceiver.error());
+  TEST_ASSERT_EQUAL_UINT32(1, offsetWriter.aborts);
+}
+
+void test_usb_firmware_receiver_aborts_short_write_timeout_and_hash_mismatch() {
+  auto intent = testFirmwareIntent(std::string(64, '0'));
+
+  FakeFirmwareWriter shortWriter;
+  shortWriter.shortWrite = true;
+  FakeUsbCommitStore shortStore;
+  UsbFirmwareReceiver shortReceiver(shortWriter, shortStore);
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    shortReceiver.begin(intent, acceptedCustomContext(), 0));
+  TEST_ASSERT_FALSE(shortReceiver.writeFrame({0, {'a', 'b', 'c'}}, 1));
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::Flash, shortReceiver.error());
+
+  FakeFirmwareWriter timeoutWriter;
+  FakeUsbCommitStore timeoutStore;
+  UsbFirmwareReceiver timeoutReceiver(timeoutWriter, timeoutStore);
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    timeoutReceiver.begin(intent, acceptedCustomContext(),
+                                          UINT32_MAX - 1000U));
+  TEST_ASSERT_TRUE(timeoutReceiver.tick(3998U));
+  TEST_ASSERT_FALSE(timeoutReceiver.tick(3999U));
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::Download, timeoutReceiver.error());
+
+  FakeFirmwareWriter hashWriter;
+  FakeUsbCommitStore hashStore;
+  UsbFirmwareReceiver hashReceiver(hashWriter, hashStore);
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    hashReceiver.begin(intent, acceptedCustomContext(), 0));
+  TEST_ASSERT_TRUE(hashReceiver.writeFrame({0, {'a', 'b', 'c'}}, 1));
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::Hash, hashReceiver.commit(2));
+  TEST_ASSERT_EQUAL_UINT32(1, hashWriter.aborts);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, hashStore.calls.find('c'));
+}
+
+void test_usb_firmware_receiver_clears_pending_if_commit_staging_fails() {
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  std::string trace;
+  writer.trace = &trace;
+  store.trace = &trace;
+  store.stageSucceeds = false;
+  UsbFirmwareReceiver receiver(writer, store);
+  const std::string image = validUsbFirmwareImage();
+  const auto intent = testFirmwareIntent(std::string(kUsbTestFirmwareHash),
+                                         image.size());
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    receiver.begin(intent, acceptedCustomContext(), 0));
+  TEST_ASSERT_TRUE(receiver.writeFrame(
+      {0, std::vector<uint8_t>(image.begin(), image.end())}, 1));
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::BootValidation, receiver.commit(2));
+  TEST_ASSERT_EQUAL_STRING("bwsac", trace.c_str());
+  TEST_ASSERT_EQUAL_UINT32(1, writer.aborts);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, store.calls.find("sc"));
+}
+
+void test_usb_firmware_receiver_restores_selected_slot_if_mark_fails() {
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  std::string trace;
+  writer.trace = &trace;
+  store.trace = &trace;
+  store.markSucceeds = false;
+  UsbFirmwareReceiver receiver(writer, store);
+  const std::string image = validUsbFirmwareImage();
+  const auto intent = testFirmwareIntent(std::string(kUsbTestFirmwareHash),
+                                         image.size());
+  TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                    receiver.begin(intent, acceptedCustomContext(), 0));
+  TEST_ASSERT_TRUE(receiver.writeFrame(
+      {0, std::vector<uint8_t>(image.begin(), image.end())}, 1));
+  TEST_ASSERT_EQUAL(FirmwareUpdateError::BootValidation, receiver.commit(2));
+  TEST_ASSERT_EQUAL_STRING("bwsfmac", trace.c_str());
+  TEST_ASSERT_EQUAL_UINT32(1, writer.restores);
+}
+
+void test_usb_firmware_receiver_rejects_missing_duplicate_or_mismatched_metadata() {
+  const auto assertRejected = [](const std::string& image,
+                                 std::string_view hash,
+                                 std::string version = "1.2.3") {
+    FakeFirmwareWriter writer;
+    FakeUsbCommitStore store;
+    UsbFirmwareReceiver receiver(writer, store);
+    const auto intent = testFirmwareIntent(std::string(hash), image.size(),
+                                           std::move(version));
+    TEST_ASSERT_EQUAL(UsbFirmwareDecision::Accept,
+                      receiver.begin(intent, acceptedCustomContext(), 0));
+    TEST_ASSERT_TRUE(receiver.writeFrame(
+        {0, std::vector<uint8_t>(image.begin(), image.end())}, 1));
+    TEST_ASSERT_EQUAL(FirmwareUpdateError::Incompatible, receiver.commit(2));
+    TEST_ASSERT_EQUAL_UINT32(1, writer.aborts);
+    TEST_ASSERT_TRUE(store.calls.find('s') == std::string::npos);
+  };
+  assertRejected("abc",
+                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  const std::string duplicate = "abc" + validUsbFirmwareImage() +
+                                validUsbFirmwareImage();
+  assertRejected(duplicate,
+                 "52c1e5105d71e2011efa0862fcc75df8e49a8dd62dbff104fb75854ffde780c4");
+  const std::string mismatch =
+      std::string(kFirmwareMetadataPrefix) +
+      R"({"board":"m5stack-basic-core-v27","protocolVersion":1,"firmwareVersion":"9.9.9"})";
+  assertRejected(mismatch,
+                 "28bd195d525d9408cc96b580dc5815db73e0d758b757fa4150aa5f0292f57dab");
+}
+
+void test_usb_custom_firmware_requires_only_c_then_negotiates_with_fallback() {
+  FakeMaintenanceTransport transport;
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  std::string trace;
+  writer.trace = &trace;
+  store.trace = &trace;
+  UsbFirmwareReceiver receiver(writer, store);
+  UsbMaintenanceService service(transport, &receiver);
+  auto context = maintenanceContext(1000);
+  context.status.pendingCount = 0;
+  context.runtimeIdle = true;
+  context.nowEpochSeconds = 1234;
+  unsigned warnings = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> progress;
+  bool rebooted = false;
+  context.showFirmwareWarning = [&] { ++warnings; };
+  context.showFirmwareProgress = [&](uint32_t received, uint32_t total) {
+    progress.emplace_back(received, total);
+  };
+  context.reboot = [&] { rebooted = true; };
+  const std::string hash =
+      std::string(kUsbTestFirmwareHash);
+  const std::string image = validUsbFirmwareImage();
+  transport.append(controlLine(
+      "firmware_begin",
+      "{\"size\":" + std::to_string(image.size()) + ",\"sha256\":\"" + hash +
+          "\",\"version\":\"1.2.3\",\"board\":\"m5stack-basic-core-v27\","
+          "\"protocolVersion\":1,\"official\":false}"));
+  auto decision = service.tick(context);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  TEST_ASSERT_EQUAL_UINT32(1, warnings);
+  TEST_ASSERT_TRUE(writer.calls.empty());
+
+  context.nowMs = 1100;
+  context.buttons = {};
+  service.tick(context);
+  context.nowMs = 1200;
+  context.buttons = {false, false, true};
+  service.tick(context);
+  context.nowMs = 6200;
+  service.tick(context);
+  TEST_ASSERT_EQUAL_UINT32(image.size(), writer.begunSize);
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"code\":\"firmware_accepted\""));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find(hash));
+  TEST_ASSERT_EQUAL_UINT32(1, progress.size());
+
+  transport.append(controlLine("set_baud", R"({"baud":460800})"));
+  context.nowMs = 6300;
+  context.buttons = {};
+  service.tick(context);
+  context.nowMs = 6400;
+  service.tick(context);
+  TEST_ASSERT_EQUAL_UINT32(460800, transport.baudChanges.back());
+  context.nowMs = 8400;
+  service.tick(context);
+  TEST_ASSERT_EQUAL_UINT32(115200, transport.baudChanges.back());
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"baud_fallback\""));
+
+  transport.appendBytes(firmwareFrame(
+      0, std::vector<uint8_t>(image.begin(), image.end())));
+  context.nowMs = 8500;
+  service.tick(context);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"firmware_ack\""));
+  TEST_ASSERT_EQUAL_UINT32(2, progress.size());
+  TEST_ASSERT_EQUAL_UINT32(image.size(), progress.back().first);
+
+  transport.append(controlLine("firmware_commit"));
+  context.nowMs = 8600;
+  service.tick(context);
+  TEST_ASSERT_TRUE(rebooted);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"rebooting\""));
+  TEST_ASSERT_EQUAL_STRING("bwsfm", trace.c_str());
+}
+
+void test_usb_official_signed_intent_runs_parser_service_receiver_and_baud_ready() {
+  FakeMaintenanceTransport transport;
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  std::string trace;
+  writer.trace = &trace;
+  store.trace = &trace;
+  UsbFirmwareReceiver receiver(writer, store);
+  UsbMaintenanceService service(transport, &receiver);
+  auto context = maintenanceContext(1000);
+  context.status.pendingCount = 0;
+  context.nowEpochSeconds = 1234;
+  bool rebooted = false;
+  context.reboot = [&] { rebooted = true; };
+  const std::string image = validUsbFirmwareImage();
+  const std::string payload =
+      signedOfficialFirmwarePayload(image.size(), context.firmwarePublicKey);
+
+  transport.append(controlLine("firmware_begin", payload));
+  service.tick(context);
+  service.tick(context);
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"code\":\"firmware_accepted\""));
+  TEST_ASSERT_FALSE(service.awaitingPhysicalConfirmation());
+
+  transport.append(controlLine("set_baud", R"({"baud":460800})"));
+  context.nowMs = 1010;
+  service.tick(context);
+  context.nowMs = 1110;
+  service.tick(context);
+  TEST_ASSERT_EQUAL_UINT32(460800, transport.baudChanges.back());
+  transport.append(controlLine("baud_ready"));
+  context.nowMs = 1120;
+  service.tick(context);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"baud_ready\""));
+
+  transport.appendBytes(firmwareFrame(
+      0, std::vector<uint8_t>(image.begin(), image.end())));
+  context.nowMs = 1130;
+  service.tick(context);
+  transport.append(controlLine("firmware_commit"));
+  context.nowMs = 1140;
+  service.tick(context);
+  TEST_ASSERT_TRUE(rebooted);
+  TEST_ASSERT_EQUAL_STRING("bwsfm", trace.c_str());
+}
+
+void test_usb_firmware_cancel_is_unambiguous_only_between_frames() {
+  FakeMaintenanceTransport transport;
+  transport.baudChangeSucceeds = false;
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  UsbFirmwareReceiver receiver(writer, store);
+  UsbMaintenanceService service(transport, &receiver);
+  auto context = maintenanceContext(1000);
+  context.status.pendingCount = 0;
+  unsigned restores = 0;
+  context.restoreScreen = [&] { ++restores; };
+  const std::string image = validUsbFirmwareImage();
+  const std::string payload =
+      signedOfficialFirmwarePayload(image.size(), context.firmwarePublicKey);
+  transport.append(controlLine("firmware_begin", payload));
+  service.tick(context);
+  transport.append(controlLine("set_baud", R"({"baud":460800})"));
+  context.nowMs = 1010;
+  service.tick(context);
+  context.nowMs = 1110;
+  service.tick(context);
+
+  const size_t split = 20;
+  transport.appendBytes(firmwareFrame(
+      0, std::vector<uint8_t>(image.begin(), image.begin() + split)));
+  context.nowMs = 1120;
+  service.tick(context);
+  TEST_ASSERT_EQUAL_UINT32(split, receiver.expectedOffset());
+  TEST_ASSERT_TRUE(receiver.active());
+
+  transport.append(controlLine("cancel"));
+  context.nowMs = 1130;
+  service.tick(context);
+  TEST_ASSERT_FALSE(receiver.active());
+  TEST_ASSERT_EQUAL_UINT32(1, writer.aborts);
+  TEST_ASSERT_EQUAL_UINT32(1, restores);
+  TEST_ASSERT_NOT_EQUAL(
+      std::string::npos,
+      transport.output().find("\"code\":\"firmware_cancelled\""));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"cancelled\""));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    transport.output().find("firmware_frame_invalid"));
+  TEST_ASSERT_EQUAL(std::string::npos,
+                    transport.output().find("invalid_request"));
+}
+
+void test_usb_concatenated_mutations_are_denied_after_firmware_begin() {
+  FakeMaintenanceTransport transport;
+  FakeFirmwareWriter writer;
+  FakeUsbCommitStore store;
+  UsbFirmwareReceiver receiver(writer, store);
+  UsbMaintenanceService service(transport, &receiver);
+  auto context = maintenanceContext(1000);
+  context.status.pendingCount = 0;
+  bool rebooted = false;
+  context.reboot = [&] { rebooted = true; };
+  const std::string image = validUsbFirmwareImage();
+  const std::string payload =
+      signedOfficialFirmwarePayload(image.size(), context.firmwarePublicKey);
+  transport.append(controlLine("firmware_begin", payload) +
+                   controlLine("reboot") + controlLine("factory_reset"));
+  for (unsigned tick = 0; tick < 4U; ++tick) service.tick(context);
+
+  TEST_ASSERT_TRUE(receiver.active());
+  TEST_ASSERT_FALSE(rebooted);
+  TEST_ASSERT_FALSE(service.awaitingPhysicalConfirmation());
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"mode_denied\""));
+  transport.append(controlLine("cancel"));
+  service.tick(context);
+  TEST_ASSERT_FALSE(receiver.active());
+}
+
+void test_usb_firmware_begin_rejects_pending_busy_and_unproved_official() {
+  const std::string customPayload =
+      R"({"size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","version":"1.2.3","board":"m5stack-basic-core-v27","protocolVersion":1,"official":false})";
+
+  FakeMaintenanceTransport pendingTransport;
+  FakeFirmwareWriter pendingWriter;
+  FakeUsbCommitStore pendingStore;
+  UsbFirmwareReceiver pendingReceiver(pendingWriter, pendingStore);
+  UsbMaintenanceService pendingService(pendingTransport, &pendingReceiver);
+  auto pendingContext = maintenanceContext();
+  pendingTransport.append(controlLine("firmware_begin", customPayload));
+  pendingService.tick(pendingContext);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        pendingTransport.output().find("\"code\":\"pending_actions\""));
+  TEST_ASSERT_TRUE(pendingWriter.calls.empty());
+
+  FakeMaintenanceTransport busyTransport;
+  FakeFirmwareWriter busyWriter;
+  FakeUsbCommitStore busyStore;
+  UsbFirmwareReceiver busyReceiver(busyWriter, busyStore);
+  UsbMaintenanceService busyService(busyTransport, &busyReceiver);
+  auto busyContext = maintenanceContext();
+  busyContext.status.pendingCount = 0;
+  busyContext.runtimeIdle = false;
+  busyTransport.append(controlLine("firmware_begin", customPayload));
+  busyService.tick(busyContext);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        busyTransport.output().find("\"code\":\"busy\""));
+
+  FakeMaintenanceTransport officialTransport;
+  FakeFirmwareWriter officialWriter;
+  FakeUsbCommitStore officialStore;
+  UsbFirmwareReceiver officialReceiver(officialWriter, officialStore);
+  UsbMaintenanceService officialService(officialTransport, &officialReceiver);
+  auto officialContext = maintenanceContext();
+  officialContext.status.pendingCount = 0;
+  const std::string fakeSignature(88, 'A');
+  officialTransport.append(controlLine(
+      "firmware_begin",
+      "{\"size\":3,\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\","
+      "\"version\":\"1.2.3\",\"board\":\"m5stack-basic-core-v27\",\"protocolVersion\":1,"
+      "\"official\":true,\"manifest\":\"{}\",\"signature\":\"" +
+          fakeSignature + "\"}"));
+  officialService.tick(officialContext);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        officialTransport.output().find("\"code\":\"invalid_signature\""));
+  TEST_ASSERT_TRUE(officialWriter.calls.empty());
 }
 
 void test_usb_maintenance_status_and_doctor_are_public_and_bounded() {
@@ -988,6 +1580,24 @@ int main(int, char**) {
       test_firmware_frame_backpressure_preserves_many_concatenated_frames);
   RUN_TEST(test_firmware_frame_rejects_header_crc_and_repeated_offset);
   RUN_TEST(test_firmware_frame_reset_recovers_with_explicit_offset);
+  RUN_TEST(
+      test_usb_firmware_receiver_writes_exact_offsets_and_commits_after_hash);
+  RUN_TEST(test_usb_firmware_receiver_retries_crc_and_aborts_bad_offset);
+  RUN_TEST(
+      test_usb_firmware_receiver_aborts_short_write_timeout_and_hash_mismatch);
+  RUN_TEST(test_usb_firmware_receiver_clears_pending_if_commit_staging_fails);
+  RUN_TEST(test_usb_firmware_receiver_restores_selected_slot_if_mark_fails);
+  RUN_TEST(
+      test_usb_firmware_receiver_rejects_missing_duplicate_or_mismatched_metadata);
+  RUN_TEST(
+      test_usb_custom_firmware_requires_only_c_then_negotiates_with_fallback);
+  RUN_TEST(
+      test_usb_official_signed_intent_runs_parser_service_receiver_and_baud_ready);
+  RUN_TEST(test_usb_firmware_cancel_is_unambiguous_only_between_frames);
+  RUN_TEST(
+      test_usb_concatenated_mutations_are_denied_after_firmware_begin);
+  RUN_TEST(
+      test_usb_firmware_begin_rejects_pending_busy_and_unproved_official);
   RUN_TEST(test_usb_maintenance_status_and_doctor_are_public_and_bounded);
   RUN_TEST(test_usb_maintenance_logs_accept_only_fixed_codes);
   RUN_TEST(

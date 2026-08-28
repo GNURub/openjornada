@@ -4,7 +4,6 @@
 
 #include <HTTPClient.h>
 #include <Preferences.h>
-#include <Update.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_ota_ops.h>
@@ -19,6 +18,7 @@
 #include <utility>
 
 #include "openjornada/ota_configuration.hpp"
+#include "openjornada/usb_firmware_receiver.hpp"
 #include "openjornada/version.hpp"
 
 #ifndef CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
@@ -151,7 +151,8 @@ FirmwareUpdateError downloadFirmware(std::string url,
       return contentLength >= 0 ? FirmwareUpdateError::Size
                                 : FirmwareUpdateError::Download;
     }
-    if (!Update.begin(manifest.size, U_FLASH)) {
+    UpdateFirmwareSlotWriter writer;
+    if (!writer.begin(manifest.size)) {
       http.end();
       return FirmwareUpdateError::Flash;
     }
@@ -177,7 +178,7 @@ FirmwareUpdateError downloadFirmware(std::string url,
       const size_t requested = std::min<size_t>(
           buffer.size(), std::min<uint32_t>(available, manifest.size - written));
       const size_t received = stream.readBytes(buffer.data(), requested);
-      if (received == 0 || Update.write(buffer.data(), received) != received) {
+      if (received == 0 || writer.write(buffer.data(), received) != received) {
         failed = true;
         break;
       }
@@ -190,7 +191,7 @@ FirmwareUpdateError downloadFirmware(std::string url,
     mbedtls_sha256_free(&sha);
     http.end();
     if (failed || written != manifest.size) {
-      Update.abort();
+      writer.abort();
       return FirmwareUpdateError::Download;
     }
     updateStatus.store(FirmwareUpdateStatus::Verifying);
@@ -198,25 +199,11 @@ FirmwareUpdateError downloadFirmware(std::string url,
     std::transform(expected.begin(), expected.end(), expected.begin(),
                    [](unsigned char byte) { return std::tolower(byte); });
     if (lowerHex(digest) != expected) {
-      Update.abort();
+      writer.abort();
       return FirmwareUpdateError::Hash;
     }
-    const FirmwareUpdateError preparation = prepareOtaBootCommit(
-        stateStore, manifest.firmwareVersion, manifest.sha256,
-        checkedAtEpochSeconds);
-    if (preparation != FirmwareUpdateError::None) {
-      Update.abort();
-      return preparation;
-    }
-    // Persist boot intent before Update.end() selects the candidate partition.
-    // A power cut from this point is classified conservatively as an attempted
-    // boot, so a bad image can never be reinstalled in a loop.
-    if (!Update.end(true)) {
-      Update.abort();
-      (void)stateStore.clearPending();
-      return FirmwareUpdateError::Flash;
-    }
-    return FirmwareUpdateError::None;
+    return finalizeOtaCandidate(writer, stateStore, manifest.firmwareVersion,
+                                manifest.sha256, checkedAtEpochSeconds);
   }
   return FirmwareUpdateError::Download;
 }
@@ -656,18 +643,13 @@ void OtaWorker::execute(const OtaJob& job, OtaResult& output) {
          (signatureText.back() == '\n' || signatureText.back() == '\r')) {
     signatureText.pop_back();
   }
-  std::array<uint8_t, 64> signature{};
-  if (!decodeBase64Signature(signatureText, signature) ||
-      !verifyEd25519Manifest(manifestBytes, signature, job.publicKey)) {
-    output.status = FirmwareUpdateStatus::Blocked;
-    output.error = FirmwareUpdateError::ManifestSignature;
-    status_.store(output.status);
-    return;
-  }
   FirmwareManifest manifest;
-  if (!parseFirmwareManifest(manifestBytes, manifest)) {
+  FirmwareUpdateError manifestError = FirmwareUpdateError::None;
+  if (!verifyFirmwareManifestSignature(manifestBytes, signatureText,
+                                       job.publicKey, manifest,
+                                       &manifestError)) {
     output.status = FirmwareUpdateStatus::Blocked;
-    output.error = FirmwareUpdateError::ManifestInvalid;
+    output.error = manifestError;
     status_.store(output.status);
     return;
   }

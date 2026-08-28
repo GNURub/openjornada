@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <functional>
 #include <optional>
 #include <string>
@@ -9,6 +10,7 @@
 
 #include "openjornada/gesture.hpp"
 #include "openjornada/usb_protocol.hpp"
+#include "openjornada/usb_firmware_receiver.hpp"
 
 namespace openjornada {
 
@@ -55,6 +57,7 @@ class UsbMaintenanceTransport {
   virtual size_t write(const uint8_t* data, size_t size) = 0;
   // Implementations must return after at most maxWaitMs even if bytes remain.
   virtual bool flush(uint32_t maxWaitMs) = 0;
+  virtual bool setBaud(uint32_t baud) = 0;
 };
 
 struct UsbMaintenanceContext {
@@ -64,7 +67,12 @@ struct UsbMaintenanceContext {
   bool storageAvailable = false;
   bool rfidAvailable = false;
   bool runtimeIdle = true;
+  bool applicationIdle = true;
+  int64_t nowEpochSeconds = 0;
+  std::array<uint8_t, 32> firmwarePublicKey{};
   std::function<void(size_t)> showFactoryResetWarning;
+  std::function<void()> showFirmwareWarning;
+  std::function<void(uint32_t, uint32_t)> showFirmwareProgress;
   std::function<void()> restoreScreen;
   std::function<void()> reboot;
 };
@@ -76,8 +84,9 @@ struct UsbMaintenanceDecision {
 
 class UsbMaintenanceService {
  public:
-  explicit UsbMaintenanceService(UsbMaintenanceTransport& transport)
-      : transport_(transport) {}
+  explicit UsbMaintenanceService(UsbMaintenanceTransport& transport,
+                                 UsbFirmwareReceiver* firmwareReceiver = nullptr)
+      : transport_(transport), firmwareReceiver_(firmwareReceiver) {}
 
   UsbMaintenanceDecision tick(const UsbMaintenanceContext& context);
   void completeFactoryReset(bool success, uint32_t nowMs);
@@ -86,6 +95,7 @@ class UsbMaintenanceService {
     return confirmation_.has_value();
   }
   bool factoryResetConfirmed() const { return resetConfirmed_; }
+  bool firmwareActive() const;
 
  private:
   static constexpr size_t kMaxReadBytesPerTick = 512;
@@ -97,6 +107,19 @@ class UsbMaintenanceService {
   void handleConfirmation(const UsbMaintenanceContext& context);
   void beginFactoryReset(const UsbControlRequest& request,
                          const UsbMaintenanceContext& context);
+  void beginFirmware(const UsbControlRequest& request,
+                     const UsbMaintenanceContext& context,
+                     bool physicallyConfirmed = false);
+  void startFirmwareTransfer(const FirmwareTransferIntent& intent,
+                             std::string_view requestId,
+                             const UsbMaintenanceContext& context,
+                             bool physicallyConfirmed);
+  void serviceFirmwareInput(const UsbMaintenanceContext& context,
+                            size_t& consumed);
+  void serviceBaudNegotiation(const UsbMaintenanceContext& context);
+  void failFirmware(std::string_view code, std::string_view message,
+                    const UsbMaintenanceContext& context,
+                    bool receiverAlreadyAborted = false);
   void finishConfirmation(std::string_view code, std::string_view message,
                           const UsbMaintenanceContext& context,
                           bool restoreScreen);
@@ -111,16 +134,37 @@ class UsbMaintenanceService {
   void servicePendingReboot(const UsbMaintenanceContext& context);
 
   UsbMaintenanceTransport& transport_;
+  UsbFirmwareReceiver* firmwareReceiver_ = nullptr;
   UsbControlParser parser_;
+  UsbFirmwareFrameParser frameParser_;
+  // At a binary-frame boundary, OJFW... is a frame and OJUSB/1... may only be
+  // an explicit cancel request. The short probe removes any ambiguity.
+  std::string firmwareBoundaryProbe_;
+  bool firmwareControlLine_ = false;
   std::optional<MaintenanceConfirmationGesture> confirmation_;
   std::string confirmationRequestId_;
+  FirmwareTransferIntent confirmationFirmware_;
   std::string logSubscriptionId_;
   std::string txBuffer_;
   size_t txOffset_ = 0;
   bool resetConfirmed_ = false;
+  bool firmwareConfirmation_ = false;
   bool factoryResetExecutionRequested_ = false;
   bool rebootPending_ = false;
   uint32_t rebootRequestedAtMs_ = 0;
+  enum class FirmwareState {
+    Idle,
+    AwaitSetBaud,
+    FlushBaudAck,
+    WaitBaudSwitch,
+    AwaitBaudReady,
+    Receiving,
+    AwaitCommit,
+  };
+  FirmwareState firmwareState_ = FirmwareState::Idle;
+  std::string firmwareRequestId_;
+  uint32_t baudStateAtMs_ = 0;
+  bool highBaud_ = false;
 };
 
 const char* usbTerminalModeValue(UsbTerminalMode mode);

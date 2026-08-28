@@ -28,6 +28,8 @@ enum class UsbCommand {
   FactoryReset,
   FirmwareBegin,
   FirmwareCommit,
+  SetBaud,
+  BaudReady,
   Cancel,
 };
 
@@ -36,6 +38,8 @@ struct FirmwareTransferIntent {
   std::string sha256;
   FirmwareBuildMetadata metadata;
   bool official = false;
+  std::string manifest;
+  std::string signature;
 };
 
 struct UsbControlRequest {
@@ -43,6 +47,7 @@ struct UsbControlRequest {
   UsbCommand command = UsbCommand::Hello;
   std::string ojp;
   FirmwareTransferIntent firmware;
+  uint32_t baud = 0;
 };
 
 enum class UsbParseStatus { NeedMore, Complete, Error };
@@ -121,6 +126,10 @@ class UsbFirmwareFrameParser {
   UsbFrameParseStatus status() const;
   UsbFrameError error() const { return error_; }
   size_t expectedBytes() const;
+  bool atFrameBoundary() const {
+    return error_ == UsbFrameError::None && !frame_.has_value() &&
+           headerBytes_ == 0U && payload_.empty();
+  }
   size_t frameCount() const { return frame_.has_value() ? 1U : 0U; }
   const UsbFirmwareFrame& frame() const;
   void popFrame();

@@ -190,10 +190,14 @@ OtaBootAction decideOtaBootAction(
     return OtaBootAction::ConfirmCandidate;
   }
   if (!hasPersistedCandidate) return OtaBootAction::None;
+  // Only BootPending records that finish() selected the candidate. Staged or
+  // None may be a partial NVS write, so without bootloader verification the
+  // running partition is necessarily the old slot, even for the same version.
+  if (phase != OtaPersistedPhase::BootPending) {
+    return OtaBootAction::ClearInterruptedStage;
+  }
   if (runningVersionMatches) return OtaBootAction::ConfirmCandidate;
-  return phase == OtaPersistedPhase::BootPending
-             ? OtaBootAction::RecordRollback
-             : OtaBootAction::ClearInterruptedStage;
+  return OtaBootAction::RecordRollback;
 }
 
 bool otaDownloadUrlAllowed(std::string_view url, bool developmentTransport) {
@@ -250,6 +254,24 @@ bool verifyEd25519Manifest(std::string_view manifest,
   return crypto_ed25519_check(signature.data(), publicKey.data(),
                               reinterpret_cast<const uint8_t*>(manifest.data()),
                               manifest.size()) == 0;
+}
+
+bool verifyFirmwareManifestSignature(
+    std::string_view manifest, std::string_view encodedSignature,
+    const std::array<uint8_t, 32>& publicKey, FirmwareManifest& output,
+    FirmwareUpdateError* error) {
+  std::array<uint8_t, 64> signature{};
+  if (!decodeBase64Signature(encodedSignature, signature) ||
+      !verifyEd25519Manifest(manifest, signature, publicKey)) {
+    if (error != nullptr) *error = FirmwareUpdateError::ManifestSignature;
+    return false;
+  }
+  if (!parseFirmwareManifest(manifest, output)) {
+    if (error != nullptr) *error = FirmwareUpdateError::ManifestInvalid;
+    return false;
+  }
+  if (error != nullptr) *error = FirmwareUpdateError::None;
+  return true;
 }
 
 const char* firmwareUpdateStatusValue(FirmwareUpdateStatus status) {
