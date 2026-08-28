@@ -65,6 +65,15 @@ bash, zsh, fish y PowerShell sin consultar dispositivos ni red. No crea
 configuración ni telemetría. Las referencias del OJP se descartan al terminar,
 pero la memoria de Go no ofrece garantía de borrado criptográfico.
 
+Cada Release de GitHub ejecuta de forma independiente la publicación del
+contenedor, del firmware y de la CLI. Los paquetes de CLI reproducibles incluyen
+seis combinaciones de sistema y arquitectura, un inventario SHA-256 e
+instaladores de usuario que validan el contenido antes de sustituir el binario.
+`self-update` y esos instaladores sólo resuelven la última release estable: una
+prerelease conserva sus paquetes versionados, pero no pasa a `latest`. El
+firmware también permanece sólo estable y nunca descubre una prerelease por
+OTA.
+
 La asignación local de tags conserva la lista para enlazar varias tarjetas
 seguidas y muestra `A+C durante 3 s` como salida explícita en todas sus
 pantallas. Si pasan cinco minutos sin botones ni lecturas RFID, la sesión

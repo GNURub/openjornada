@@ -352,6 +352,26 @@ instalar firmware y actualizar el propio CLI. Los comandos exactos, permisos
 USB, advertencias de binarios sin firma y límites de seguridad están en
 [`cli/openjornada-terminal/README.md`](cli/openjornada-terminal/README.md).
 
+La instalación estable no requiere Go, Python ni PlatformIO:
+
+```bash
+curl -fsSL https://github.com/GNURub/openjornada/releases/latest/download/install.sh | sh
+```
+
+```powershell
+irm https://github.com/GNURub/openjornada/releases/latest/download/install.ps1 | iex
+```
+
+Los instaladores verifican el checksum antes de sustituir el ejecutable. La
+guía de la CLI incluye la verificación SHA-256 manual, la configuración de
+`PATH`, `self-update`, las advertencias de Gatekeeper/SmartScreen para binarios
+sin firma y la desinstalación que no elimina otros archivos del usuario.
+
+Publicar una Release de GitHub inicia de forma independiente la imagen del
+contenedor, el firmware y los paquetes de la CLI. Una prerelease publica la
+imagen y los paquetes versionados de la CLI, pero no cambia `latest`, no se
+convierte en destino de los instaladores y no se ofrece al firmware por OTA.
+
 ## Integración MCP
 
 Administración y responsables gestionan sus credenciales en

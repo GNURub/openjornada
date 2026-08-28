@@ -25,9 +25,17 @@ curl -fsSL https://github.com/GNURub/openjornada/releases/latest/download/instal
   | OPENJORNADA_INSTALL_DIR="$HOME/Mis programas/bin" sh
 ```
 
-Añade el directorio elegido a `PATH` si aún no está incluido. Un checksum
-incorrecto o un archivo con entradas inesperadas cancela la instalación antes
-de sustituir un binario existente.
+El instalador no modifica los archivos de inicio de la shell. Añade el
+directorio elegido a `PATH` si aún no está incluido; para el destino
+predeterminado, incorpora esta línea a `~/.profile` o al archivo equivalente de
+tu shell y abre una consola nueva:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Un checksum incorrecto o un archivo con entradas inesperadas cancela la
+instalación antes de sustituir un binario existente.
 
 ## Instalación en Windows
 
@@ -46,6 +54,82 @@ máquina. Abre una nueva consola después de la primera instalación para usar e
 comando sin indicar su ruta completa. Un checksum incorrecto, un inventario no
 canónico o un ZIP con rutas, enlaces, duplicados, ficheros inesperados, vacíos o
 sobredimensionados deja intacto cualquier ejecutable anterior.
+
+## Verificación manual de la descarga
+
+Los instaladores verifican SHA-256 automáticamente. Para comprobar manualmente
+un paquete Unix, elige el nombre exacto correspondiente a tu sistema y
+arquitectura (`linux` o `darwin`, `amd64` o `arm64`):
+
+```bash
+set -eu
+base=https://github.com/GNURub/openjornada/releases/latest/download
+archive=openjornada-terminal_linux_amd64.tar.gz
+curl -fLO "$base/$archive"
+curl -fsSLO "$base/checksums.txt"
+awk -v target="$archive" '
+  {
+    digest = substr($0, 1, 64)
+    separator = substr($0, 65, 2)
+    name = substr($0, 67)
+    if (length(digest) == 64 && digest !~ /[^0-9a-f]/ &&
+        separator == "  " && name == target) {
+      matches++
+      checksum = $0
+    }
+  }
+  END {
+    if (matches != 1) exit 1
+    print checksum
+  }
+' checksums.txt > "$archive.sha256"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c "$archive.sha256"
+else
+  shasum -a 256 -c "$archive.sha256"
+fi
+```
+
+En Windows, PowerShell permite seleccionar y verificar el ZIP estable sin
+ejecutar el instalador:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$Base = 'https://github.com/GNURub/openjornada/releases/latest/download'
+$Architecture = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+  ([Runtime.InteropServices.Architecture]::X64) { 'amd64' }
+  ([Runtime.InteropServices.Architecture]::Arm64) { 'arm64' }
+  default { throw 'Arquitectura no compatible.' }
+}
+$Archive = "openjornada-terminal_windows_$Architecture.zip"
+$Work = [IO.Path]::Combine(
+  [IO.Path]::GetTempPath(), "openjornada-terminal-$([Guid]::NewGuid().ToString('N'))"
+)
+[void][IO.Directory]::CreateDirectory($Work)
+try {
+  $ArchivePath = [IO.Path]::Combine($Work, $Archive)
+  $ChecksumsPath = [IO.Path]::Combine($Work, 'checksums.txt')
+  Invoke-WebRequest "$Base/$Archive" -OutFile $ArchivePath
+  Invoke-WebRequest "$Base/checksums.txt" -OutFile $ChecksumsPath
+  $Pattern = '^(?<digest>[0-9a-f]{64})  ' + [regex]::Escape($Archive) + '$'
+  $Entries = @(Get-Content -LiteralPath $ChecksumsPath | Where-Object { $_ -cmatch $Pattern })
+  if ($Entries.Count -ne 1) { throw 'No existe una única entrada SHA-256 exacta.' }
+  [void]($Entries[0] -cmatch $Pattern)
+  $Expected = $Matches.digest
+  $Actual = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($Actual -cne $Expected) { throw 'El checksum SHA-256 no coincide.' }
+  Write-Host "SHA-256 verificado: $Archive"
+}
+finally {
+  if ([IO.Directory]::Exists($Work)) {
+    Remove-Item -LiteralPath $Work -Recurse -Force
+  }
+}
+```
+
+La URL `releases/latest/download` resuelve únicamente la última release
+estable. Las prereleases también pueden incluir paquetes de la CLI, pero no
+reemplazan ese destino ni el usado por `self-update`.
 
 ## Comandos
 
@@ -155,6 +239,12 @@ verifica SHA-256 antes de extraer y sólo acepta el binario junto con `LICENSE`,
 en Windows prepara el reemplazo para cuando termine el proceso actual. Nunca
 ejecuta scripts descargados.
 
+Para actualizar una instalación existente a la última versión estable:
+
+```bash
+openjornada-terminal self-update
+```
+
 Ejemplos de instalación del completado en la sesión actual:
 
 ```bash
@@ -169,6 +259,71 @@ openjornada-terminal completion powershell | Out-String | Invoke-Expression
 
 La generación de completado es reproducible y no abre dispositivos ni accede a
 la red.
+
+## Desinstalación
+
+En Linux o macOS, elimina sólo el binario del destino usado al instalar. Para
+el destino predeterminado:
+
+```bash
+rm -- "$HOME/.local/bin/openjornada-terminal"
+```
+
+Retira manualmente de tu archivo de inicio la línea de `PATH` que añadiste si
+ya no usas `$HOME/.local/bin` para otros programas. No borres ese directorio si
+contiene otros ejecutables.
+
+En Windows, estos comandos validan primero el destino, eliminan sólo el
+ejecutable y eliminan `bin` únicamente si queda vacío:
+
+```powershell
+if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+  throw 'LOCALAPPDATA no está definido.'
+}
+$InstallDir = [IO.Path]::GetFullPath(
+  [IO.Path]::Combine($env:LOCALAPPDATA, 'Programs', 'OpenJornada', 'bin')
+)
+$Executable = [IO.Path]::Combine($InstallDir, 'openjornada-terminal.exe')
+if ([IO.File]::Exists($Executable)) {
+  Remove-Item -LiteralPath $Executable -Force
+}
+if ((Test-Path -LiteralPath $InstallDir) -and
+    -not (Get-ChildItem -LiteralPath $InstallDir -Force)) {
+  Remove-Item -LiteralPath $InstallDir
+}
+```
+
+El instalador puede haber añadido ese directorio al `PATH` de usuario. Retira
+la entrada sólo si confirmas que la añadió para OpenJornada y que no la
+necesita otro programa; el siguiente bloque además exige que `bin` ya no exista:
+
+```powershell
+if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+  throw 'LOCALAPPDATA no está definido.'
+}
+$InstallDir = [IO.Path]::GetFullPath(
+  [IO.Path]::Combine($env:LOCALAPPDATA, 'Programs', 'OpenJornada', 'bin')
+)
+if ([IO.Directory]::Exists($InstallDir)) {
+  throw 'No se modifica PATH porque el directorio bin contiene otros archivos.'
+}
+$UserPath = [Environment]::GetEnvironmentVariable(
+  'Path', [EnvironmentVariableTarget]::User
+)
+$UpdatedPath = (($UserPath -split [IO.Path]::PathSeparator) | Where-Object {
+  $_ -and -not [StringComparer]::OrdinalIgnoreCase.Equals(
+    $_.Trim().Trim('"').TrimEnd('\'),
+    $InstallDir.TrimEnd('\')
+  )
+}) -join [IO.Path]::PathSeparator
+[Environment]::SetEnvironmentVariable(
+  'Path', $UpdatedPath, [EnvironmentVariableTarget]::User
+)
+```
+
+Abre una consola nueva para que el cambio de `PATH` sea visible. El CLI no crea
+archivos de configuración ni telemetría, por lo que no hay datos adicionales
+propios que eliminar.
 
 ## Desarrollo
 

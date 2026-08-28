@@ -1,6 +1,6 @@
 # Cumplimiento del registro de jornada en España
 
-Última revisión técnica: 18 de agosto de 2026.
+Última revisión técnica: 28 de agosto de 2026.
 
 Este documento describe las salvaguardas incorporadas y las decisiones que la empresa debe completar. No sustituye el asesoramiento laboral o de protección de datos ni la consulta del convenio colectivo aplicable.
 
@@ -46,6 +46,16 @@ durante cinco segundos y caducan a los 30 segundos. Esa presencia no identifica
 a la persona operadora ni constituye una firma electrónica. Las instalaciones
 se rechazan mientras existan fichajes pendientes; una placa que no exponga
 `OJUSB/1` requiere recuperación técnica con PlatformIO/esptool.
+
+La distribución del CLI comprueba SHA-256 y el inventario exacto antes de
+reemplazar el ejecutable; `self-update` repite esas comprobaciones sin ejecutar
+scripts descargados. Esto aporta integridad de transporte y del artefacto, pero
+los binarios iniciales no tienen Apple Developer ID ni Authenticode y no deben
+presentarse como software firmado para macOS o Windows. La persona operadora
+debe obtenerlos de la release oficial estable, verificar el checksum y atender
+las advertencias de Gatekeeper o SmartScreen conforme a la política interna.
+Las prereleases del CLI no se convierten en destino `latest`, y las
+prereleases del firmware nunca se ofrecen por OTA.
 
 Referencias oficiales:
 

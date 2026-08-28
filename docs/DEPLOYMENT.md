@@ -40,6 +40,13 @@ El informe del frontend procede del bundle de producción real de Angular. El
 informe Go se genera desde los módulos que `go list -deps` confirma enlazados en
 el binario, no desde todas las entradas posibles de `go.mod`.
 
+Una única Release de GitHub en estado `published` inicia tres workflows
+independientes: imagen del contenedor, firmware del terminal y CLI USB. El
+fallo de uno no cancela automáticamente los otros; antes de anunciar la versión
+comprueba el resultado de los tres. En prereleases, contenedor y CLI publican
+sus artefactos versionados, pero no cambian sus destinos `latest`; el workflow
+de firmware no publica assets y el terminal nunca las recibe por OTA.
+
 ## Imágenes publicadas en GitHub
 
 El workflow
