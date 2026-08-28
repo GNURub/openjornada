@@ -5,6 +5,30 @@ OpenJornada y protocolo `OJUSB/1`. Es un binario autocontenido para Linux,
 macOS y Windows en `amd64` y `arm64`; no necesita Python ni PlatformIO para el
 mantenimiento ordinario.
 
+## Instalación en Linux y macOS
+
+El instalador oficial selecciona `amd64` o `arm64`, descarga la última release
+estable, exige la línea SHA-256 exacta de `checksums.txt` y comprueba que el
+archivo contiene únicamente el ejecutable y los tres avisos legales. Después
+instala el binario atómicamente con modo `0755`; no usa `sudo` ni solicita
+privilegios de administrador.
+
+```bash
+curl -fsSL https://github.com/GNURub/openjornada/releases/latest/download/install.sh | sh
+```
+
+El destino predeterminado es `$HOME/.local/bin`. Puede elegirse otro directorio
+de usuario, incluso si su ruta contiene espacios:
+
+```bash
+curl -fsSL https://github.com/GNURub/openjornada/releases/latest/download/install.sh \
+  | OPENJORNADA_INSTALL_DIR="$HOME/Mis programas/bin" sh
+```
+
+Añade el directorio elegido a `PATH` si aún no está incluido. Un checksum
+incorrecto o un archivo con entradas inesperadas cancela la instalación antes
+de sustituir un binario existente.
+
 ## Comandos
 
 ```text
