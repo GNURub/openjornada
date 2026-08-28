@@ -1,0 +1,184 @@
+name: Publicar CLI del terminal
+
+on:
+  release:
+    types:
+      - published
+
+permissions: {}
+
+concurrency:
+  group: publish-terminal-cli-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Compilar y empaquetar CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar código de la etiqueta publicada
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Comprobar commit de la release
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Preparar Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: cli/openjornada-terminal/go.mod
+          cache: true
+          cache-dependency-path: cli/openjornada-terminal/go.sum
+
+      - name: Probar CLI y herramientas de release
+        working-directory: cli/openjornada-terminal
+        run: |
+          go test -race ./...
+          python3 -m unittest \
+            scripts/test_package_release.py \
+            scripts/test_checksums.py \
+            scripts/test_verify_release_assets.py
+
+      - name: Analizar CLI
+        working-directory: cli/openjornada-terminal
+        run: go vet ./...
+
+      - name: Compilar y empaquetar los seis destinos
+        shell: bash
+        working-directory: cli/openjornada-terminal
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: |
+          set -euo pipefail
+          install -d -m 0755 build-release release-dist
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+            "windows arm64"
+          )
+          for target in "${targets[@]}"; do
+            read -r target_os target_arch <<< "$target"
+            suffix=""
+            if [[ "$target_os" == "windows" ]]; then
+              suffix=".exe"
+            fi
+            binary="build-release/openjornada-terminal_${target_os}_${target_arch}${suffix}"
+            CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
+              go build -trimpath -ldflags "-s -w \
+                -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.version=$RELEASE_TAG \
+                -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.commit=$RELEASE_COMMIT \
+                -X github.com/GNURub/openjornada/cli/openjornada-terminal/internal/app.buildDate=$PUBLISHED_AT" \
+                -o "$binary" ./cmd/openjornada-terminal
+            test -s "$binary"
+            python3 scripts/package_release.py \
+              --binary "$binary" \
+              --os "$target_os" \
+              --arch "$target_arch" \
+              --license ../../LICENSE \
+              --notice ../../NOTICE \
+              --third-party THIRD_PARTY_NOTICES \
+              --output release-dist
+          done
+          ./build-release/openjornada-terminal_linux_amd64 version | grep -Fx "version=$RELEASE_TAG"
+          ./build-release/openjornada-terminal_linux_amd64 version | grep -Fx "commit=$RELEASE_COMMIT"
+          ./build-release/openjornada-terminal_linux_amd64 version | grep -Fx "buildDate=$PUBLISHED_AT"
+
+      - name: Transferir paquetes al job aislado de publicación
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: openjornada-terminal-${{ github.event.release.id }}
+          path: cli/openjornada-terminal/release-dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Atestar y publicar CLI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Descargar código de la etiqueta publicada
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Comprobar commit de la release
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Descargar paquetes compilados
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: openjornada-terminal-${{ github.event.release.id }}
+          path: release-dist
+
+      - name: Completar y verificar inventario local
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cli/openjornada-terminal/scripts/checksums.py \
+            release-dist/*.tar.gz release-dist/*.zip \
+            --output release-dist/checksums.txt
+          install -m 0755 cli/openjornada-terminal/install.sh release-dist/install.sh
+          install -m 0644 cli/openjornada-terminal/install.ps1 release-dist/install.ps1
+          python3 cli/openjornada-terminal/scripts/verify_release_assets.py release-dist/*
+
+      - name: Atestar archivos verificables
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: |
+            release-dist/openjornada-terminal_*.tar.gz
+            release-dist/openjornada-terminal_*.zip
+            release-dist/checksums.txt
+
+      - name: Publicar los nueve assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" --clobber release-dist/*
+
+      - name: Verificar inventario publicado en GitHub
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --json assets --jq '
+            [.assets[]
+              | select(
+                  (.name | startswith("openjornada-terminal_"))
+                  or .name == "checksums.txt"
+                  or .name == "install.sh"
+                  or .name == "install.ps1"
+                )
+              | {name: .name, size: .size}
+            ]' > server-assets.json
+          python3 cli/openjornada-terminal/scripts/verify_release_assets.py \
+            --inventory-json server-assets.json \
+            --checksums release-dist/checksums.txt

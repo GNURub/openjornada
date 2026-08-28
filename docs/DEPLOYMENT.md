@@ -82,6 +82,49 @@ visibilidad y el acceso heredado del repositorio. Para producción fija una
 versión exacta o un digest `sha256`; no dependas de `latest` para despliegues
 reproducibles.
 
+## Publicación de la CLI del terminal
+
+El workflow
+[`publish-terminal-cli.yml`](../.github/workflows/publish-terminal-cli.yml) se
+ejecuta al publicar cualquier Release de GitHub, tanto estable como prerelease.
+Obtiene el código de la etiqueta exacta de la release, sin conservar
+credenciales de Git en el checkout, y usa la versión de Go declarada por
+`cli/openjornada-terminal/go.mod`. Antes de publicar ejecuta las pruebas, `go
+vet` y seis compilaciones con `CGO_ENABLED=0` para Linux, macOS y Windows en
+arquitecturas amd64 y arm64.
+
+Cada binario incorpora la etiqueta, el commit y la fecha de publicación de la
+release. Los paquetes son reproducibles y contienen exclusivamente el binario,
+`LICENSE`, `NOTICE` y `THIRD_PARTY_NOTICES`. La release recibe este inventario:
+
+```text
+openjornada-terminal_linux_amd64.tar.gz
+openjornada-terminal_linux_arm64.tar.gz
+openjornada-terminal_darwin_amd64.tar.gz
+openjornada-terminal_darwin_arm64.tar.gz
+openjornada-terminal_windows_amd64.zip
+openjornada-terminal_windows_arm64.zip
+checksums.txt
+install.sh
+install.ps1
+```
+
+El job de compilación sólo dispone de `contents: read` y entrega los seis
+paquetes mediante un artefacto de Actions retenido durante un día. Un job
+aislado genera el inventario SHA-256, incorpora los instaladores, verifica que
+no falte ni sobre ningún asset y crea attestaciones para los seis paquetes y
+`checksums.txt`. Sólo ese job declara `contents: write`, `attestations: write` e
+`id-token: write`. Después de subir los nueve archivos vuelve a consultar sus
+nombres y tamaños en GitHub y falla si falta alguno, está duplicado o tiene
+tamaño cero.
+
+Las prereleases reciben el mismo conjunto de assets y attestaciones, pero
+GitHub no las resuelve mediante `releases/latest`; por ello los instaladores que
+usan ese endpoint continúan apuntando a la última release estable. Si una
+publicación falla, corrige la etiqueta o el contenido y vuelve a ejecutar el
+workflow: no publiques paquetes construidos desde otra revisión ni sustituyas
+el `GITHUB_TOKEN` efímero por un token personal.
+
 ## Prueba local de un terminal RFID físico
 
 El firmware debe usar la IP LAN del ordenador que ejecuta OpenJornada, por
