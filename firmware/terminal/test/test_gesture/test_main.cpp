@@ -241,6 +241,51 @@ void test_runtime_wake_press_is_not_replayed_and_timer_wrap_is_safe() {
   TEST_ASSERT_TRUE(decision.provisioningRequested);
 }
 
+void test_factory_reset_requires_fresh_only_c_hold() {
+  MaintenanceConfirmationGesture gesture(5000, 30000);
+  TEST_ASSERT_EQUAL(
+      ConfirmationState::Waiting,
+      gesture.update({}, 1000).state);
+  TEST_ASSERT_EQUAL(
+      ConfirmationState::Counting,
+      gesture.update({false, false, true}, 2000).state);
+  TEST_ASSERT_EQUAL(
+      ConfirmationState::Confirmed,
+      gesture.update({false, false, true}, 7000).state);
+}
+
+void test_factory_reset_confirmation_cancels_on_release_or_other_button() {
+  MaintenanceConfirmationGesture released(5000, 30000);
+  released.update({}, 0);
+  released.update({false, false, true}, 100);
+  TEST_ASSERT_EQUAL(ConfirmationState::Cancelled,
+                    released.update({}, 5099).state);
+
+  MaintenanceConfirmationGesture mixed(5000, 30000);
+  mixed.update({}, 0);
+  mixed.update({false, false, true}, 100);
+  TEST_ASSERT_EQUAL(ConfirmationState::Cancelled,
+                    mixed.update({true, false, true}, 200).state);
+}
+
+void test_factory_reset_confirmation_has_exact_rollover_safe_timeout() {
+  MaintenanceConfirmationGesture timeout(5000, 30000);
+  timeout.update({}, 1000);
+  TEST_ASSERT_EQUAL(ConfirmationState::Waiting,
+                    timeout.update({}, 30999).state);
+  TEST_ASSERT_EQUAL(ConfirmationState::TimedOut,
+                    timeout.update({}, 31000).state);
+
+  MaintenanceConfirmationGesture rollover(5000, 30000);
+  constexpr uint32_t started = UINT32_MAX - 1000U;
+  rollover.update({}, started);
+  rollover.update({false, false, true}, UINT32_MAX - 500U);
+  TEST_ASSERT_EQUAL(ConfirmationState::Counting,
+                    rollover.update({false, false, true}, 4498U).state);
+  TEST_ASSERT_EQUAL(ConfirmationState::Confirmed,
+                    rollover.update({false, false, true}, 4499U).state);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_ab_requires_exactly_five_seconds);
@@ -255,6 +300,10 @@ int main(int, char**) {
   RUN_TEST(
       test_runtime_late_second_button_cannot_turn_an_emitted_action_into_recovery);
   RUN_TEST(test_runtime_wake_press_is_not_replayed_and_timer_wrap_is_safe);
+  RUN_TEST(test_factory_reset_requires_fresh_only_c_hold);
+  RUN_TEST(
+      test_factory_reset_confirmation_cancels_on_release_or_other_button);
+  RUN_TEST(test_factory_reset_confirmation_has_exact_rollover_safe_timeout);
   RUN_TEST(
       test_provisioning_cancel_requires_release_then_three_seconds_of_only_c);
   RUN_TEST(test_provisioning_cancel_is_aborted_by_another_button);

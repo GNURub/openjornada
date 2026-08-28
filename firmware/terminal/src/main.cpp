@@ -5,6 +5,7 @@
 #include <esp_sntp.h>
 #include <esp_system.h>
 #include <esp_timer.h>
+#include <driver/uart.h>
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,7 @@
 #include "openjornada/telemetry_worker.hpp"
 #include "openjornada/timezone.hpp"
 #include "openjornada/uid_gate.hpp"
+#include "openjornada/usb_maintenance.hpp"
 #include "openjornada/version.hpp"
 
 namespace {
@@ -44,6 +46,22 @@ namespace {
 using namespace openjornada;
 
 constexpr std::time_t kEarliestTrustedTime = 1704067200;
+
+class ArduinoUsbMaintenanceTransport final : public UsbMaintenanceTransport {
+ public:
+  int available() override { return Serial.available(); }
+  int read() override { return Serial.read(); }
+  size_t availableForWrite() override {
+    const int available = Serial.availableForWrite();
+    return available > 0 ? static_cast<size_t>(available) : 0U;
+  }
+  size_t write(const uint8_t* data, size_t size) override {
+    return Serial.write(data, size);
+  }
+  bool flush(uint32_t maxWaitMs) override {
+    return uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(maxWaitMs)) == ESP_OK;
+  }
+};
 
 Hardware hardware;
 UidGate uidGate{300};
@@ -54,6 +72,8 @@ CacheStore cacheStore;
 ScreenRenderer renderer;
 DisplayPowerPolicy displayPower{0};
 RuntimeProvisioningGesture runtimeProvisioningGesture;
+ArduinoUsbMaintenanceTransport usbMaintenanceTransport;
+UsbMaintenanceService usbMaintenance{usbMaintenanceTransport};
 std::unique_ptr<Esp32ApiClient> apiClient;
 std::unique_ptr<NetworkWorker> networkWorker;
 std::unique_ptr<Esp32ApiClient> telemetryApiClient;
@@ -86,6 +106,8 @@ uint32_t otaRebootAtMs = 0;
 FirmwareUpdateStatus lastDrawnOtaStatus = FirmwareUpdateStatus::Idle;
 bool otaCandidateNeedsBootValidation = false;
 bool otaInstallQueued = false;
+bool usbStorageAvailable = false;
+bool usbRfidAvailable = false;
 
 enum class BootChoice { Normal, Provisioning, FactoryReset };
 enum class ProvisioningOutcome { Saved, Cancelled, Failed };
@@ -207,7 +229,7 @@ bool initializeFirstUseStorage(CacheStore& cacheStore) {
 }
 
 bool performFactoryReset(ConfigStore& configStore, CacheStore& cacheStore) {
-  // The 10 s + 5 s physical gesture is the explicit destructive confirmation.
+  // The caller has already completed the explicit physical confirmation.
   if (!cacheStore.formatAndInitialize()) return false;
   if (!cacheStore.clear()) return false;
   // Clear the API key last. If storage preparation fails, the credentials stay
@@ -429,6 +451,131 @@ size_t currentPendingCountForRecovery() {
   return pendingCount;
 }
 
+size_t currentUsbPendingCount() {
+  return app != nullptr ? app->screen().pendingCount : pendingCountForRecovery;
+}
+
+UsbTerminalMode currentUsbMode() {
+  if (usbMaintenance.awaitingPhysicalConfirmation()) {
+    return UsbTerminalMode::AwaitPhysicalConfirmation;
+  }
+  if (terminalBlocked) return UsbTerminalMode::Blocked;
+  const bool otaBusy = otaWorker != nullptr && otaWorker->busy();
+  const FirmwareUpdateStatus otaStatus =
+      otaBusy ? otaWorker->status() : FirmwareUpdateStatus::Idle;
+  if (otaInstallQueued ||
+      (otaBusy &&
+       (otaStatus == FirmwareUpdateStatus::Downloading ||
+        otaStatus == FirmwareUpdateStatus::Verifying ||
+        otaStatus == FirmwareUpdateStatus::PendingReboot))) {
+    return UsbTerminalMode::Updating;
+  }
+  return app != nullptr ? UsbTerminalMode::Ready : UsbTerminalMode::Booting;
+}
+
+void restoreScreenAfterUsbMaintenance() {
+  lastRecoveryCountdown = UINT8_MAX;
+  if (!terminalBlocked && app != nullptr) {
+    renderer.invalidate();
+    renderer.render(app->screen(), std::time(nullptr));
+  } else if (blockedScreen.has_value()) {
+    drawProvisioningStatus(blockedScreen->title, blockedScreen->detail,
+                           blockedScreen->error);
+  }
+}
+
+bool performRuntimeFactoryReset() {
+  // Stop every owner of network or persistent runtime state before formatting
+  // LittleFS. The maintenance service has already suppressed attendance input.
+  app.reset();
+  otaWorker.reset();
+  telemetryWorker.reset();
+  telemetryApiClient.reset();
+  networkWorker.reset();
+  apiClient.reset();
+  outboxStorage.end();
+  const bool reset = performFactoryReset(configStore, cacheStore);
+  showFactoryResetResult(reset);
+  if (!reset) {
+    enterBlockedState(
+        "No se pudo borrar",
+        "Los datos no se borraron por completo. Reinicia y repite.", true);
+  }
+  return reset;
+}
+
+void drainCompletedWorkersForUsbReset() {
+  if (networkWorker != nullptr) {
+    NetworkResult result;
+    while (networkWorker->poll(result)) result = {};
+  }
+  if (telemetryWorker != nullptr) {
+    TelemetryResult result;
+    while (telemetryWorker->poll(result)) result = {};
+  }
+  if (otaWorker != nullptr) {
+    OtaResult result;
+    while (otaWorker->poll(result)) result = {};
+  }
+}
+
+UsbMaintenanceContext currentUsbMaintenanceContext(BootButtons buttons) {
+  UsbMaintenanceContext context;
+  context.status = {"m5stack-basic-core-v27",
+                    std::string(kTerminalFirmwareVersion),
+                    kTerminalProtocolVersion,
+                    currentUsbMode(),
+                    deviceConfig.has_value(),
+                    WiFi.status() == WL_CONNECTED,
+                    currentUsbPendingCount()};
+  context.buttons = buttons;
+  context.nowMs = millis();
+  context.storageAvailable = usbStorageAvailable;
+  context.rfidAvailable = usbRfidAvailable;
+  context.runtimeIdle =
+      (networkWorker == nullptr || !networkWorker->busy()) &&
+      (telemetryWorker == nullptr || !telemetryWorker->busy()) &&
+      (otaWorker == nullptr || !otaWorker->busy());
+  context.showFactoryResetWarning = drawFactoryConfirmation;
+  context.restoreScreen = restoreScreenAfterUsbMaintenance;
+  context.reboot = [] { ESP.restart(); };
+  return context;
+}
+
+void recordUsbRuntimeChanges(const UsbPublicStatus& status) {
+  static bool initialized = false;
+  static UsbTerminalMode previousMode = UsbTerminalMode::Booting;
+  static bool previousWifi = false;
+  static size_t previousPending = 0;
+  if ((!initialized || status.mode != previousMode) &&
+      (status.mode == UsbTerminalMode::Ready ||
+       status.mode == UsbTerminalMode::Blocked)) {
+    usbMaintenance.recordLog(
+        status.mode == UsbTerminalMode::Ready ? UsbLogCode::TerminalReady
+                                              : UsbLogCode::TerminalBlocked,
+        millis());
+  }
+  if (initialized && status.wifiConnected != previousWifi) {
+    usbMaintenance.recordLog(status.wifiConnected
+                                 ? UsbLogCode::NetworkConnected
+                                 : UsbLogCode::NetworkDisconnected,
+                             millis());
+  }
+  if (initialized && status.pendingCount != previousPending) {
+    usbMaintenance.recordLog(UsbLogCode::PendingActionsChanged, millis());
+  }
+  if (!initialized && !usbStorageAvailable) {
+    usbMaintenance.recordLog(UsbLogCode::StorageUnavailable, millis());
+  }
+  if (!initialized && !usbRfidAvailable) {
+    usbMaintenance.recordLog(UsbLogCode::RfidUnavailable, millis());
+  }
+  initialized = true;
+  previousMode = status.mode;
+  previousWifi = status.wifiConnected;
+  previousPending = status.pendingCount;
+}
+
 [[noreturn]] void enterRuntimeProvisioning() {
   const size_t pendingCount = currentPendingCountForRecovery();
   drawProvisioningStatus(
@@ -525,6 +672,8 @@ void setup() {
       storageMounted, beginResult, pendingResult, pendingCount);
   pendingCount = outboxReadiness.pendingForSafety;
   pendingCountForRecovery = pendingCount;
+  usbStorageAvailable = outboxReadiness.operational;
+  usbRfidAvailable = rfidReady;
 
   const BootChoice choice = detectBootChoice(pendingCount);
   if (otaCandidateNeedsBootValidation &&
@@ -559,6 +708,7 @@ void setup() {
         storageMounted, beginResult, pendingResult, pendingCount);
     pendingCount = outboxReadiness.pendingForSafety;
     pendingCountForRecovery = pendingCount;
+    usbStorageAvailable = outboxReadiness.operational;
   }
 
   if (choice == BootChoice::Provisioning || !deviceConfig.has_value()) {
@@ -710,6 +860,26 @@ void setup() {
 void loop() {
   constexpr std::array<Button, 3> kButtons{Button::A, Button::B, Button::C};
   hardware.update();
+  const UsbMaintenanceContext usbContext =
+      currentUsbMaintenanceContext(currentBootButtons());
+  const UsbMaintenanceDecision maintenance = usbMaintenance.tick(usbContext);
+  if (usbMaintenance.factoryResetConfirmed() &&
+      !maintenance.performFactoryReset) {
+    // Worker busy flags are released by poll(). Once physical confirmation is
+    // irreversible, discard completed results so active bounded jobs can drain
+    // without resuming attendance or scheduling more work.
+    drainCompletedWorkersForUsbReset();
+  }
+  if (maintenance.performFactoryReset) {
+    const bool reset = performRuntimeFactoryReset();
+    usbMaintenance.completeFactoryReset(reset, millis());
+  }
+  recordUsbRuntimeChanges(usbContext.status);
+  if (maintenance.suppressAttendanceInput) {
+    acceleratedHoldSent.fill(false);
+    delay(20);
+    return;
+  }
   std::array<bool, 3> pressed{};
   std::array<bool, 3> down{};
   for (size_t index = 0; index < kButtons.size(); ++index) {

@@ -252,4 +252,48 @@ ProvisioningCancelDecision ProvisioningCancelGesture::update(
   return decision;
 }
 
+MaintenanceConfirmationDecision MaintenanceConfirmationGesture::update(
+    BootButtons buttons, uint32_t nowMs) {
+  const bool anyDown = buttons.a || buttons.b || buttons.c;
+  const bool exactC = onlyC(buttons);
+
+  if (state_ == State::Done) return {terminalState_, 0};
+  if (state_ == State::AwaitFirstUpdate) {
+    requestedAtMs_ = nowMs;
+    state_ = anyDown ? State::AwaitRelease : State::Ready;
+    return {ConfirmationState::Waiting, 0};
+  }
+  if (nowMs - requestedAtMs_ >= timeoutMs_) {
+    return terminal(ConfirmationState::TimedOut);
+  }
+  if (state_ == State::AwaitRelease) {
+    if (!anyDown) state_ = State::Ready;
+    return {ConfirmationState::Waiting, 0};
+  }
+  if (state_ == State::Ready) {
+    if (!anyDown) return {ConfirmationState::Waiting, 0};
+    if (!exactC) return terminal(ConfirmationState::Cancelled);
+    state_ = State::HoldingC;
+    holdStartedMs_ = nowMs;
+  } else if (!exactC) {
+    return terminal(ConfirmationState::Cancelled);
+  }
+
+  const uint32_t elapsed = nowMs - holdStartedMs_;
+  if (elapsed >= holdMs_) return terminal(ConfirmationState::Confirmed);
+  return {ConfirmationState::Counting,
+          static_cast<uint8_t>((holdMs_ - elapsed + 999U) / 1000U)};
+}
+
+MaintenanceConfirmationDecision MaintenanceConfirmationGesture::cancel() {
+  return terminal(ConfirmationState::Cancelled);
+}
+
+MaintenanceConfirmationDecision MaintenanceConfirmationGesture::terminal(
+    ConfirmationState state) {
+  state_ = State::Done;
+  terminalState_ = state;
+  return {state, 0};
+}
+
 }  // namespace openjornada

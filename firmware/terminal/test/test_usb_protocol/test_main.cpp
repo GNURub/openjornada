@@ -10,6 +10,7 @@
 #include "openjornada/ojp.hpp"
 #include "openjornada/provisioning.hpp"
 #include "openjornada/usb_protocol.hpp"
+#include "openjornada/usb_maintenance.hpp"
 
 using namespace openjornada;
 
@@ -93,6 +94,54 @@ class FakeProvisioningSerialTransport final
   size_t cursor_ = 0;
   std::string output_;
 };
+
+class FakeMaintenanceTransport final : public UsbMaintenanceTransport {
+ public:
+  void append(std::string_view bytes) { input_.append(bytes); }
+  int available() override {
+    return cursor_ < input_.size() ? static_cast<int>(input_.size() - cursor_)
+                                   : 0;
+  }
+  int read() override {
+    if (cursor_ >= input_.size()) return -1;
+    return static_cast<uint8_t>(input_[cursor_++]);
+  }
+  size_t availableForWrite() override { return writeAvailable; }
+  size_t write(const uint8_t* data, size_t size) override {
+    if (zeroWrites != 0) {
+      --zeroWrites;
+      return 0;
+    }
+    const size_t written = std::min(size, maxWriteSize);
+    output_.append(reinterpret_cast<const char*>(data), written);
+    return written;
+  }
+  bool flush(uint32_t maxWaitMs) override {
+    flushBudgetMs = maxWaitMs;
+    return true;
+  }
+  const std::string& output() const { return output_; }
+
+  uint32_t flushBudgetMs = 0;
+  size_t writeAvailable = 4096;
+  size_t maxWriteSize = 4096;
+  unsigned zeroWrites = 0;
+
+ private:
+  std::string input_;
+  size_t cursor_ = 0;
+  std::string output_;
+};
+
+UsbMaintenanceContext maintenanceContext(uint32_t nowMs = 1000) {
+  UsbMaintenanceContext context;
+  context.status = {"m5stack-basic-core-v27", "1.2.0", 1,
+                    UsbTerminalMode::Ready, true, true, 3};
+  context.nowMs = nowMs;
+  context.storageAvailable = true;
+  context.rfidAvailable = true;
+  return context;
+}
 
 std::string controlLine(std::string_view command,
                         std::string_view payload = "{}") {
@@ -404,6 +453,222 @@ void test_firmware_frame_reset_recovers_with_explicit_offset() {
   parser.consume(valid.data(), valid.size());
   TEST_ASSERT_EQUAL(UsbFrameParseStatus::Complete, parser.status());
   TEST_ASSERT_EQUAL_UINT32(7, parser.frame().offset);
+}
+
+void test_usb_maintenance_status_and_doctor_are_public_and_bounded() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  transport.append(controlLine("hello") + controlLine("status") +
+                   controlLine("doctor"));
+  service.tick(context);
+
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"board\":\"m5stack-basic-core-v27\""));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"pendingCount\":3"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"storageAvailable\":true"));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("192.168."));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("password"));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("terminalToken"));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("uid"));
+}
+
+void test_usb_maintenance_logs_accept_only_fixed_codes() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  transport.append(controlLine("logs_subscribe"));
+  service.tick(context);
+  service.recordLog(UsbLogCode::NetworkConnected, 1200);
+  context.nowMs = 1200;
+  service.tick(context);
+
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"network_connected\""));
+  TEST_ASSERT_EQUAL(std::string::npos, transport.output().find("192.168."));
+}
+
+void test_usb_maintenance_reboot_responds_and_flushes_at_most_250_ms() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  bool rebooted = false;
+  context.reboot = [&] { rebooted = true; };
+  transport.append(controlLine("reboot"));
+  service.tick(context);
+
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"rebooting\""));
+  TEST_ASSERT_TRUE(rebooted);
+  TEST_ASSERT_EQUAL_UINT32(250, transport.flushBudgetMs);
+}
+
+void test_usb_factory_reset_suppresses_input_and_calls_reset_only_after_hold() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  size_t warningPending = 0;
+  unsigned resets = 0;
+  context.showFactoryResetWarning = [&](size_t pending) {
+    warningPending = pending;
+  };
+  transport.append(controlLine("factory_reset"));
+  auto decision = service.tick(context);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  TEST_ASSERT_EQUAL_UINT32(3, warningPending);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"pendingCount\":3"));
+  TEST_ASSERT_EQUAL_UINT32(0, resets);
+
+  context.nowMs = 1100;
+  context.buttons = {};
+  service.tick(context);
+  context.nowMs = 1200;
+  context.buttons = {false, false, true};
+  service.tick(context);
+  context.nowMs = 6199;
+  decision = service.tick(context);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  TEST_ASSERT_EQUAL_UINT32(0, resets);
+  context.nowMs = 6200;
+  decision = service.tick(context);
+  if (decision.performFactoryReset) ++resets;
+  TEST_ASSERT_EQUAL_UINT32(1, resets);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  service.completeFactoryReset(false, context.nowMs);
+  context.nowMs = 6220;
+  TEST_ASSERT_FALSE(service.tick(context).suppressAttendanceInput);
+}
+
+void test_usb_factory_reset_response_reports_zero_pending_actions() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  context.status.pendingCount = 0;
+  transport.append(controlLine("factory_reset"));
+  service.tick(context);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"pendingCount\":0"));
+}
+
+void test_usb_mutations_allow_blocked_recovery_but_deny_updating_mode() {
+  FakeMaintenanceTransport blockedTransport;
+  UsbMaintenanceService blocked(blockedTransport);
+  auto blockedContext = maintenanceContext();
+  blockedContext.status.mode = UsbTerminalMode::Blocked;
+  bool rebooted = false;
+  blockedContext.reboot = [&] { rebooted = true; };
+  blockedTransport.append(controlLine("reboot"));
+  blocked.tick(blockedContext);
+  TEST_ASSERT_TRUE(rebooted);
+
+  FakeMaintenanceTransport updatingTransport;
+  UsbMaintenanceService updating(updatingTransport);
+  auto updatingContext = maintenanceContext();
+  updatingContext.status.mode = UsbTerminalMode::Updating;
+  updatingTransport.append(controlLine("factory_reset"));
+  const auto decision = updating.tick(updatingContext);
+  TEST_ASSERT_FALSE(decision.suppressAttendanceInput);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        updatingTransport.output().find("\"code\":\"mode_denied\""));
+}
+
+void test_usb_reboot_retries_partial_and_zero_writes_until_250_ms_deadline() {
+  FakeMaintenanceTransport transport;
+  transport.writeAvailable = 16;
+  transport.maxWriteSize = 7;
+  transport.zeroWrites = 1;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  bool rebooted = false;
+  context.reboot = [&] { rebooted = true; };
+  transport.append(controlLine("reboot"));
+  auto decision = service.tick(context);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  TEST_ASSERT_FALSE(rebooted);
+
+  for (uint32_t nowMs = 1020; nowMs <= 1250 && !rebooted; nowMs += 20) {
+    context.nowMs = nowMs;
+    service.tick(context);
+  }
+  TEST_ASSERT_TRUE(rebooted);
+  TEST_ASSERT_TRUE(transport.flushBudgetMs <= 250);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"rebooting\""));
+}
+
+void test_usb_reboot_deadline_is_total_when_transport_stays_full() {
+  FakeMaintenanceTransport transport;
+  transport.writeAvailable = 0;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  bool rebooted = false;
+  context.reboot = [&] { rebooted = true; };
+  transport.append(controlLine("reboot"));
+  service.tick(context);
+  TEST_ASSERT_FALSE(rebooted);
+  context.nowMs = 1249;
+  service.tick(context);
+  TEST_ASSERT_FALSE(rebooted);
+  context.nowMs = 1250;
+  service.tick(context);
+  TEST_ASSERT_TRUE(rebooted);
+  TEST_ASSERT_EQUAL_UINT32(0, transport.flushBudgetMs);
+}
+
+void test_usb_factory_reset_waits_cooperatively_for_runtime_idle() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  context.runtimeIdle = false;
+  unsigned resets = 0;
+  transport.append(controlLine("factory_reset"));
+  service.tick(context);
+  context.nowMs = 1100;
+  context.buttons = {};
+  service.tick(context);
+  context.nowMs = 1200;
+  context.buttons = {false, false, true};
+  service.tick(context);
+  context.nowMs = 6200;
+  auto decision = service.tick(context);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  TEST_ASSERT_EQUAL_UINT32(0, resets);
+  transport.append(controlLine("cancel"));
+  context.nowMs = 6210;
+  decision = service.tick(context);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos,
+                        transport.output().find("\"code\":\"already_confirmed\""));
+  context.runtimeIdle = true;
+  context.nowMs = 6220;
+  decision = service.tick(context);
+  if (decision.performFactoryReset) ++resets;
+  TEST_ASSERT_EQUAL_UINT32(1, resets);
+  TEST_ASSERT_TRUE(decision.suppressAttendanceInput);
+  service.completeFactoryReset(false, context.nowMs);
+}
+
+void test_usb_factory_reset_cancel_never_calls_reset() {
+  FakeMaintenanceTransport transport;
+  UsbMaintenanceService service(transport);
+  auto context = maintenanceContext();
+  unsigned resets = 0;
+  unsigned restores = 0;
+  context.restoreScreen = [&] { ++restores; };
+  transport.append(controlLine("factory_reset"));
+  service.tick(context);
+  context.nowMs = 1100;
+  context.buttons = {};
+  service.tick(context);
+  transport.append(controlLine("cancel"));
+  context.nowMs = 1200;
+  const auto decision = service.tick(context);
+  TEST_ASSERT_EQUAL_UINT32(0, resets);
+  TEST_ASSERT_EQUAL_UINT32(1, restores);
+  TEST_ASSERT_FALSE(decision.suppressAttendanceInput);
 }
 
 void test_ojp_accepts_all_supported_wrappers() {
@@ -723,6 +988,20 @@ int main(int, char**) {
       test_firmware_frame_backpressure_preserves_many_concatenated_frames);
   RUN_TEST(test_firmware_frame_rejects_header_crc_and_repeated_offset);
   RUN_TEST(test_firmware_frame_reset_recovers_with_explicit_offset);
+  RUN_TEST(test_usb_maintenance_status_and_doctor_are_public_and_bounded);
+  RUN_TEST(test_usb_maintenance_logs_accept_only_fixed_codes);
+  RUN_TEST(
+      test_usb_maintenance_reboot_responds_and_flushes_at_most_250_ms);
+  RUN_TEST(
+      test_usb_reboot_retries_partial_and_zero_writes_until_250_ms_deadline);
+  RUN_TEST(test_usb_reboot_deadline_is_total_when_transport_stays_full);
+  RUN_TEST(
+      test_usb_factory_reset_suppresses_input_and_calls_reset_only_after_hold);
+  RUN_TEST(test_usb_factory_reset_response_reports_zero_pending_actions);
+  RUN_TEST(
+      test_usb_mutations_allow_blocked_recovery_but_deny_updating_mode);
+  RUN_TEST(test_usb_factory_reset_cancel_never_calls_reset);
+  RUN_TEST(test_usb_factory_reset_waits_cooperatively_for_runtime_idle);
   RUN_TEST(test_ojp_accepts_all_supported_wrappers);
   RUN_TEST(test_usb_provision_starts_the_existing_attempt_once);
   RUN_TEST(test_usb_provision_service_is_fragmented_and_cooperative);

@@ -103,4 +103,41 @@ class ProvisioningCancelGesture {
   uint32_t holdStartedMs_ = 0;
 };
 
+enum class ConfirmationState {
+  Waiting,
+  Counting,
+  Confirmed,
+  Cancelled,
+  TimedOut,
+};
+
+struct MaintenanceConfirmationDecision {
+  ConfirmationState state = ConfirmationState::Waiting;
+  uint8_t secondsRemaining = 0;
+};
+
+// Requires a release after the remote request followed by one uninterrupted
+// hold of C. Unsigned elapsed-time arithmetic keeps both deadlines safe across
+// millis() rollover.
+class MaintenanceConfirmationGesture {
+ public:
+  MaintenanceConfirmationGesture(uint32_t holdMs, uint32_t timeoutMs)
+      : holdMs_(holdMs), timeoutMs_(timeoutMs) {}
+
+  MaintenanceConfirmationDecision update(BootButtons buttons, uint32_t nowMs);
+  MaintenanceConfirmationDecision cancel();
+
+ private:
+  enum class State { AwaitFirstUpdate, AwaitRelease, Ready, HoldingC, Done };
+
+  MaintenanceConfirmationDecision terminal(ConfirmationState state);
+
+  uint32_t holdMs_;
+  uint32_t timeoutMs_;
+  State state_ = State::AwaitFirstUpdate;
+  ConfirmationState terminalState_ = ConfirmationState::Waiting;
+  uint32_t requestedAtMs_ = 0;
+  uint32_t holdStartedMs_ = 0;
+};
+
 }  // namespace openjornada
