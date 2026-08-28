@@ -32,16 +32,30 @@ generan bucles de redirección.
 El gesto A+B mantenido cinco segundos abre ese portal desde cualquier estado
 del terminal, también durante los reintentos de conexión. La cuenta atrás se
 cancela al soltar, no genera acciones de jornada y conserva credenciales,
-caché y cola local. El borrado completo sigue requiriendo el gesto físico
-separado A+B+C del arranque y su confirmación con C.
+caché y cola local. El borrado completo requiere el gesto físico separado
+A+B+C del arranque o una solicitud USB `factory-reset`; ambas rutas exigen
+después mantener sólo C durante cinco segundos y muestran antes los pendientes.
 
 Las actualizaciones normales por USB conservan la configuración validada del
 terminal en NVS y la cola/caché en LittleFS sin reducir la geometría publicada
 de esas particiones. La primera carga del layout A/B escribe `ota_0` y sitúa
 `otadata` en `0x3f0000`; las posteriores alternan entre `ota_0` y `ota_1`.
-La compilación comprueba la tabla y las direcciones efectivas de carga; sólo el gesto de
-restablecimiento confirmado o un borrado completo explícito de la flash
-eliminan las credenciales guardadas.
+La compilación comprueba la tabla y las direcciones efectivas de carga; sólo un
+restablecimiento confirmado, iniciado con botones o por USB, o un borrado
+completo explícito de la flash eliminan las credenciales guardadas.
+
+El firmware implementa `OJUSB/1` para handshake, estado, diagnóstico, eventos
+saneados, aprovisionamiento, reinicio, reset físico e instalación en el slot
+OTA inactivo. Publica los modos `booting`, `ready`, `blocked`, `provisioning`,
+`updating` y `await_physical_confirmation` sin revelar SSID, credenciales, UID,
+IP, OJP ni bytes de firmware. Las releases oficiales necesitan firma Ed25519;
+un build personalizado debe declarar metadatos compatibles de OpenJornada y
+requiere mantener sólo C cinco segundos. El reset usa la misma presencia física
+y ambas confirmaciones caducan a los 30 segundos. Toda instalación se niega con
+fichajes pendientes, valida placa, protocolo, SemVer, tamaño y SHA-256, y
+conserva el slot vigente ante cancelación, desconexión o cinco segundos sin
+progreso. Una placa que no arranque queda fuera del protocolo y se recupera con
+PlatformIO/esptool bajo un procedimiento técnico controlado.
 
 La asignación local de tags conserva la lista para enlazar varias tarjetas
 seguidas y muestra `A+C durante 3 s` como salida explícita en todas sus

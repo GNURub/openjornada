@@ -23,7 +23,8 @@ usar los comandos siguientes:
 
 ```bash
 cd firmware/terminal
-python3 -m unittest scripts/test_validate_partitions.py
+python3 -m unittest scripts/test_validate_partitions.py scripts/test_release_firmware.py
+uv tool run --from platformio==6.1.19 platformio test -e native -f test_usb_protocol
 uv tool run --from platformio==6.1.19 platformio test -e native
 uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev
 uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
@@ -51,9 +52,9 @@ Release estable.
 La carga USB conserva NVS y LittleFS, escribe la aplicación en `ota_0` y
 reubica el inicializador `boot_app0.bin` a la partición `otadata` de `0x3f0000`,
 evitando su offset predeterminado `0xe000`, que solaparía NVS. El firmware nunca
-puede superar el 85 % de cada slot de `0x1f0000`. Sólo el restablecimiento
-físico A+B+C —o un borrado completo solicitado expresamente— elimina las
-credenciales, la caché y la cola.
+puede superar el 85 % de cada slot de `0x1f0000`. Sólo un restablecimiento con
+confirmación física —iniciado con A+B+C o mediante `factory-reset` USB— o un
+borrado completo solicitado expresamente elimina credenciales, caché y cola.
 
 ## Actualizaciones OTA
 
@@ -86,6 +87,149 @@ La clave privada de pruebas no debe entrar en Git. La privada de producción se
 guarda exclusivamente como secreto `FIRMWARE_SIGNING_PRIVATE_KEY_B64` de
 GitHub Actions. Cada release estable contiene binario, manifiesto, firma y
 licencias. USB sigue siendo siempre el mecanismo de recuperación.
+
+## Mantenimiento por USB (`OJUSB/1`)
+
+El firmware atiende por el mismo puerto serie un protocolo de mantenimiento
+acotado. La CLI prevista se llama `openjornada-terminal` y expone estos comandos
+sin requerir Python ni PlatformIO en el equipo operador:
+
+```text
+openjornada-terminal ports
+openjornada-terminal status [--port PORT]
+openjornada-terminal doctor [--port PORT]
+openjornada-terminal logs [--port PORT] --follow
+openjornada-terminal provision [--port PORT]
+openjornada-terminal provision [--port PORT] --ojp-stdin
+openjornada-terminal reboot [--port PORT]
+openjornada-terminal factory-reset [--port PORT]
+openjornada-terminal firmware check [--port PORT]
+openjornada-terminal firmware update [--port PORT]
+openjornada-terminal firmware install ARCHIVO.bin [--port PORT]
+openjornada-terminal version
+openjornada-terminal self-update
+openjornada-terminal completion bash|zsh|fish|powershell
+```
+
+`--port auto` es el valor predeterminado y sólo continúa cuando el handshake
+identifica un único terminal compatible. `status` y `doctor` son de lectura y
+no alteran pantalla ni sonido. `logs --follow` sólo recibe códigos estructurados
+saneados. El protocolo define los modos `booting`, `ready`, `blocked`,
+`provisioning`, `updating` y `await_physical_confirmation`. Durante el portal el
+adaptador serie restringido sólo procesa `provision`; el modo se comprueba en la
+pantalla y `status` vuelve a estar disponible después del reinicio al runtime.
+
+El valor OJP se pega mediante entrada interactiva sin eco o `--ojp-stdin`.
+Deliberadamente no existe `--ojp VALOR`: los argumentos pueden quedar en el
+historial y en el listado de procesos. El terminal sólo acepta `provision` en
+modo `provisioning`; para entrar desde una configuración existente, mantén A+B
+cinco segundos. Se reutilizan la validación Wi-Fi, `bootstrap` y persistencia
+del portal, y un cambio de API key se rechaza mientras haya fichajes pendientes.
+
+Limitación conocida: el adaptador del portal todavía no atiende `hello`, pero la
+CLI prevista exige ese handshake incluso con un puerto explícito. Por tanto, el
+aprovisionamiento mediante `openjornada-terminal provision` no supera aún la
+aceptación física. No se debe presentar como operativo hasta corregir el
+firmware. Una placa nueva o un terminal que ya esté en el portal deben usar la
+puesta en servicio web descrita abajo.
+
+Las mutaciones aplican estas barreras:
+
+- `reboot` responde antes de reiniciar y no borra datos.
+- `factory-reset` muestra el recuento de pendientes y exige soltar todos los
+  botones y mantener **sólo C durante cinco segundos**. Otro botón, soltar C o
+  agotar 30 segundos cancela. Si se confirma, borra configuración, caché, tags y
+  outbox; no es reversible y no debe confundirse con un reinicio.
+- `firmware update` sólo acepta una release oficial cuya firma Ed25519,
+  manifiesto, placa, protocolo, SemVer, tamaño y SHA-256 validen tanto la CLI
+  como el terminal. Una firma oficial válida evita la confirmación física.
+- `firmware install` exige una compilación compatible de OpenJornada con un
+  único bloque `OJFW_META_V1`, placa `m5stack-basic-core-v27`, protocolo 1 y una
+  versión SemVer. Antes de recibir el binario exige mantener **sólo C durante
+  cinco segundos**, también con caducidad de 30 segundos. Un binario que no
+  implemente la autocomprobación y rollback de OpenJornada no es compatible.
+- Toda instalación se rechaza con el código `pending_actions` si existe al menos
+  un fichaje pendiente, y también se rechaza si hay una acción, sesión
+  administrativa o actualización incompatible en curso. Nunca fuerces la
+  actualización borrando la cola: sincronízala y resuelve antes sus incidencias.
+
+`OJUSB/1` empieza a 115200 baudios. La transferencia de firmware negocia 460800
+y vuelve a 115200 si la reapertura falla. Las líneas de control admiten como
+máximo 4096 bytes, incluido prefijo y salto de línea; cada frame lleva hasta
+2048 bytes y CRC-32 IEEE. Un CRC inválido permite reintentar el mismo frame como
+máximo tres veces; un offset inesperado aborta inmediatamente. Agotar esos
+reintentos, desconectar o pasar cinco segundos sin progreso aborta el slot
+inactivo.
+Las respuestas no reflejan OJP, contraseñas, API keys, UIDs, IP ni bytes del
+firmware; esos datos tampoco deben copiarse a tickets o informes de aceptación.
+
+### Recuperación cuando no hay handshake
+
+La CLI no flashea bootloader ni tabla de particiones. Si el firmware no arranca
+o no responde a `ports`/`doctor`, usa una placa bajo custodia y recupera el build
+completo con el PlatformIO fijado por el proyecto:
+
+```bash
+cd firmware/terminal
+PORT=/dev/serial/by-id/usb-dispositivo-de-laboratorio
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_release \
+  --target upload --upload-port "$PORT"
+```
+
+PlatformIO invoca `esptool` con la tabla y offsets comprobados por
+`validate_partitions.py`. Si ni siquiera puede abrir el cargador ROM, `esptool`
+sólo debe usarse siguiendo el procedimiento del fabricante para diagnosticar
+puerto, cable y modo de descarga. No improvises offsets ni ejecutes
+`erase_flash`: un borrado completo destruye NVS, LittleFS, credenciales, caché y
+fichajes pendientes. La recuperación directa queda fuera de `OJUSB/1`.
+
+### Lista física reproducible no destructiva
+
+Ejecuta esta aceptación sobre una placa de laboratorio, un backend demo aislado
+y una credencial exclusiva. No confirma ningún reset ni escribe un slot OTA:
+
+1. Anota fecha, sistema operativo, ruta estable del puerto, versión esperada y
+   sólo el resultado `PASS`/`FAIL` con códigos de error acotados. No anotes OJP,
+   SSID, API key, UID, IP ni salida serie sin sanear.
+2. Ejecuta `ports`, `status`, `doctor` y `logs --follow`. Comprueba handshake,
+   placa/protocolo, diagnósticos y que los eventos no contienen secretos.
+3. Marca la prueba CLI de `provision --ojp-stdin` como `BLOQUEADA`: dentro del
+   portal USB admite `provision`, pero no `hello`, y la CLI exige primero el
+   handshake. No inventes un bypass ni registres el OJP. Verifica por separado
+   que A+B abre el portal y completa el aprovisionamiento web con credenciales
+   demo; tras el reinicio, `status` debe volver a mostrar `ready` y configuración
+   presente. Repite sólo en un dispositivo cuya configuración pueda cambiar.
+4. Ejecuta `factory-reset`, suelta los botones y no mantengas C. Cancela desde
+   la CLI o espera 30 segundos; espera `physical_confirmation_cancelled` o
+   `physical_confirmation_timeout` y comprueba con `status` que configuración y
+   `pendingCount` no cambiaron.
+5. Ejecuta `firmware install ARCHIVO-COMPATIBLE.bin` con la misma versión de
+   laboratorio y cancela antes de mantener C. Comprueba que no comenzó la
+   transferencia, que la versión sigue igual y que el modo vuelve al anterior.
+6. Para probar el rechazo oficial, prepara el terminal con una release oficial
+   anterior que ya implemente `OJUSB/1` y tenga otra estable firmada más nueva.
+   En la organización demo crea una
+   persona, un tag y una credencial exclusivos de prueba; no anotes su UID ni
+   secretos. Conecta, espera a `bootstrap` y NTP y no cortes la red hasta que
+   termine **Actualizando credenciales locales…** y vuelva la pantalla inactiva.
+   Corta entonces sólo la red del banco, presenta una vez el tag y confirma en
+   pantalla una acción offline sintética;
+   comprueba con `status` que `pendingCount` vale 1. Ejecuta `firmware update`: debe
+   responder `pending_actions` antes de transferir bytes. Restaura la red y deja
+   que esa acción demo se sincronice. Si no existe una release oficial más nueva
+   que la instalada, registra este paso como `NO EJECUTADO`, no simules una firma
+   ni fuerces una OTA; la política oficial queda cubierta en native por
+   `test_usb_firmware_install_policy_fails_closed` y el servicio por
+   `test_usb_firmware_begin_rejects_pending_busy_and_unproved_official`.
+7. Ejecuta `reboot` y repite `status` y `doctor`; la configuración y el recuento
+   de pendientes deben conservarse.
+
+La actualización oficial real, la escritura de un firmware personalizado, la
+interrupción durante transferencia, la comprobación de rollback y el
+restablecimiento confirmado son pruebas destructivas o de cambio de slot. Sólo
+se ejecutan en una placa sacrificable, con copia restaurable y autorización
+separada; no forman parte de esta lista rutinaria.
 
 ## Puesta en servicio
 
@@ -193,7 +337,8 @@ la petición de comprobación en curso.
   Wi-Fi y dejar vacíos los secretos que no cambien.
 - A+B+C durante diez segundos, soltar y mantener sólo C cinco segundos ejecuta
   el restablecimiento completo tras mostrar el número de pendientes. Es la
-  única operación local que elimina configuración, caché y cola.
+  única operación iniciada sólo con botones que elimina configuración, caché y
+  cola; `factory-reset` USB exige la misma confirmación final con C.
 
 Tras cada reinicio se exige una sincronización NTP nueva antes de crear
 fichajes offline. La confianza caduca a las 24 horas. Los registros ya

@@ -74,6 +74,7 @@ jobs:
       - name: Probar dominio del firmware
         run: |
           python3 -m unittest scripts/test_validate_partitions.py scripts/test_release_firmware.py
+          uv tool run --from platformio==6.1.19 platformio test -e native -f test_usb_protocol
           uv tool run --from platformio==6.1.19 platformio test -e native
         working-directory: firmware/terminal
 
@@ -83,6 +84,47 @@ jobs:
 
       - name: Compilar firmware de producción
         run: uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
+        working-directory: firmware/terminal
+
+      - name: Comprobar metadatos USB de los binarios
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          marker = b"OJFW_META_V1:"
+          header = Path("include/openjornada/version.hpp").read_text(encoding="utf-8")
+          version = re.search(
+              r'OPENJORNADA_TERMINAL_VERSION_LITERAL\s+"([^"]+)"', header
+          )
+          if version is None:
+              raise SystemExit("No se pudo leer la versión esperada del firmware")
+
+          expected = {
+              "board": "m5stack-basic-core-v27",
+              "protocolVersion": 1,
+              "firmwareVersion": version.group(1),
+          }
+          for environment in ("m5stack_dev", "m5stack_release"):
+              image = Path(".pio/build") / environment / "firmware.bin"
+              scanned = image.read_bytes()[: 256 * 1024]
+              if scanned.count(marker) != 1:
+                  raise SystemExit(
+                      f"{environment}: el binario no contiene un único marcador USB"
+                  )
+              encoded = scanned.split(marker, 1)[1].split(b"}", 1)[0] + b"}"
+              try:
+                  metadata = json.loads(encoded)
+              except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                  raise SystemExit(
+                      f"{environment}: los metadatos USB no son JSON válido"
+                  ) from error
+              if metadata != expected:
+                  raise SystemExit(
+                      f"{environment}: los metadatos USB no coinciden con el build"
+                  )
+          PY
         working-directory: firmware/terminal
 
       - name: Compilar firmware del banco OTA

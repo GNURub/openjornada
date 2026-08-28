@@ -105,6 +105,8 @@ administración.
 Compila y flashea por USB desde `firmware/terminal/`:
 
 ```bash
+python3 -m unittest scripts/test_validate_partitions.py scripts/test_release_firmware.py
+uv tool run --from platformio==6.1.19 platformio test -e native -f test_usb_protocol
 uv tool run --from platformio==6.1.19 platformio test -e native
 uv tool run --from platformio==6.1.19 platformio run -e m5stack_dev --target upload --upload-port /dev/ttyACM0
 uv tool run --from platformio==6.1.19 platformio device monitor --port /dev/ttyACM0 --baud 115200
@@ -122,6 +124,81 @@ Si distribuyes `firmware.bin`, acompáñalo con
 y el directorio completo [`firmware/terminal/LICENSES/`](../firmware/terminal/LICENSES/).
 Los avisos no sustituyen las obligaciones de código fuente u objetos
 relocalizables que puedan exigir las licencias del build exacto.
+
+### Operación USB y recuperación
+
+La interfaz `OJUSB/1` permite a la CLI prevista `openjornada-terminal` ejecutar
+`ports`, `status`, `doctor`, `logs --follow`, `provision`, `reboot`,
+`factory-reset`, `firmware check`, `firmware update` y
+`firmware install ARCHIVO.bin`. La detección automática debe fallar si encuentra
+cero o más de un terminal. El OJP entra de forma interactiva sin eco o mediante
+`--ojp-stdin`; no debe pasarse como argumento ni guardarse en logs.
+
+El aprovisionamiento CLI tiene una limitación conocida: el adaptador serie del
+portal sólo atiende `provision`, no `hello`, mientras la CLI prevista exige el
+handshake también con puerto explícito. La aceptación de
+`openjornada-terminal provision` queda bloqueada hasta corregir el firmware; no
+documentes un bypass. Una placa nueva o un terminal dentro del portal deben
+completar por ahora la puesta en servicio web.
+
+Estado y diagnóstico son operaciones de lectura. Aprovisionar sólo se admite
+en el portal abierto con A+B durante cinco segundos. Reset y firmware
+personalizado requieren mantener sólo C cinco segundos y caducan tras 30
+segundos; la confirmación física no identifica a la persona operadora. El
+firmware oficial necesita manifiesto y firma Ed25519 válidos. El personalizado
+debe ser un build compatible de OpenJornada con bloque `OJFW_META_V1`, placa
+`m5stack-basic-core-v27`, protocolo 1 y SemVer. Cualquier instalación se rechaza
+si `pendingCount` no es cero; la operación correcta es sincronizar o resolver la
+cola, nunca borrarla para eludir el control.
+
+Para una aceptación física rutinaria, usa sólo una placa y backend demo:
+
+1. Registra puerto estable, SO, versión y `PASS`/`FAIL`, sin OJP, credenciales,
+   UID, IP ni salida serie arbitraria.
+2. Ejecuta `ports`, `status`, `doctor` y `logs --follow`; verifica los modos y
+   que sólo aparecen eventos saneados.
+3. Marca `provision --ojp-stdin` como `BLOQUEADA` por falta de `hello` en el
+   portal. No fuerces un bypass. Comprueba por separado que A+B abre el portal,
+   aprovisiona por web con credenciales demo y ejecuta `status` tras el reinicio.
+4. Solicita `factory-reset` y cancela o deja vencer los 30 segundos sin mantener
+   C; comprueba que configuración y pendientes no cambian.
+5. Solicita instalar un build compatible y cancela antes de mantener C; no debe
+   empezar la transferencia ni cambiar la versión.
+6. Instala previamente una release oficial con `OJUSB/1` anterior a otra estable
+   firmada más nueva. En la organización demo crea una persona, tag y credencial
+   exclusivos sin registrar UID ni secretos; tras `bootstrap` y NTP, espera a
+   que termine **Actualizando credenciales locales…** y vuelva la pantalla
+   inactiva. Corta entonces la red del banco, presenta el tag, confirma la acción
+   sintética en pantalla y comprueba `pendingCount: 1`. Ejecuta
+   `firmware update` y exige `pending_actions` antes de transferir un byte;
+   después restaura la red y sincroniza la acción demo. Si no hay una release
+   oficial más nueva, marca el paso `NO EJECUTADO`: no simules la firma ni
+   fuerces una OTA. La CI cubre la política oficial mediante
+   `test_usb_firmware_install_policy_fails_closed` y el rechazo del servicio en
+   `test_usb_firmware_begin_rejects_pending_busy_and_unproved_official`.
+7. Ejecuta `reboot`, seguido de `status` y `doctor`, y comprueba que los datos se
+   conservan.
+
+No ejecutes en esta lista el reset confirmado, la escritura OTA, la interrupción
+de transferencia ni el rollback. Esas pruebas necesitan autorización separada,
+placa sacrificable y copia restaurable. El detalle reproducible y los códigos
+esperados están en
+[`firmware/terminal/README.md`](../firmware/terminal/README.md).
+
+Si el terminal no arranca o no completa el handshake, la CLI no puede recuperar
+bootloader ni particiones. Compila y carga el perfil completo con PlatformIO:
+
+```bash
+cd firmware/terminal
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
+uv tool run --from platformio==6.1.19 platformio run -e m5stack_release \
+  --target upload --upload-port /dev/serial/by-id/usb-dispositivo-de-laboratorio
+```
+
+Este flujo usa `esptool` y los offsets que valida el proyecto. Si falla el acceso
+al cargador ROM, escala al procedimiento del fabricante; no inventes un
+`write_flash` ni ejecutes `erase_flash`, porque un borrado completo elimina NVS,
+LittleFS, credenciales y fichajes pendientes.
 
 ### Publicación del firmware
 
