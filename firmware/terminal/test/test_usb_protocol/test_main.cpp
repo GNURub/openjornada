@@ -115,7 +115,7 @@ std::string signedOfficialFirmwarePayload(
       R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.3","releaseTag":"v1.2.3","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":)" +
       std::to_string(imageSize) + R"(,"sha256":")" +
       std::string(kUsbTestFirmwareHash) +
-      R"(","keyId":"production-2026","publishedAt":"2026-08-28T12:00:00Z"})";
+      R"(","keyId":"production-2026-09","publishedAt":"2026-08-28T12:00:00Z"})";
   std::array<uint8_t, 32> seed{};
   for (size_t index = 0; index < seed.size(); ++index) {
     seed[index] = static_cast<uint8_t>(index);
@@ -1344,7 +1344,7 @@ void test_portal_usb_hello_status_and_doctor_are_fragmented_and_public() {
       std::string::npos,
       transport.output().find("\"board\":\"m5stack-basic-core-v27\""));
   TEST_ASSERT_NOT_EQUAL(std::string::npos,
-                        transport.output().find("\"firmwareVersion\":\"1.2.0\""));
+                        transport.output().find("\"firmwareVersion\":\"1.2.1\""));
   TEST_ASSERT_NOT_EQUAL(std::string::npos,
                         transport.output().find("\"mode\":\"provisioning\""));
   TEST_ASSERT_NOT_EQUAL(
@@ -1588,7 +1588,7 @@ void test_embedded_firmware_metadata_has_exact_canonical_contract() {
   TEST_ASSERT_TRUE(parsed.has_value());
   TEST_ASSERT_EQUAL_STRING("m5stack-basic-core-v27", parsed->board.c_str());
   TEST_ASSERT_EQUAL_UINT8(1, parsed->protocolVersion);
-  TEST_ASSERT_EQUAL_STRING("1.2.0", parsed->firmwareVersion.c_str());
+  TEST_ASSERT_EQUAL_STRING("1.2.1", parsed->firmwareVersion.c_str());
 }
 
 void test_firmware_metadata_scans_bounded_image_and_requires_one_marker() {

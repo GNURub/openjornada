@@ -66,7 +66,7 @@ FirmwareManifest validManifest() {
   value.assetName = "openjornada-m5stack.bin";
   value.size = 1400000;
   value.sha256 = std::string(64, 'a');
-  value.keyId = "production-2026";
+  value.keyId = "production-2026-09";
   value.publishedAt = "2026-08-27T12:00:00Z";
   return value;
 }
@@ -95,7 +95,7 @@ std::string base64Signature(const std::array<uint8_t, 64>& input) {
 
 void test_manifest_parses_exact_contract() {
   const std::string json =
-      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.1","releaseTag":"v0.8.0","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":1400000,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","keyId":"production-2026","publishedAt":"2026-08-27T12:00:00Z"})";
+      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.1","releaseTag":"v0.8.0","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":1400000,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","keyId":"production-2026-09","publishedAt":"2026-08-27T12:00:00Z"})";
   FirmwareManifest parsed;
   TEST_ASSERT_TRUE(parseFirmwareManifest(json, parsed));
   TEST_ASSERT_EQUAL_STRING("1.2.1", parsed.firmwareVersion.c_str());
@@ -105,7 +105,7 @@ void test_manifest_parses_exact_contract() {
 void test_manifest_rejects_unknown_fields_and_bad_hash() {
   FirmwareManifest parsed;
   TEST_ASSERT_FALSE(parseFirmwareManifest(
-      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.1","releaseTag":"v0.8.0","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":1,"sha256":"bad","keyId":"production-2026","publishedAt":"2026-08-27T12:00:00Z","url":"https://evil.invalid"})",
+      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.1","releaseTag":"v0.8.0","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":1,"sha256":"bad","keyId":"production-2026-09","publishedAt":"2026-08-27T12:00:00Z","url":"https://evil.invalid"})",
       parsed));
 }
 
@@ -118,7 +118,7 @@ void test_semver_and_compatibility_reject_downgrades() {
   TEST_ASSERT_FALSE(manifestIsInstallable(manifest, "1.2.1", 1));
   manifest.keyId = "unknown-key";
   TEST_ASSERT_FALSE(manifestIsInstallable(manifest, "1.2.0", 1));
-  manifest.keyId = "production-2026";
+  manifest.keyId = "production-2026-09";
   manifest.board = "other";
   TEST_ASSERT_FALSE(manifestIsInstallable(manifest, "1.2.0", 1));
 }
@@ -292,18 +292,18 @@ void test_production_public_key_matches_repository_pem() {
                         std::istreambuf_iterator<char>());
   TEST_ASSERT_EQUAL_STRING(
       "-----BEGIN PUBLIC KEY-----\n"
-      "MCowBQYDK2VwAyEAniydx6DntO/wet8WBhSBSQXaiq8Fow33lKaeCUWUjMk=\n"
+      "MCowBQYDK2VwAyEAT72/d8TqbnHGR3OKEiJ3vjsl7n8tt8RZmah1ldBJ3sQ=\n"
       "-----END PUBLIC KEY-----\n",
       pem.c_str());
   const auto expected = bytes32(
-      "9e2c9dc7a0e7b4eff07adf160614814905da8aaf05a30df794a69e0945948cc9");
+      "4fbdbf77c4ea6e71c647738a122277be3b25ee7f2db7c45999a87595d049dec4");
   TEST_ASSERT_EQUAL_UINT8_ARRAY(expected.data(), kProductionOtaPublicKey.data(),
                                 expected.size());
 }
 
 void test_official_usb_intent_requires_signed_manifest_exact_match() {
   const std::string manifest =
-      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.3","releaseTag":"v1.2.3","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","keyId":"production-2026","publishedAt":"2026-08-28T12:00:00Z"})";
+      R"({"schemaVersion":1,"channel":"stable","board":"m5stack-basic-core-v27","firmwareVersion":"1.2.3","releaseTag":"v1.2.3","protocolVersion":1,"assetName":"openjornada-m5stack.bin","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","keyId":"production-2026-09","publishedAt":"2026-08-28T12:00:00Z"})";
   std::array<uint8_t, 32> seed{};
   for (size_t index = 0; index < seed.size(); ++index) {
     seed[index] = static_cast<uint8_t>(index);

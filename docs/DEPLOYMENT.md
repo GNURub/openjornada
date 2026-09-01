@@ -164,9 +164,17 @@ uv tool run --from platformio==6.1.19 platformio run -e m5stack_release
 ```
 
 La release sólo admite HTTPS y usa el bundle de CA del firmware. La primera
-instalación de firmware 1.2.0 se hace por USB para activar los slots A/B;
-después el terminal instala automáticamente la última release estable firmada.
-USB permanece como recuperación. Consulta el procedimiento operativo,
+instalación de firmware 1.2.0 se hace por USB para activar los slots A/B. La
+rotación de la raíz Ed25519 de `1.2.0` a `1.2.1` también exige USB: al haberse
+perdido la privada anterior, `1.2.0` no puede validar el manifiesto nuevo y
+`firmware update` falla de forma segura. Antes de migrar comprueba con `status`
+que `pendingCount` sea cero. Instala `1.2.1` mediante el perfil
+`m5stack_release` y `--target upload`, que conserva NVS y LittleFS, o descarga
+`openjornada-m5stack.bin` de la release y ejecuta
+`openjornada-terminal firmware install openjornada-m5stack.bin --port auto`,
+confirmando físicamente con sólo C. Desde `1.2.1`, las versiones posteriores
+vuelven a instalarse automáticamente por OTA. USB permanece como recuperación.
+Consulta el procedimiento operativo,
 el cableado Grove A y los gestos de recuperación en
 [`firmware/terminal/README.md`](../firmware/terminal/README.md).
 Si distribuyes `firmware.bin`, acompáñalo con

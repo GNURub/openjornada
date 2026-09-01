@@ -225,6 +225,14 @@ Las instalaciones de firmware se rechazan si hay fichajes pendientes o una
 acción incompatible en curso. Sincroniza la cola antes de actualizar; el CLI
 no ofrece una opción para ignorar esa protección.
 
+La rotación excepcional de la raíz Ed25519 entre firmware `1.2.0` y `1.2.1`
+no puede hacerse con `firmware update`, porque `1.2.0` sólo confía en la pública
+anterior. Con `pendingCount: 0`, descarga `openjornada-m5stack.bin` de la
+release `v0.8.1` y usa
+`openjornada-terminal firmware install openjornada-m5stack.bin --port auto`;
+confirma la presencia física manteniendo sólo C. A partir de `1.2.1`, las
+actualizaciones oficiales vuelven a usar `firmware update` y OTA normalmente.
+
 Si el firmware no llega a arrancar ni a exponer `OJUSB/1`, este CLI no puede
 recuperarlo. Usa el procedimiento técnico documentado en
 [`firmware/terminal/README.md`](../../firmware/terminal/README.md) con

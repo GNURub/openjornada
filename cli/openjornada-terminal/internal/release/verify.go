@@ -22,7 +22,7 @@ import (
 
 const (
 	productionBoard   = "m5stack-basic-core-v27"
-	productionKeyID   = "production-2026"
+	productionKeyID   = "production-2026-09"
 	firmwareAssetName = "openjornada-m5stack.bin"
 	manifestMaxBytes  = 2048
 	signatureMaxBytes = 256

@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from release_firmware import build_manifest  # noqa: E402
+from release_firmware import build_manifest, firmware_version  # noqa: E402
 
 
 class ReleaseFirmwareTest(unittest.TestCase):
@@ -52,7 +52,7 @@ class ReleaseFirmwareTest(unittest.TestCase):
             firmware.write_bytes(b"signed firmware")
             version = root / "version.hpp"
             version.write_text(
-                '#define OPENJORNADA_TERMINAL_VERSION_LITERAL "1.2.0"\n',
+                '#define OPENJORNADA_TERMINAL_VERSION_LITERAL "1.2.1"\n',
                 encoding="utf-8",
             )
             first = build_manifest(
@@ -64,9 +64,15 @@ class ReleaseFirmwareTest(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertTrue(first.endswith(b"\n"))
             payload = json.loads(first)
-            self.assertEqual(payload["firmwareVersion"], "1.2.0")
+            self.assertEqual(payload["firmwareVersion"], "1.2.1")
+            self.assertEqual(payload["keyId"], "production-2026-09")
             self.assertEqual(payload["assetName"], "openjornada-m5stack.bin")
             self.assertEqual(payload["sha256"], hashlib.sha256(b"signed firmware").hexdigest())
+
+    def test_repository_version_is_the_rotated_firmware(self):
+        terminal = Path(__file__).resolve().parent.parent
+        version = terminal / "include" / "openjornada" / "version.hpp"
+        self.assertEqual(firmware_version(version), "1.2.1")
 
     def test_rejects_missing_binary_or_invalid_version(self):
         with tempfile.TemporaryDirectory() as directory:

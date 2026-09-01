@@ -45,9 +45,18 @@ placa sin depender del número ACM puede usarse el enlace estable de
 El artefacto de producción queda en
 `.pio/build/m5stack_release/firmware.bin`. `m5stack_release` sólo permite
 HTTPS y valida la cadena del servidor con el bundle de CA del ESP32. La primera
-instalación de la versión 1.2.0 requiere USB para activar el layout A/B; las
-versiones posteriores se descargan automáticamente desde la última GitHub
-Release estable.
+instalación de la versión 1.2.0 requiere USB para activar el layout A/B.
+
+La transición de `1.2.0` a `1.2.1` es una excepción: rota la raíz Ed25519
+porque la privada anterior se perdió. Un terminal `1.2.0` conserva la pública
+antigua y, por diseño, rechazará el manifiesto nuevo; `firmware update` no puede
+cruzar esta rotación. Sincroniza primero todos los fichajes y comprueba
+`pendingCount: 0`. Después flashea `m5stack_release` por USB o instala el
+`openjornada-m5stack.bin` de la release con
+`openjornada-terminal firmware install openjornada-m5stack.bin --port auto` y
+mantén sólo C cuando lo solicite. Ambas vías conservan NVS y LittleFS. Una vez
+instalado `1.2.1`, las versiones posteriores vuelven a descargarse
+automáticamente desde la última GitHub Release estable.
 
 La carga USB conserva NVS y LittleFS, escribe la aplicación en `ota_0` y
 reubica el inicializador `boot_app0.bin` a la partición `otadata` de `0x3f0000`,

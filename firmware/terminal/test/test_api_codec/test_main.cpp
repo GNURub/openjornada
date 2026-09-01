@@ -162,7 +162,7 @@ void test_requests_are_serialized_with_protocol_field_names() {
       BootstrapRequest{1, std::string(kTerminalClientVersion), 3}, json));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, json.find("\"protocolVersion\":1"));
   TEST_ASSERT_NOT_EQUAL(std::string::npos,
-                        json.find("\"clientVersion\":\"m5stack-1.2.0\""));
+                        json.find("\"clientVersion\":\"m5stack-1.2.1\""));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, json.find("\"pendingCount\":3"));
 
   ActionRequest action;

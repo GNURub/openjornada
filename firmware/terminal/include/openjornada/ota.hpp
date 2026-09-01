@@ -12,7 +12,7 @@ namespace openjornada {
 inline constexpr std::string_view kOtaBoard = "m5stack-basic-core-v27";
 inline constexpr std::string_view kOtaChannel = "stable";
 inline constexpr std::string_view kOtaFirmwareAsset = "openjornada-m5stack.bin";
-inline constexpr std::string_view kOtaKeyId = "production-2026";
+inline constexpr std::string_view kOtaKeyId = "production-2026-09";
 inline constexpr size_t kOtaManifestMaxBytes = 2048;
 inline constexpr uint32_t kOtaCheckIntervalMs = 60U * 60U * 1000U;
 inline constexpr uint32_t kOtaInteractionIdleMs = 2U * 60U * 1000U;

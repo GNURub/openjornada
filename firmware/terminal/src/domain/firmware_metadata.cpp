@@ -10,7 +10,7 @@
 
 namespace openjornada {
 
-static_assert(kTerminalFirmwareVersion == "1.2.0",
+static_assert(kTerminalFirmwareVersion == "1.2.1",
               "Actualice los metadatos al cambiar la version del firmware");
 
 #if defined(ARDUINO)
@@ -23,7 +23,7 @@ static_assert(kTerminalFirmwareVersion == "1.2.0",
 extern "C" OPENJORNADA_FIRMWARE_METADATA_ATTRIBUTES const char
     kEmbeddedFirmwareMetadata[] =
     "OJFW_META_V1:{\"board\":\"m5stack-basic-core-v27\",\"protocolVersion\":1,"
-    "\"firmwareVersion\":\"1.2.0\"}";
+    "\"firmwareVersion\":\"1.2.1\"}";
 
 #undef OPENJORNADA_FIRMWARE_METADATA_ATTRIBUTES
 

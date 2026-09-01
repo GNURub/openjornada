@@ -14,7 +14,7 @@ from pathlib import Path
 
 ASSET_NAME = "openjornada-m5stack.bin"
 BOARD = "m5stack-basic-core-v27"
-KEY_ID = "production-2026"
+KEY_ID = "production-2026-09"
 VERSION_PATTERN = re.compile(
     rb'#define OPENJORNADA_TERMINAL_VERSION_LITERAL "([0-9]+\.[0-9]+\.[0-9]+)"'
 )
