@@ -33,8 +33,9 @@ describe('WorktimeService.loadToday', () => {
     service = runInInjectionContext(injector, () => new WorktimeService());
   });
 
+  /** Desde dónde se cargaron los fichajes que acaban en pantalla (la última consulta). */
   function loadedFrom(): string {
-    return getFullList.mock.calls[0][0].filter.params.start;
+    return getFullList.mock.calls.at(-1)![0].filter.params.start;
   }
 
   function startOfToday(): Date {
@@ -49,6 +50,7 @@ describe('WorktimeService.loadToday', () => {
     await service.loadToday();
 
     expect(getList).toHaveBeenCalledTimes(1);
+    expect(getFullList).toHaveBeenCalledTimes(1);
     expect(new Date(loadedFrom().replace(' ', 'T')).getTime()).toBe(startOfToday().getTime());
   });
 
@@ -68,6 +70,7 @@ describe('WorktimeService.loadToday', () => {
     await service.loadToday();
 
     expect(getList.mock.calls[1][2].filter.params.at).toBe('2026-11-05 15:00:00.000Z');
+    expect(getFullList).toHaveBeenCalledTimes(2);
     expect(new Date(loadedFrom().replace(' ', 'T')).toISOString()).toBe('2026-11-05T07:00:00.000Z');
   });
 

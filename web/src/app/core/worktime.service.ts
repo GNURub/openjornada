@@ -36,15 +36,22 @@ export class WorktimeService {
     this.error.set('');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    try {
-      const start = await this.openShiftStart(user.id, today);
-      const records = await this.pb.collection('work_events').getFullList({
+    const since = (start: Date) =>
+      this.pb.collection('work_events').getFullList({
         filter: this.pb.filter('employee = {:employee} && occurredAt >= {:start}', {
           employee: user.id,
           start: pocketBaseDateTime(start),
         }),
         sort: '-occurredAt',
       });
+    try {
+      // Las dos consultas van a la vez para que la carga no tarde más que antes; solo si la
+      // jornada anterior sigue abierta hace falta una tercera desde su entrada.
+      const [todayRecords, start] = await Promise.all([
+        since(today),
+        this.openShiftStart(user.id, today),
+      ]);
+      const records = start.getTime() === today.getTime() ? todayRecords : await since(start);
       this.events.set(records as WorkEventRecord[]);
     } catch {
       this.error.set('No se han podido cargar los fichajes de hoy.');
