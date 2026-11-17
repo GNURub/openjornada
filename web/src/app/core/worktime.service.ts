@@ -34,9 +34,10 @@ export class WorktimeService {
     }
     this.loading.set(true);
     this.error.set('');
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     try {
+      const start = await this.openShiftStart(user.id, today);
       const records = await this.pb.collection('work_events').getFullList({
         filter: this.pb.filter('employee = {:employee} && occurredAt >= {:start}', {
           employee: user.id,
@@ -49,6 +50,39 @@ export class WorktimeService {
       this.error.set('No se han podido cargar los fichajes de hoy.');
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  /**
+   * Inicio desde el que hay que cargar los fichajes. Normalmente es hoy a las 00:00, pero si
+   * la jornada anterior quedó abierta (el último fichaje previo no es una salida), se carga
+   * desde su entrada: así la persona ve la jornada en curso y puede cerrarla con la hora real
+   * en lugar de quedarse en «Fuera de jornada» con un «Empezar jornada» que el servidor rechaza.
+   */
+  private async openShiftStart(employee: string, today: Date): Promise<Date> {
+    try {
+      const previous = await this.pb.collection('work_events').getList(1, 1, {
+        filter: this.pb.filter(
+          "employee = {:employee} && kind != 'correction' && occurredAt < {:start}",
+          { employee, start: pocketBaseDateTime(today) },
+        ),
+        sort: '-occurredAt',
+      });
+      const last = previous.items[0] as WorkEventRecord | undefined;
+      if (!last || last.kind === 'clock_out') {
+        return today;
+      }
+      const clockIn = await this.pb.collection('work_events').getList(1, 1, {
+        filter: this.pb.filter(
+          "employee = {:employee} && kind = 'clock_in' && occurredAt <= {:at}",
+          { employee, at: last.occurredAt },
+        ),
+        sort: '-occurredAt',
+      });
+      const opened = clockIn.items[0] as WorkEventRecord | undefined;
+      return opened ? new Date(String(opened.occurredAt).replace(' ', 'T')) : today;
+    } catch {
+      return today;
     }
   }
 
