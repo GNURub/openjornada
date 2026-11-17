@@ -6,6 +6,7 @@ import {
   AnnouncementRecord,
   NotificationRecord,
 } from '../../core/models';
+import { NotificationsService } from '../../core/notifications.service';
 import { PocketBaseService } from '../../core/pocketbase.service';
 
 @Component({
@@ -16,6 +17,7 @@ import { PocketBaseService } from '../../core/pocketbase.service';
 export class CommunicationsComponent {
   private readonly pb = inject(PocketBaseService).client;
   protected readonly auth = inject(AuthService);
+  private readonly notificationCenter = inject(NotificationsService);
   protected readonly notifications = signal<NotificationRecord[]>([]);
   protected readonly announcements = signal<AnnouncementRecord[]>([]);
   protected readonly loading = signal(true);
@@ -50,6 +52,7 @@ export class CommunicationsComponent {
           .getFullList({ sort: '-publishedAt' }),
       ]);
       this.notifications.set(notifications as NotificationRecord[]);
+      void this.notificationCenter.refresh();
       this.announcements.set(announcements as AnnouncementRecord[]);
     } catch {
       this.error.set('No se han podido cargar los avisos.');
@@ -71,6 +74,7 @@ export class CommunicationsComponent {
             : item,
         ),
       );
+      void this.notificationCenter.refresh();
     } catch {
       this.error.set('No se pudo marcar el aviso como leído.');
     }

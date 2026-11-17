@@ -1,0 +1,57 @@
+@if (visible() && latest(); as notification) {
+  <aside
+    aria-label="Avisos nuevos"
+    aria-live="polite"
+    class="mx-4 mt-4 sm:mx-6 lg:mx-10 lg:mt-6"
+  >
+    <div
+      class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-coral-200 bg-coral-50 px-4 py-3 text-stone-950"
+      data-testid="notification-toast"
+    >
+      <span aria-hidden="true" class="size-2 shrink-0 rounded-full bg-coral-500"></span>
+      <p class="min-w-0 flex-1 text-sm">
+        <span class="font-semibold">{{ notification.title }}</span>
+        <span class="text-stone-500"> · {{ formatTime(notification.created) }}</span>
+        @if (others() > 0) {
+          <span class="text-stone-500">
+            · y {{ others() }} {{ others() === 1 ? 'aviso más' : 'avisos más' }} sin leer</span
+          >
+        }
+      </p>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          (click)="open(notification)"
+          class="rounded-xl bg-coral-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-coral-700"
+        >
+          Ver aviso
+        </button>
+        <button
+          type="button"
+          (click)="notifications.markRead(notification.id)"
+          class="rounded-xl px-3 py-1.5 text-sm font-semibold text-stone-600 transition hover:bg-white hover:text-stone-900"
+        >
+          Marcar como leído
+        </button>
+        @if (others() > 0) {
+          <a
+            routerLink="/avisos"
+            class="rounded-xl px-3 py-1.5 text-sm font-semibold text-stone-600 transition hover:bg-white hover:text-stone-900"
+          >
+            Ver todos
+          </a>
+        }
+        <button
+          type="button"
+          aria-label="Ocultar este aviso"
+          (click)="notifications.dismiss(notification.id)"
+          class="grid size-7 place-items-center rounded-full text-stone-400 transition hover:bg-white hover:text-stone-900"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+}
