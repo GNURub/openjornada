@@ -317,6 +317,14 @@ test('employee completes a past workday and the approval policy is enforced', as
       requestType: 'replacement',
     }),
   );
+  const appliedNotices = await request.get(`${apiBase}/collections/notifications/records`, {
+    headers: { Authorization: admin.token },
+    params: { filter: `recipient = "${admin.record.id}" && title = "Corrección aplicada"` },
+  });
+  expect(appliedNotices.ok(), await appliedNotices.text()).toBeTruthy();
+  const appliedItems = ((await appliedNotices.json()) as { items: Array<{ message: string }> })
+    .items;
+  expect(appliedItems.some((item) => item.message.includes('ahora 22:00–05:00'))).toBe(true);
 
   await changeAccount(page, employeeEmail, employeePassword);
   await page.goto('/registros');

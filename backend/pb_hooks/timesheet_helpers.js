@@ -922,6 +922,73 @@ function notifyPending(app, request) {
   }
 }
 
+function describeIntervals(raw) {
+  let list = []
+  try {
+    const parsed = JSON.parse(raw || "[]")
+    list = Array.isArray(parsed) ? parsed : []
+  } catch (_) {
+    list = []
+  }
+  // Los tramos de duración cero (entrada = salida) son restos de fichajes a medias.
+  list = list.filter((item) => item.start !== item.end || item.startNextDay)
+  const work = list
+    .filter((item) => item.kind === "work")
+    .map((item) => item.start + "–" + item.end + (item.startNextDay ? " (+1 día)" : ""))
+  const breaks = list
+    .filter((item) => item.kind !== "work")
+    .map((item) => item.start + "–" + item.end)
+  if (!work.length && !breaks.length) return "sin horas"
+  return (
+    (work.length ? work.join(" y ") : "sin trabajo") +
+    (breaks.length ? " (pausa " + breaks.join(", ") + ")" : "")
+  )
+}
+
+// Cuando la empresa no exige aprobar las correcciones, se aplican al momento y nadie se
+// enteraba. Se avisa a administración y responsables con el antes, el después y el motivo.
+function notifyAutoApplied(app, request) {
+  const employee = app.findRecordById("users", request.getString("employee"))
+  const timezone = request.getString("timezone") || "Europe/Madrid"
+  const day = localKey(request.getString("workDate"), timezone)
+    .split("-")
+    .reverse()
+    .join("/")
+  const before = describeIntervals(request.getString("originalIntervals"))
+  const after = describeIntervals(request.getString("intervals"))
+  const name = employee.getString("name")
+  const supervisors = app.findRecordsByFilter(
+    "users",
+    "organization = {:organization} && active = true && (role = 'admin' || role = 'manager')",
+    "name",
+    100,
+    0,
+    { organization: request.getString("organization") },
+  )
+  for (const supervisor of supervisors) {
+    if (supervisor.id === employee.id) continue
+    notifyRecord(
+      app,
+      supervisor,
+      "Corrección aplicada",
+      name + " ha corregido el " + day + ": antes " + before + ", ahora " + after + ".",
+      "request",
+      employee.id,
+    )
+    sendMail(
+      app,
+      supervisor,
+      "Corrección de jornada aplicada en " + app.settings().meta.appName,
+      name + " ha corregido su jornada del " + day + ".\n\n" +
+        "Antes: " + before + "\n" +
+        "Ahora: " + after + "\n" +
+        "Motivo: " + request.getString("reason") + "\n\n" +
+        "La corrección ya está aplicada (la empresa no exige aprobarlas) y queda en el " +
+        "historial. Puedes revisarla en " + app.settings().meta.appURL + "/registros\n",
+    )
+  }
+}
+
 function notifyResolution(app, request) {
   const employee = app.findRecordById(
     "users",
@@ -1064,6 +1131,7 @@ module.exports = {
   materializeRequest,
   materializeReplacement,
   normalizeIntervals,
+  notifyAutoApplied,
   notifyPending,
   notifyResolution,
   recordDateInRange,
