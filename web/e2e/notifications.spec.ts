@@ -65,7 +65,7 @@ async function markEverythingRead(
   }
 }
 
-test('unread notifications show a badge, the count in the title and pop-ups', async ({
+test('unread notifications show a badge, the count in the title and a banner', async ({
   page,
   request,
 }) => {
@@ -89,7 +89,7 @@ test('unread notifications show a badge, the count in the title and pop-ups', as
 
   await signIn(page, employeeEmail, employeePassword);
 
-  const toast = page.getByTestId('notification-toast').filter({ hasText: title });
+  const toast = page.getByTestId('notification-toast');
   await expect(toast).toBeVisible();
   await expect(toast.getByText('Nueva tarea asignada')).toBeVisible();
   await expect(page).toHaveTitle(/^\(1\) /);
@@ -104,7 +104,7 @@ test('unread notifications show a badge, the count in the title and pop-ups', as
   await expect(page.getByText('0 sin leer')).toBeVisible();
 });
 
-test('pop-ups open the linked page and stay hidden on the notifications page', async ({
+test('the banner opens the linked page and stays hidden on the notifications page', async ({
   page,
   request,
 }) => {
@@ -132,8 +132,9 @@ test('pop-ups open the linked page and stay hidden on the notifications page', a
   await expect(page.getByTestId('notification-toast')).toHaveCount(0);
 
   await page.goto('/');
-  const toast = page.getByTestId('notification-toast').filter({ hasText: title });
-  await toast.getByRole('button', { name: 'Ver' }).click();
+  const toast = page.getByTestId('notification-toast');
+  await expect(toast.getByText('Nueva tarea asignada')).toBeVisible();
+  await toast.getByRole('button', { name: 'Ver aviso' }).click();
   await expect(page).toHaveURL(/\/tareas$/);
   await expect(page.getByTestId('notification-toast')).toHaveCount(0);
   await expect(page).not.toHaveTitle(/^\(\d+\) /);

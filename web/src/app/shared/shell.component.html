@@ -306,6 +306,7 @@
   </header>
 
   <main class="pb-24 lg:ml-64 lg:pb-10">
+    <app-notification-toasts />
     <router-outlet />
     @if (!worktime.loading() && worktime.status() !== 'off') {
       <div aria-hidden="true" class="h-44"></div>
@@ -315,7 +316,6 @@
   <app-active-worktime-widget />
   <app-worktime-review-modal />
   <app-privacy-notice-modal />
-  <app-notification-toasts />
 
   <nav
     aria-label="Navegación móvil"
