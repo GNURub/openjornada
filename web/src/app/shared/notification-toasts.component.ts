@@ -47,7 +47,7 @@ export class NotificationToastsComponent {
     () => this.notifications.pending().length - this.toasts().length,
   );
 
-  /** Temporizador de cada aviso; `null` mientras el ratón o el foco están encima. */
+  /** Temporizador de cada aviso; `null` mientras tiene el foco del teclado. */
   private readonly timers = new Map<string, ReturnType<typeof setTimeout> | null>();
 
   constructor() {
@@ -62,7 +62,7 @@ export class NotificationToastsComponent {
     });
   }
 
-  /** Mientras se lee o se usa con el teclado, el aviso no se recoge. */
+  /** Mientras se usa con el teclado, el aviso no se recoge. */
   protected pause(id: string): void {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
