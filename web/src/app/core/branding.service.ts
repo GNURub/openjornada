@@ -56,6 +56,7 @@ export function createPrimaryPalette(primary: string): Record<string, string> {
 export class BrandingService {
   private readonly document = inject(DOCUMENT);
   private readonly pb = inject(PocketBaseService).client;
+  private unreadCount = 0;
   private readonly organization = signal<OrganizationRecord | null>(null);
   private loadSequence = 0;
 
@@ -114,6 +115,17 @@ export class BrandingService {
     this.applyToDocument();
   }
 
+  /** Número de avisos sin leer que se muestra delante del título de la pestaña. */
+  setUnreadCount(count: number): void {
+    this.unreadCount = Math.max(0, Math.floor(count));
+    this.applyTitle();
+  }
+
+  private applyTitle(): void {
+    const prefix = this.unreadCount > 0 ? `(${this.unreadCount}) ` : '';
+    this.document.title = `${prefix}${this.displayName()} · Gestión laboral`;
+  }
+
   private applyToDocument(): void {
     const root = this.document.documentElement;
     const palette = createPrimaryPalette(this.primaryColor());
@@ -123,7 +135,7 @@ export class BrandingService {
       root.style.setProperty(`--color-coral-${shade}`, value);
     }
 
-    this.document.title = `${this.displayName()} · Gestión laboral`;
+    this.applyTitle();
     this.setMetaContent('theme-color', this.secondaryColor());
     this.setMetaContent('apple-mobile-web-app-title', this.shortName());
 
