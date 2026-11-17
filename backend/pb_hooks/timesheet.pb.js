@@ -853,6 +853,13 @@ routerAdd(
         console.log("No se pudo notificar la corrección pendiente:", error);
       }
     }
+    if (created.getString("status") === "approved") {
+      try {
+        helper.notifyAutoApplied(e.app, created);
+      } catch (error) {
+        console.log("No se pudo notificar la corrección aplicada:", error);
+      }
+    }
     return e.json(201, created.publicExport());
   },
   $apis.requireAuth("users"),
